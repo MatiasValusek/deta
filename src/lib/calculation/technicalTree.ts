@@ -15,10 +15,11 @@ import {
   type PipeSystemResolutionStatus,
 } from "@/lib/calculation/pipeSystem";
 import {
-  resolveTechnicalRouteAccessories,
-  type TechnicalRouteAccessoryResolution,
-  type TechnicalRouteAccessorySegmentContext,
-} from "@/lib/calculation/technicalRouteAccessories";
+  solveTechnicalNetworkSizing,
+  type TechnicalNetworkSizingResult,
+  type TechnicalNetworkSizingSegmentResult,
+} from "@/lib/calculation/technicalNetworkSizing";
+import type { TechnicalRouteAccessoryResolution } from "@/lib/calculation/technicalRouteAccessories";
 import {
   applianceNodesAreTerminal,
   buildEquipmentIndex,
@@ -42,6 +43,11 @@ import type {
   RouteNode,
   RouteSegment,
 } from "@/lib/routing/types";
+
+export type {
+  TechnicalNetworkSizingResult,
+  TechnicalNetworkSizingSegmentResult,
+} from "@/lib/calculation/technicalNetworkSizing";
 
 export type {
   TechnicalRouteAccessoryContribution,
@@ -158,6 +164,7 @@ export type TechnicalSegmentResult = {
 export type TechnicalCalculationResult = {
   connectedApplianceIds: string[];
   issues: TechnicalCalculationIssue[];
+  networkSizing: TechnicalNetworkSizingResult | null;
   nodeLabels: Record<string, string>;
   pipeSystem: PipeSystemIdentity;
   rootNodeId: string | null;
@@ -203,6 +210,7 @@ export function calculateTechnicalTree(params: {
     return createResult({
       connectedApplianceIds: [],
       issues: invalidIssues,
+      networkSizing: null,
       nodeLabels: createNodeLabels(params.network, params.equipment, []),
       pipeSystem: pipeSystem.identity,
       rootNodeId: null,
@@ -229,6 +237,7 @@ export function calculateTechnicalTree(params: {
           message: "No se encontro el nodo de alimentacion en la red confirmada.",
         },
       ],
+      networkSizing: null,
       nodeLabels: createNodeLabels(params.network, params.equipment, []),
       pipeSystem: pipeSystem.identity,
       rootNodeId: null,
@@ -250,6 +259,7 @@ export function calculateTechnicalTree(params: {
         message: "Existe un componente desconectado de la alimentacion.",
         nodeId,
       })),
+      networkSizing: null,
       nodeLabels: createNodeLabels(params.network, params.equipment, []),
       pipeSystem: pipeSystem.identity,
       rootNodeId: supplyNode.id,
@@ -310,24 +320,23 @@ export function calculateTechnicalTree(params: {
       ),
     }),
   );
-  const provisionalDiameterBySegmentId = createProvisionalDiameterBySegmentId({
-    pipeContextBySegmentId: params.pipeContextBySegmentId,
-    segments: technicalSegments,
-  });
-  const routeAccessoryResolutions = createRouteAccessoryResolutions({
-    diameterBySegmentId: provisionalDiameterBySegmentId,
+  const networkSizing = solveTechnicalNetworkSizing({
     pipeContextBySegmentId: params.pipeContextBySegmentId,
     pipeSystem,
-    routeSegmentContextBySegmentId:
-      createRouteAccessorySegmentContextBySegmentId(technicalSegments),
+    routeSegments: params.network.segments,
     routes: technicalRoutes,
-    segments: params.network.segments,
+    segments: technicalSegments,
   });
+  const networkSizingSegmentById = new Map(
+    networkSizing.segments.map((segment) => [segment.segmentId, segment]),
+  );
+  const routeAccessoryResolutions = networkSizing.routeAccessoryResolutions;
   const technicalSegmentsWithRouteSizing = technicalSegments.map((segment) => ({
     ...segment,
-    routeSizingBasis: createRouteSizingBasis({
+    routeSizingBasis: createRouteSizingBasisFromNetworkSizing({
       governingRouteResolution: segment.governingRouteResolution,
-      routeAccessoryResolutions,
+      networkSizingSegment:
+        networkSizingSegmentById.get(segment.segmentId) ?? null,
     }),
   }));
 
@@ -385,6 +394,7 @@ export function calculateTechnicalTree(params: {
     pipeSystem: pipeSystem.identity,
     rootNodeId: supplyNode.id,
     routeAccessoryResolutions,
+    networkSizing,
     segments: technicalSegmentsWithRouteSizing,
     status,
     technicalRoutes,
@@ -889,79 +899,6 @@ function createMissingSegmentRouteResolution(
   };
 }
 
-function createProvisionalDiameterBySegmentId(params: {
-  pipeContextBySegmentId:
-    | Record<string, PipeSegmentPipeContext | undefined>
-    | undefined;
-  segments: TechnicalSegmentResult[];
-}) {
-  const map = new Map<string, PipeDiameterReference>();
-
-  for (const segment of params.segments) {
-    const explicitDiameter =
-      params.pipeContextBySegmentId?.[segment.segmentId]?.diameter ?? null;
-
-    if (explicitDiameter) {
-      map.set(segment.segmentId, explicitDiameter);
-      continue;
-    }
-
-    if (segment.dimensioningResolution.status === "resolved") {
-      map.set(
-        segment.segmentId,
-        segment.dimensioningResolution.value.calculatedDiameter,
-      );
-    }
-  }
-
-  return map;
-}
-
-function createRouteAccessorySegmentContextBySegmentId(
-  segments: TechnicalSegmentResult[],
-) {
-  const map = new Map<string, TechnicalRouteAccessorySegmentContext>();
-
-  for (const segment of segments) {
-    map.set(segment.segmentId, {
-      accumulatedFlow: segment.accumulatedFlow,
-      accumulatedFlowUnit: segment.accumulatedFlowUnit,
-      drawingLength: segment.drawingLength,
-      physicalLengthMeters: segment.segmentPhysicalLengthMeters,
-    });
-  }
-
-  return map;
-}
-
-function createRouteAccessoryResolutions(params: {
-  diameterBySegmentId: Map<string, PipeDiameterReference>;
-  pipeContextBySegmentId:
-    | Record<string, PipeSegmentPipeContext | undefined>
-    | undefined;
-  pipeSystem: PipeSystem;
-  routeSegmentContextBySegmentId: Map<
-    string,
-    TechnicalRouteAccessorySegmentContext
-  >;
-  routes: TechnicalRoute[];
-  segments: RouteSegment[];
-}) {
-  return Object.fromEntries(
-    params.routes.map((route) => [
-      route.id,
-      resolveTechnicalRouteAccessories({
-        diameterBySegmentId: params.diameterBySegmentId,
-        pipeContextBySegmentId: params.pipeContextBySegmentId,
-        pipeSystem: params.pipeSystem,
-        route,
-        segmentContextBySegmentId: params.routeSegmentContextBySegmentId,
-        segments: params.segments,
-      }),
-    ]),
-  );
-}
-
 function createPendingRouteSizingBasis(
   governingRouteResolution: PipeSystemResolution<TechnicalSegmentGoverningRoute>,
 ): TechnicalSegmentSizingBasis {
@@ -989,24 +926,22 @@ function createPendingRouteSizingBasis(
   };
 }
 
-function createRouteSizingBasis(params: {
+function createRouteSizingBasisFromNetworkSizing(params: {
   governingRouteResolution: PipeSystemResolution<TechnicalSegmentGoverningRoute>;
-  routeAccessoryResolutions: Record<string, TechnicalRouteAccessoryResolution>;
+  networkSizingSegment: TechnicalNetworkSizingSegmentResult | null;
 }): TechnicalSegmentSizingBasis {
   if (params.governingRouteResolution.status !== "resolved") {
     return createPendingRouteSizingBasis(params.governingRouteResolution);
   }
 
   const routeId = params.governingRouteResolution.value.routeId;
-  const routeAccessoryResolution =
-    params.routeAccessoryResolutions[routeId] ?? null;
 
-  if (!routeAccessoryResolution) {
+  if (!params.networkSizingSegment) {
     return {
       governingRouteAccessoryEquivalentLengthMeters: null,
       governingRoutePhysicalLengthMeters:
         params.governingRouteResolution.value.physicalLengthMeters,
-      reasons: ["No se encontro la resolucion de accesorios del recorrido."],
+      reasons: ["No se encontro el resultado global del tramo."],
       routeAccessoryResolutionId: routeId,
       sizingLengthMeters: null,
       status: "unresolved",
@@ -1015,13 +950,15 @@ function createRouteSizingBasis(params: {
 
   return {
     governingRouteAccessoryEquivalentLengthMeters:
-      routeAccessoryResolution.governingRouteAccessoryEquivalentLengthMeters,
+      params.networkSizingSegment
+        .governingRouteAccessoryEquivalentLengthMeters,
     governingRoutePhysicalLengthMeters:
-      params.governingRouteResolution.value.physicalLengthMeters,
-    reasons: routeAccessoryResolution.reasons,
-    routeAccessoryResolutionId: routeAccessoryResolution.routeId,
-    sizingLengthMeters: routeAccessoryResolution.sizingLengthMeters,
-    status: routeAccessoryResolution.status,
+      params.networkSizingSegment.governingRoutePhysicalLengthMeters,
+    reasons: params.networkSizingSegment.issues.map((issue) => issue.message),
+    routeAccessoryResolutionId:
+      params.networkSizingSegment.routeAccessoryResolutionId ?? routeId,
+    sizingLengthMeters: params.networkSizingSegment.sizingLengthMeters,
+    status: params.networkSizingSegment.status,
   };
 }
 

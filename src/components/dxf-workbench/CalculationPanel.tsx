@@ -11,6 +11,7 @@ import {
   routeAccessoryTypeLabel,
   technicalCalculationStatusLabel,
   type TechnicalCalculationResult,
+  type TechnicalNetworkSizingSegmentResult,
   type TechnicalRouteAccessoryContribution,
   type TechnicalRouteAccessoryResolution,
   type TechnicalSegmentAccessoryResult,
@@ -105,6 +106,9 @@ function CalculationSummary({ result }: { result: TechnicalCalculationResult }) 
     result.totals.accumulatedFlow,
     result.totals.accumulatedFlowUnit,
   );
+  const globalResolvedSegmentCount =
+    result.networkSizing?.segments.filter((segment) => segment.status === "resolved")
+      .length ?? null;
   const physicalLength = formatCalculationMeters(result.totals.physicalLengthMeters);
   const equivalentLength = formatCalculationMeters(
     result.totals.accessoryEquivalentLengthMeters,
@@ -116,9 +120,10 @@ function CalculationSummary({ result }: { result: TechnicalCalculationResult }) 
     <dl className="mt-3 grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 gap-y-1 text-xs">
       <dt>Tramos</dt>
       <dd className="text-right font-mono">{result.totals.segmentCount}</dd>
-      <dt>Dimensionados</dt>
+      <dt>Dimensionados globales</dt>
       <dd className="text-right font-mono">
-        {result.totals.dimensionedSegmentCount}/{result.totals.segmentCount}
+        {globalResolvedSegmentCount ?? result.totals.dimensionedSegmentCount}/
+        {result.totals.segmentCount}
       </dd>
       <dt>Artefactos</dt>
       <dd className="text-right font-mono">{result.totals.applianceCount}</dd>
@@ -130,7 +135,7 @@ function CalculationSummary({ result }: { result: TechnicalCalculationResult }) 
       <dd className="text-right">{physicalLength}</dd>
       <dt>Equiv. accesorios tramo</dt>
       <dd className="text-right">{equivalentLength}</dd>
-      <dt>Long. calculo prov.</dt>
+      <dt>Long. calculo local</dt>
       <dd className="text-right">{calculationLength}</dd>
     </dl>
   );
@@ -207,7 +212,7 @@ function SegmentList({
               {" - "}
               {formatGoverningRouteLength(segment)}
               {" - "}
-              {formatSegmentDiameter(segment)}
+              {formatSegmentDiameter(segment, result)}
               {" - "}
               {segment.downstreamApplianceIds.length}{" "}
               {segment.downstreamApplianceIds.length === 1 ? "artefacto" : "artefactos"}
@@ -258,7 +263,7 @@ function SegmentDetail({
         segment={segment}
       />
       <AccessoryList accessories={segment.accessories} />
-      <SegmentDimensioning result={result} segment={segment} />
+      <NetworkSegmentSizing result={result} segment={segment} />
 
       <div className="mt-2">
         <div className="font-semibold text-[var(--muted)]">Alimenta</div>
@@ -318,6 +323,7 @@ function RouteBasisDetail({
   const terminal = equipmentById.get(route.terminalEquipmentId);
   const routeAccessoryResolution =
     result.routeAccessoryResolutions[route.routeId] ?? null;
+  const routeSizingReasons = segment.routeSizingBasis.reasons;
 
   return (
     <div className="mt-2 rounded border border-[var(--line)] px-2 py-2">
@@ -333,11 +339,11 @@ function RouteBasisDetail({
         </dd>
         <dt>Equiv. accesorios recorrido</dt>
         <dd className="text-right">
-          {formatRouteAccessoryEquivalentLength(routeAccessoryResolution)}
+          {formatRouteAccessoryEquivalentLength(segment)}
         </dd>
         <dt>Longitud dimensionado</dt>
         <dd className="text-right">
-          {formatRouteSizingLength(routeAccessoryResolution)}
+          {formatRouteSizingLength(segment)}
         </dd>
       </dl>
       <div className="mt-1">
@@ -350,6 +356,12 @@ function RouteBasisDetail({
         resolution={routeAccessoryResolution}
         result={result}
       />
+      {segment.routeSizingBasis.status !== "resolved" &&
+      routeSizingReasons.length > 0 ? (
+        <div className="mt-1 text-[var(--warning)]">
+          {routeSizingReasons.join(" ")}
+        </div>
+      ) : null}
       {route.tiedRouteIds.length > 1 ? (
         <div className="mt-1 text-[10px] text-[var(--muted)]">
           Empate resuelto por id de terminal.
@@ -359,59 +371,96 @@ function RouteBasisDetail({
   );
 }
 
-function SegmentDimensioning({
+function NetworkSegmentSizing({
   result,
   segment,
 }: {
   result: TechnicalCalculationResult;
   segment: TechnicalSegmentResult;
 }) {
-  const resolution = segment.dimensioningResolution;
+  const sizing = getNetworkSizingSegment(result, segment.segmentId);
+  const issues = sizing?.issues ?? [];
 
-  if (resolution.status !== "resolved") {
+  if (!sizing || sizing.status !== "resolved" || !sizing.calculatedDiameter) {
     return (
       <div className="mt-2 rounded border border-[#f1d28a] bg-[#fffaf0] px-2 py-2">
         <div className="font-semibold text-[var(--muted)]">
-          Dimensionado SIGAS provisional
+          Dimensionado global
         </div>
         <div className="mt-1 text-[var(--warning)]">
-          {resolution.status === "unsupported"
-            ? `No soportado: ${resolution.reason}`
-            : resolution.reason}
+          {issues[0]?.message ??
+            "Dimensionado global pendiente para este tramo."}
         </div>
       </div>
     );
   }
 
-  const sizing = resolution.value.sizingResult;
-  const usedData = sizing.usedData ?? {};
+  const requiredDiameter = sizing.requiredDiameter;
+  const showRequiredDiameter =
+    requiredDiameter !== null &&
+    requiredDiameter.id !== sizing.calculatedDiameter.id;
 
   return (
     <div className="mt-2 rounded border border-[var(--line)] px-2 py-2">
       <div className="font-semibold text-[var(--muted)]">
-        Dimensionado SIGAS provisional
-      </div>
-      <div className="mt-1 text-[10px] text-[var(--muted)]">
-        Usa longitud local y accesorios locales; falta adoptar longitud por recorrido.
+        Dimensionado global
       </div>
       <dl className="mt-1 grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 gap-y-1">
-        <dt>Diametro calculado</dt>
-        <dd className="text-right">{formatDiameterReference(resolution.value.calculatedDiameter)}</dd>
+        <dt>Caudal</dt>
+        <dd className="text-right">
+          {formatTechnicalFlow(sizing.accumulatedFlow, sizing.accumulatedFlowUnit)}
+        </dd>
+        <dt>Longitud tramo</dt>
+        <dd className="text-right">
+          {formatCalculationMeters(segment.segmentPhysicalLengthMeters)}
+        </dd>
+        <dt>Recorrido gobernante</dt>
+        <dd className="text-right">
+          {sizing.governingTerminalEquipmentId ?? sizing.governingRouteId ?? "Pendiente"}
+        </dd>
+        <dt>Longitud inicial</dt>
+        <dd className="text-right">
+          {formatCalculationMeters(sizing.governingRoutePhysicalLengthMeters)}
+        </dd>
+        <dt>Equiv. recorrido</dt>
+        <dd className="text-right">
+          {formatCalculationMeters(
+            sizing.governingRouteAccessoryEquivalentLengthMeters,
+            "Pendiente",
+          )}
+        </dd>
+        <dt>Longitud dimensionado</dt>
+        <dd className="text-right">
+          {formatCalculationMeters(sizing.sizingLengthMeters, "Pendiente")}
+        </dd>
+        <dt>Diametro minimo calculado</dt>
+        <dd className="text-right">
+          {formatDiameterReference(sizing.calculatedDiameter)}
+        </dd>
+        {showRequiredDiameter ? (
+          <>
+            <dt>Requerido final</dt>
+            <dd className="text-right">
+              {formatDiameterReference(requiredDiameter)}
+            </dd>
+          </>
+        ) : null}
+        <dt>Diametro interior</dt>
+        <dd className="text-right">{formatInternalDiameter(sizing)}</dd>
         <dt>Longitud tabulada</dt>
         <dd className="text-right">
-          {formatRecordMeters(usedData, "tabulatedLengthMeters")}
+          {formatCalculationMeters(sizing.tabulatedLengthMeters, "Pendiente")}
         </dd>
         <dt>Capacidad tabulada</dt>
-        <dd className="text-right">
-          {formatRecordFlow(usedData, "capacityM3h")}
-        </dd>
+        <dd className="text-right">{formatTabulatedCapacity(sizing)}</dd>
         <dt>Sistema</dt>
         <dd className="text-right">{formatPipeSystemLabel(result)}</dd>
-        <dt>Fuente</dt>
-        <dd className="text-right">
-          {formatRecordSource(usedData)}
-        </dd>
       </dl>
+      {sizing.explanation ? (
+        <div className="mt-1 text-[10px] text-[var(--muted)]">
+          {sizing.explanation}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -666,22 +715,21 @@ function formatGoverningRouteLength(segment: TechnicalSegmentResult) {
 }
 
 function formatRouteAccessoryEquivalentLength(
-  resolution: TechnicalRouteAccessoryResolution | null,
+  segment: TechnicalSegmentResult,
 ) {
-  return resolution
-    ? formatCalculationMeters(
-        resolution.governingRouteAccessoryEquivalentLengthMeters,
-        "Pendiente",
-      )
-    : "Pendiente";
+  return formatCalculationMeters(
+    segment.routeSizingBasis.governingRouteAccessoryEquivalentLengthMeters,
+    "Pendiente",
+  );
 }
 
 function formatRouteSizingLength(
-  resolution: TechnicalRouteAccessoryResolution | null,
+  segment: TechnicalSegmentResult,
 ) {
-  return resolution
-    ? formatCalculationMeters(resolution.sizingLengthMeters, "Pendiente")
-    : "Pendiente";
+  return formatCalculationMeters(
+    segment.routeSizingBasis.sizingLengthMeters,
+    "Pendiente",
+  );
 }
 
 function formatTechnicalRoutePath(
@@ -720,16 +768,46 @@ function formatContributionName(
   );
 }
 
-function formatSegmentDiameter(segment: TechnicalSegmentResult) {
-  if (segment.dimensioningResolution.status === "resolved") {
-    return formatDiameterReference(
-      segment.dimensioningResolution.value.calculatedDiameter,
-    );
+function formatSegmentDiameter(
+  segment: TechnicalSegmentResult,
+  result: TechnicalCalculationResult,
+) {
+  const sizing = getNetworkSizingSegment(result, segment.segmentId);
+
+  if (sizing?.status === "resolved" && sizing.calculatedDiameter) {
+    return formatDiameterReference(sizing.calculatedDiameter);
+  }
+
+  if (sizing) {
+    return sizing.status === "unsupported" ? "No soportado" : "Pendiente";
   }
 
   return segment.dimensioningResolution.status === "unsupported"
     ? "No soportado"
     : "Pendiente";
+}
+
+function getNetworkSizingSegment(
+  result: TechnicalCalculationResult,
+  segmentId: string,
+) {
+  return (
+    result.networkSizing?.segments.find(
+      (segment) => segment.segmentId === segmentId,
+    ) ?? null
+  );
+}
+
+function formatInternalDiameter(sizing: TechnicalNetworkSizingSegmentResult) {
+  const value = formatOptionalNumber(sizing.internalDiameterMillimeters ?? undefined);
+
+  return value ? `DI ${value} mm` : "Pendiente";
+}
+
+function formatTabulatedCapacity(sizing: TechnicalNetworkSizingSegmentResult) {
+  const value = formatOptionalNumber(sizing.tabulatedCapacityM3h ?? undefined);
+
+  return value ? `${value} m3/h` : "Pendiente";
 }
 
 function formatDiameterReference(

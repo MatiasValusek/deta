@@ -302,8 +302,8 @@ function resolvePipeContext(params: {
 }) {
   const pipeContext = getFromIndex(params.pipeContextBySegmentId, params.segmentId);
   const diameter =
-    pipeContext?.diameter ??
     getFromIndex(params.diameterBySegmentId, params.segmentId) ??
+    pipeContext?.diameter ??
     null;
 
   if (!pipeContext && !diameter) {
