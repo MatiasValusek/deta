@@ -6,6 +6,8 @@ import {
 } from "@/lib/equipment/types";
 import {
   UNCONFIGURED_PIPE_SYSTEM,
+  type PipeDiameterReference,
+  type PipeSegmentSizingResult,
   type PipeSegmentPipeContext,
   type PipeSystem,
   type PipeSystemIdentity,
@@ -56,7 +58,8 @@ export type TechnicalCalculationIssue = {
     | "appliance_not_connected"
     | "missing_demand"
     | "mixed_demand_units"
-    | "pending_equivalent_length";
+    | "pending_equivalent_length"
+    | "pending_diameter_sizing";
   equipmentId?: string;
   message: string;
   nodeId?: string;
@@ -64,6 +67,7 @@ export type TechnicalCalculationIssue = {
 };
 
 export type TechnicalSegmentAccessoryResult = {
+  catalogCode?: string;
   equivalentLengthResolution: PipeSystemResolution<number>;
   equivalentLengthMetersPerUnit: number | null;
   equivalentLengthSource: RouteAccessoryEquivalentLengthSource;
@@ -74,13 +78,25 @@ export type TechnicalSegmentAccessoryResult = {
   type: RouteAccessoryType;
 };
 
+export type TechnicalSegmentDimensioningResult = {
+  accessories: TechnicalSegmentAccessoryResult[];
+  accessoryEquivalentLengthMeters: number;
+  calculatedDiameter: PipeDiameterReference;
+  calculationLengthMeters: number;
+  candidateCount: number;
+  physicalLengthMeters: number;
+  sizingResult: PipeSegmentSizingResult;
+};
+
 export type TechnicalSegmentResult = {
   accessories: TechnicalSegmentAccessoryResult[];
   accessoryEquivalentLengthMeters: number | null;
   accumulatedFlow: number | null;
   accumulatedFlowUnit: DemandUnit | null;
+  calculatedDiameter: PipeDiameterReference | null;
   calculationLengthMeters: number | null;
   depth: number;
+  dimensioningResolution: PipeSystemResolution<TechnicalSegmentDimensioningResult>;
   downstreamApplianceIds: string[];
   drawingLength: number;
   fromNodeId: string;
@@ -105,6 +121,8 @@ export type TechnicalCalculationResult = {
     applianceCount: number;
     accessoryEquivalentLengthMeters: number | null;
     calculationLengthMeters: number | null;
+    dimensionedSegmentCount: number;
+    pendingDimensioningSegmentCount: number;
     physicalLengthMeters: number | null;
     segmentCount: number;
   };
@@ -239,6 +257,10 @@ export function calculateTechnicalTree(params: {
 
     if (segment.accessoryEquivalentLengthMeters === null) {
       incompleteIssues.push(...createEquivalentLengthIssues(segment));
+    }
+
+    if (segment.dimensioningResolution.status !== "resolved") {
+      incompleteIssues.push(createDimensioningIssue(segment));
     }
   }
 
@@ -529,26 +551,49 @@ function createTechnicalSegmentResult(params: {
     id: params.oriented.segment.id,
     physicalLengthMeters,
   };
-  const accessories = createTechnicalAccessoryResults({
+  const preliminaryAccessories = createTechnicalAccessoryResults({
     pipeContext: params.pipeContext,
     pipeSystem: params.pipeSystem,
     segment: params.oriented.segment,
     segmentContext: accessoryContext,
   });
-  const accessoryEquivalentLengthMeters =
-    calculateAccessoryEquivalentLength(accessories);
-  const calculationLengthMeters =
-    physicalLengthMeters !== null && accessoryEquivalentLengthMeters !== null
-      ? physicalLengthMeters + accessoryEquivalentLengthMeters
+  const preliminaryAccessoryEquivalentLengthMeters =
+    calculateAccessoryEquivalentLength(preliminaryAccessories);
+  const preliminaryCalculationLengthMeters =
+    physicalLengthMeters !== null &&
+    preliminaryAccessoryEquivalentLengthMeters !== null
+      ? physicalLengthMeters + preliminaryAccessoryEquivalentLengthMeters
       : null;
+  const dimensioningResolution = resolveSegmentDimensioning({
+    drawingLength,
+    flow,
+    physicalLengthMeters,
+    pipeContext: params.pipeContext,
+    pipeSystem: params.pipeSystem,
+    segment: params.oriented.segment,
+  });
+  const resolvedDimensioning =
+    dimensioningResolution.status === "resolved"
+      ? dimensioningResolution.value
+      : null;
+  const accessories =
+    resolvedDimensioning?.accessories ?? preliminaryAccessories;
+  const accessoryEquivalentLengthMeters =
+    resolvedDimensioning?.accessoryEquivalentLengthMeters ??
+    preliminaryAccessoryEquivalentLengthMeters;
+  const calculationLengthMeters =
+    resolvedDimensioning?.calculationLengthMeters ??
+    preliminaryCalculationLengthMeters;
 
   return {
     accessories,
     accessoryEquivalentLengthMeters,
     accumulatedFlow: flow.value,
     accumulatedFlowUnit: flow.unit,
+    calculatedDiameter: resolvedDimensioning?.calculatedDiameter ?? null,
     calculationLengthMeters,
     depth: params.oriented.depth,
+    dimensioningResolution,
     downstreamApplianceIds,
     drawingLength,
     fromNodeId: params.oriented.fromNodeId,
@@ -557,6 +602,219 @@ function createTechnicalSegmentResult(params: {
     physicalLengthMeters,
     segmentId: params.oriented.segment.id,
     toNodeId: params.oriented.toNodeId,
+  };
+}
+
+type SegmentDimensioningFailure = {
+  data?: Record<string, unknown>;
+  reason: string;
+  status: "unresolved" | "unsupported";
+};
+
+function resolveSegmentDimensioning(params: {
+  drawingLength: number;
+  flow: {
+    missingEquipmentIds: string[];
+    unit: DemandUnit | null;
+    value: number | null;
+  };
+  physicalLengthMeters: number | null;
+  pipeContext: PipeSegmentPipeContext | undefined;
+  pipeSystem: PipeSystem;
+  segment: RouteSegment;
+}): PipeSystemResolution<TechnicalSegmentDimensioningResult> {
+  if (params.physicalLengthMeters === null) {
+    return {
+      reason: "Falta longitud fisica para dimensionar el tramo.",
+      status: "unresolved",
+    };
+  }
+
+  if (params.flow.value === null) {
+    return {
+      reason:
+        params.flow.missingEquipmentIds.length > 0
+          ? "Falta consumo aguas abajo para dimensionar el tramo."
+          : "El caudal acumulado del tramo no esta disponible en una unidad unica.",
+      status: "unresolved",
+    };
+  }
+
+  if (params.flow.unit === null) {
+    return {
+      reason: "Falta unidad de caudal acumulado para dimensionar el tramo.",
+      status: "unresolved",
+    };
+  }
+
+  const availableDiametersResolution = params.pipeSystem.getAvailableDiameters({
+    pipe: params.pipeContext,
+  });
+
+  if (availableDiametersResolution.status !== "resolved") {
+    return {
+      data: availableDiametersResolution.data,
+      reason: availableDiametersResolution.reason,
+      status: availableDiametersResolution.status,
+    };
+  }
+
+  const candidates = sortDiameterReferences(availableDiametersResolution.value);
+
+  if (candidates.length === 0) {
+    return {
+      reason: "El sistema de canerias no informo diametros disponibles.",
+      status: "unresolved",
+    };
+  }
+
+  const failures: SegmentDimensioningFailure[] = [];
+
+  for (const candidate of candidates) {
+    const candidatePipeContext = {
+      ...(params.pipeContext ?? {}),
+      diameter: candidate,
+    };
+    const segmentContext = {
+      accumulatedFlow: params.flow.value,
+      accumulatedFlowUnit: params.flow.unit,
+      drawingLength: params.drawingLength,
+      id: params.segment.id,
+      physicalLengthMeters: params.physicalLengthMeters,
+    };
+    const accessories = createTechnicalAccessoryResults({
+      pipeContext: candidatePipeContext,
+      pipeSystem: params.pipeSystem,
+      segment: params.segment,
+      segmentContext,
+    });
+    const accessoryFailure = accessories.find(
+      (accessory) => accessory.equivalentLengthResolution.status !== "resolved",
+    );
+
+    if (accessoryFailure) {
+      failures.push(createAccessoryDimensioningFailure(accessoryFailure));
+      continue;
+    }
+
+    const accessoryEquivalentLengthMeters =
+      calculateAccessoryEquivalentLength(accessories);
+
+    if (accessoryEquivalentLengthMeters === null) {
+      failures.push({
+        reason: "No se pudo resolver la longitud equivalente de accesorios.",
+        status: "unresolved",
+      });
+      continue;
+    }
+
+    const calculationLengthMeters =
+      params.physicalLengthMeters + accessoryEquivalentLengthMeters;
+    const sizingResolution = params.pipeSystem.sizeSegment({
+      accessoryEquivalentLengthMeters,
+      accumulatedFlow: params.flow.value,
+      accumulatedFlowUnit: params.flow.unit,
+      calculationLengthMeters,
+      physicalLengthMeters: params.physicalLengthMeters,
+      pipe: candidatePipeContext,
+      segmentId: params.segment.id,
+    });
+
+    if (sizingResolution.status !== "resolved") {
+      failures.push({
+        data: sizingResolution.data,
+        reason: sizingResolution.reason,
+        status: sizingResolution.status,
+      });
+      continue;
+    }
+
+    if (
+      diameterIsLessOrEqual(
+        sizingResolution.value.selectedDiameter,
+        candidate,
+        candidates,
+      )
+    ) {
+      return {
+        data: {
+          candidateCount: candidates.length,
+          evaluatedCandidateDiameterId: candidate.id,
+        },
+        explanation:
+          `Diametro ${candidate.label} resuelto con accesorios del mismo diametro.`,
+        status: "resolved",
+        value: {
+          accessories,
+          accessoryEquivalentLengthMeters,
+          calculatedDiameter: candidate,
+          calculationLengthMeters,
+          candidateCount: candidates.length,
+          physicalLengthMeters: params.physicalLengthMeters,
+          sizingResult: sizingResolution.value,
+        },
+      };
+    }
+
+    failures.push({
+      data: {
+        candidateDiameterId: candidate.id,
+        requiredDiameterId: sizingResolution.value.selectedDiameter.id,
+      },
+      reason:
+        `El candidato ${candidate.label} no alcanza; ` +
+        `el sistema requiere ${sizingResolution.value.selectedDiameter.label}.`,
+      status: "unresolved",
+    });
+  }
+
+  return createFailedDimensioningResolution(failures, candidates.length);
+}
+
+function createAccessoryDimensioningFailure(
+  accessory: TechnicalSegmentAccessoryResult,
+): SegmentDimensioningFailure {
+  const resolution = accessory.equivalentLengthResolution;
+
+  if (resolution.status === "resolved") {
+    return {
+      reason: "Longitud equivalente pendiente de resolver.",
+      status: "unresolved",
+    };
+  }
+
+  return {
+    data: resolution.data,
+    reason: resolution.reason,
+    status: resolution.status,
+  };
+}
+
+function createFailedDimensioningResolution(
+  failures: SegmentDimensioningFailure[],
+  candidateCount: number,
+): PipeSystemResolution<TechnicalSegmentDimensioningResult> {
+  const firstUnsupported = failures.find(
+    (failure) => failure.status === "unsupported",
+  );
+  const firstFailure = firstUnsupported ?? failures[0];
+
+  if (!firstFailure) {
+    return {
+      data: { candidateCount },
+      reason: "No se encontro un diametro candidato valido.",
+      status: "unresolved",
+    };
+  }
+
+  return {
+    data: {
+      ...firstFailure.data,
+      candidateCount,
+      failureCount: failures.length,
+    },
+    reason: firstFailure.reason,
+    status: firstFailure.status,
   };
 }
 
@@ -577,6 +835,7 @@ function createTechnicalAccessoryResults(params: {
       const quantity = normalizeAccessoryQuantity(accessory.quantity);
       const equivalentLengthResolution = resolveAccessoryEquivalentLength({
         accessory: {
+          catalogCode: accessory.catalogCode,
           id: accessory.id,
           quantity,
           type: accessory.type,
@@ -597,6 +856,7 @@ function createTechnicalAccessoryResults(params: {
         equivalentLengthResolution,
         equivalentLengthMetersPerUnit,
         equivalentLengthSource: accessory.equivalentLengthSource,
+        catalogCode: accessory.catalogCode,
         id: accessory.id,
         quantity,
         segmentId: params.segment.id,
@@ -616,6 +876,7 @@ function createTechnicalAccessoryResults(params: {
 
 function resolveAccessoryEquivalentLength(params: {
   accessory: {
+    catalogCode?: string;
     id: string;
     quantity: number;
     type: RouteAccessoryType;
@@ -721,6 +982,103 @@ function normalizeEquivalentLengthMetersPerUnit(value: number | null) {
   }
 
   return value;
+}
+
+function sortDiameterReferences(diameters: PipeDiameterReference[]) {
+  return diameters
+    .map((diameter, index) => ({
+      diameter,
+      index,
+      order: diameterSortValue(diameter),
+    }))
+    .sort((first, second) => {
+      if (first.order !== null && second.order !== null) {
+        return first.order - second.order;
+      }
+
+      if (first.order !== null) {
+        return -1;
+      }
+
+      if (second.order !== null) {
+        return 1;
+      }
+
+      return first.index - second.index;
+    })
+    .map((item) => item.diameter);
+}
+
+function diameterIsLessOrEqual(
+  first: PipeDiameterReference,
+  second: PipeDiameterReference,
+  orderedDiameters: PipeDiameterReference[],
+) {
+  const firstIndex = diameterOrderIndex(first, orderedDiameters);
+  const secondIndex = diameterOrderIndex(second, orderedDiameters);
+
+  if (firstIndex !== null && secondIndex !== null) {
+    return firstIndex <= secondIndex;
+  }
+
+  const firstValue = diameterSortValue(first);
+  const secondValue = diameterSortValue(second);
+
+  return firstValue !== null && secondValue !== null && firstValue <= secondValue;
+}
+
+function diameterOrderIndex(
+  diameter: PipeDiameterReference,
+  orderedDiameters: PipeDiameterReference[],
+) {
+  const byId = orderedDiameters.findIndex((item) => item.id === diameter.id);
+
+  if (byId >= 0) {
+    return byId;
+  }
+
+  const value = diameterSortValue(diameter);
+
+  if (value === null) {
+    return null;
+  }
+
+  const byValue = orderedDiameters.findIndex((item) => {
+    const itemValue = diameterSortValue(item);
+
+    return itemValue !== null && Math.abs(itemValue - value) <= 0.000001;
+  });
+
+  return byValue >= 0 ? byValue : null;
+}
+
+function diameterSortValue(diameter: PipeDiameterReference) {
+  const numericValue =
+    diameter.externalDiameterMillimeters ??
+    diameter.internalDiameterMillimeters ??
+    parseDiameterMillimeters(diameter.nominalDiameter) ??
+    parseDiameterMillimeters(diameter.label) ??
+    parseDiameterMillimeters(diameter.id);
+
+  return numericValue !== undefined && Number.isFinite(numericValue)
+    ? numericValue
+    : null;
+}
+
+function parseDiameterMillimeters(value: string | undefined) {
+  if (!value) {
+    return undefined;
+  }
+
+  const match = value.match(/(?:^|[^0-9])([0-9]{2,3})(?:\s*mm)?(?:$|[^0-9])/i);
+
+  if (!match) {
+    return undefined;
+  }
+
+  const parsed = Number(match[1]);
+
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function collectDownstreamApplianceIds(
@@ -858,6 +1216,23 @@ function createEquivalentLengthIssues(segment: TechnicalSegmentResult) {
   });
 }
 
+function createDimensioningIssue(
+  segment: TechnicalSegmentResult,
+): TechnicalCalculationIssue {
+  const resolution = segment.dimensioningResolution;
+
+  return {
+    code: "pending_diameter_sizing",
+    message:
+      resolution.status === "unsupported"
+        ? `Dimensionado no soportado: ${resolution.reason}`
+        : resolution.status === "resolved"
+          ? "Dimensionado pendiente."
+          : resolution.reason,
+    segmentId: segment.segmentId,
+  };
+}
+
 function createMissingPositionIssues(
   network: ManualRouteNetwork,
   equipment: WorkbenchEquipment[],
@@ -955,6 +1330,9 @@ function createTotals(
     physicalLengthMeters !== null && accessoryEquivalentLengthMeters !== null
       ? physicalLengthMeters + accessoryEquivalentLengthMeters
       : null;
+  const dimensionedSegmentCount = segments.filter(
+    (segment) => segment.dimensioningResolution.status === "resolved",
+  ).length;
 
   return {
     accumulatedFlow: totalFlow.value,
@@ -962,6 +1340,9 @@ function createTotals(
     applianceCount: appliances.length,
     accessoryEquivalentLengthMeters,
     calculationLengthMeters,
+    dimensionedSegmentCount,
+    pendingDimensioningSegmentCount:
+      segments.length - dimensionedSegmentCount,
     physicalLengthMeters,
     segmentCount: segments.length,
   };
@@ -974,6 +1355,8 @@ function createEmptyTotals(): TechnicalCalculationResult["totals"] {
     applianceCount: 0,
     accessoryEquivalentLengthMeters: null,
     calculationLengthMeters: null,
+    dimensionedSegmentCount: 0,
+    pendingDimensioningSegmentCount: 0,
     physicalLengthMeters: null,
     segmentCount: 0,
   };

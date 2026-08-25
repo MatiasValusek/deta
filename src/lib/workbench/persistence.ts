@@ -866,6 +866,8 @@ function isRouteAccessoryArray(value: unknown) {
         isRecord(accessory) &&
         isString(accessory.id) &&
         isString(accessory.segmentId) &&
+        (accessory.catalogCode === undefined ||
+          isString(accessory.catalogCode)) &&
         (accessory.type === "elbow" ||
           accessory.type === "tee" ||
           accessory.type === "valve" ||

@@ -26,6 +26,7 @@ export type PipeSystemResolution<T> =
     };
 
 export type PipeDiameterReference = {
+  externalDiameterMillimeters?: number;
   id: string;
   internalDiameterMillimeters?: number;
   label: string;
@@ -40,6 +41,7 @@ export type PipeSegmentPipeContext = {
 
 export type PipeAccessoryEquivalentLengthContext = {
   accessory: {
+    catalogCode?: string;
     id: string;
     quantity: number;
     type: RouteAccessoryType;

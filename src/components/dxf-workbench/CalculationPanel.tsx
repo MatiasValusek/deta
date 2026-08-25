@@ -114,6 +114,10 @@ function CalculationSummary({ result }: { result: TechnicalCalculationResult }) 
     <dl className="mt-3 grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 gap-y-1 text-xs">
       <dt>Tramos</dt>
       <dd className="text-right font-mono">{result.totals.segmentCount}</dd>
+      <dt>Dimensionados</dt>
+      <dd className="text-right font-mono">
+        {result.totals.dimensionedSegmentCount}/{result.totals.segmentCount}
+      </dd>
       <dt>Artefactos</dt>
       <dd className="text-right font-mono">{result.totals.applianceCount}</dd>
       <dt>Consumo total</dt>
@@ -201,6 +205,8 @@ function SegmentList({
               {" - "}
               {formatSegmentCalculationLength(segment)}
               {" - "}
+              {formatSegmentDiameter(segment)}
+              {" - "}
               {segment.downstreamApplianceIds.length}{" "}
               {segment.downstreamApplianceIds.length === 1 ? "artefacto" : "artefactos"}
             </div>
@@ -243,6 +249,7 @@ function SegmentDetail({
       </dl>
 
       <AccessoryList accessories={segment.accessories} />
+      <SegmentDimensioning result={result} segment={segment} />
 
       <div className="mt-2">
         <div className="font-semibold text-[var(--muted)]">Alimenta</div>
@@ -263,6 +270,56 @@ function SegmentDetail({
         )}
       </div>
     </section>
+  );
+}
+
+function SegmentDimensioning({
+  result,
+  segment,
+}: {
+  result: TechnicalCalculationResult;
+  segment: TechnicalSegmentResult;
+}) {
+  const resolution = segment.dimensioningResolution;
+
+  if (resolution.status !== "resolved") {
+    return (
+      <div className="mt-2 rounded border border-[#f1d28a] bg-[#fffaf0] px-2 py-2">
+        <div className="font-semibold text-[var(--muted)]">Dimensionado SIGAS</div>
+        <div className="mt-1 text-[var(--warning)]">
+          {resolution.status === "unsupported"
+            ? `No soportado: ${resolution.reason}`
+            : resolution.reason}
+        </div>
+      </div>
+    );
+  }
+
+  const sizing = resolution.value.sizingResult;
+  const usedData = sizing.usedData ?? {};
+
+  return (
+    <div className="mt-2 rounded border border-[var(--line)] px-2 py-2">
+      <div className="font-semibold text-[var(--muted)]">Dimensionado SIGAS</div>
+      <dl className="mt-1 grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 gap-y-1">
+        <dt>Diametro calculado</dt>
+        <dd className="text-right">{formatDiameterReference(resolution.value.calculatedDiameter)}</dd>
+        <dt>Longitud tabulada</dt>
+        <dd className="text-right">
+          {formatRecordMeters(usedData, "tabulatedLengthMeters")}
+        </dd>
+        <dt>Capacidad tabulada</dt>
+        <dd className="text-right">
+          {formatRecordFlow(usedData, "capacityM3h")}
+        </dd>
+        <dt>Sistema</dt>
+        <dd className="text-right">{formatPipeSystemLabel(result)}</dd>
+        <dt>Fuente</dt>
+        <dd className="text-right">
+          {formatRecordSource(usedData)}
+        </dd>
+      </dl>
+    </div>
   );
 }
 
@@ -417,6 +474,83 @@ function formatSegmentCalculationLength(segment: TechnicalSegmentResult) {
   }
 
   return "Pendiente";
+}
+
+function formatSegmentDiameter(segment: TechnicalSegmentResult) {
+  if (segment.dimensioningResolution.status === "resolved") {
+    return formatDiameterReference(
+      segment.dimensioningResolution.value.calculatedDiameter,
+    );
+  }
+
+  return segment.dimensioningResolution.status === "unsupported"
+    ? "No soportado"
+    : "Pendiente";
+}
+
+function formatDiameterReference(
+  diameter: TechnicalSegmentResult["calculatedDiameter"],
+) {
+  if (!diameter) {
+    return "Pendiente";
+  }
+
+  const external = formatOptionalNumber(diameter.externalDiameterMillimeters);
+  const internal = formatOptionalNumber(diameter.internalDiameterMillimeters);
+
+  if (external && internal) {
+    return `DE ${external} mm / DI ${internal} mm`;
+  }
+
+  if (external) {
+    return `DE ${external} mm`;
+  }
+
+  return diameter.label;
+}
+
+function formatRecordMeters(data: Record<string, unknown>, key: string) {
+  const value = finiteRecordNumber(data, key);
+
+  return value === null ? "Pendiente" : formatCalculationMeters(value);
+}
+
+function formatRecordFlow(data: Record<string, unknown>, key: string) {
+  const value = finiteRecordNumber(data, key);
+
+  return value === null
+    ? "Pendiente"
+    : `${formatOptionalNumber(value)} m3/h`;
+}
+
+function formatRecordSource(data: Record<string, unknown>) {
+  const sourceTable = stringRecordValue(data, "sourceTable");
+  const sourceFile = stringRecordValue(data, "sourceFile");
+
+  return [sourceTable, sourceFile].filter(Boolean).join(" - ") || "Pendiente";
+}
+
+function finiteRecordNumber(data: Record<string, unknown>, key: string) {
+  const value = data[key];
+
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function stringRecordValue(data: Record<string, unknown>, key: string) {
+  const value = data[key];
+
+  return typeof value === "string" ? value : null;
+}
+
+function formatOptionalNumber(value: number | undefined) {
+  if (value === undefined || !Number.isFinite(value)) {
+    return null;
+  }
+
+  return value.toLocaleString("es-AR", {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: 0,
+  });
 }
 
 function formatDrawingLength(value: number) {

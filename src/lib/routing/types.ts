@@ -18,6 +18,7 @@ export type RouteNode = {
 };
 
 export type RouteSegmentAccessory = {
+  catalogCode?: string;
   equivalentLengthMetersPerUnit: number | null;
   equivalentLengthSource: RouteAccessoryEquivalentLengthSource;
   id: string;

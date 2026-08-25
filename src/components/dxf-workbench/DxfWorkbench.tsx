@@ -25,6 +25,7 @@ import {
   formatTechnicalFlow,
   technicalCalculationStatusLabel,
 } from "@/lib/calculation/technicalTree";
+import { SIGAS_PIPE_SYSTEM } from "@/lib/calculation/pipeSystems/sigas";
 import {
   equipmentDefinitionForType,
   equipmentTypeLabel,
@@ -765,6 +766,7 @@ export function DxfWorkbench() {
             equipment: planBase.equipment,
             minSegmentLengthSource: MIN_SECTION_LINK_LENGTH,
             network: planBase.routeNetwork,
+            pipeSystem: SIGAS_PIPE_SYSTEM,
             scaleMetersPerSourceUnit: calibrationScaleMetersPerSourceUnit(planBase),
           })
         : null,
