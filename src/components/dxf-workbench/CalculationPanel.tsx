@@ -128,7 +128,7 @@ function CalculationSummary({ result }: { result: TechnicalCalculationResult }) 
       <dd className="text-right">{physicalLength}</dd>
       <dt>Equiv. accesorios</dt>
       <dd className="text-right">{equivalentLength}</dd>
-      <dt>Longitud calculo</dt>
+      <dt>Long. calculo prov.</dt>
       <dd className="text-right">{calculationLength}</dd>
     </dl>
   );
@@ -203,7 +203,7 @@ function SegmentList({
             <div className="mt-0.5 text-[10px] text-[var(--muted)]">
               {formatTechnicalFlow(segment.accumulatedFlow, segment.accumulatedFlowUnit)}
               {" - "}
-              {formatSegmentCalculationLength(segment)}
+              {formatGoverningRouteLength(segment)}
               {" - "}
               {formatSegmentDiameter(segment)}
               {" - "}
@@ -234,13 +234,15 @@ function SegmentDetail({
       <dl className="mt-2 grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 gap-y-1">
         <dt>Longitud dibujada</dt>
         <dd className="text-right">{formatDrawingLength(segment.drawingLength)}</dd>
-        <dt>Longitud física</dt>
-        <dd className="text-right">{formatCalculationMeters(segment.physicalLengthMeters)}</dd>
+        <dt>Longitud del tramo</dt>
+        <dd className="text-right">
+          {formatCalculationMeters(segment.segmentPhysicalLengthMeters)}
+        </dd>
         <dt>Equiv. accesorios</dt>
         <dd className="text-right">
           {formatCalculationMeters(segment.accessoryEquivalentLengthMeters, "Pendiente")}
         </dd>
-        <dt>Longitud calculo</dt>
+        <dt>Long. prov. 08B2</dt>
         <dd className="text-right">{formatSegmentCalculationLength(segment)}</dd>
         <dt>Consumo acumulado</dt>
         <dd className="text-right">
@@ -248,6 +250,11 @@ function SegmentDetail({
         </dd>
       </dl>
 
+      <RouteBasisDetail
+        equipmentById={equipmentById}
+        result={result}
+        segment={segment}
+      />
       <AccessoryList accessories={segment.accessories} />
       <SegmentDimensioning result={result} segment={segment} />
 
@@ -273,6 +280,69 @@ function SegmentDetail({
   );
 }
 
+function RouteBasisDetail({
+  equipmentById,
+  result,
+  segment,
+}: {
+  equipmentById: Map<string, WorkbenchEquipment>;
+  result: TechnicalCalculationResult;
+  segment: TechnicalSegmentResult;
+}) {
+  const resolution = segment.governingRouteResolution;
+
+  if (resolution.status !== "resolved") {
+    return (
+      <div className="mt-2 rounded border border-[#f1d28a] bg-[#fffaf0] px-2 py-2">
+        <div className="font-semibold text-[var(--muted)]">
+          Recorrido de calculo
+        </div>
+        <dl className="mt-1 grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 gap-y-1">
+          <dt>Extremo desfavorable</dt>
+          <dd className="text-right">Pendiente</dd>
+          <dt>Longitud inicial de calculo</dt>
+          <dd className="text-right">Pendiente</dd>
+        </dl>
+        <div className="mt-1 text-[var(--warning)]">
+          {resolution.status === "unsupported"
+            ? `No soportado: ${resolution.reason}`
+            : resolution.reason}
+        </div>
+      </div>
+    );
+  }
+
+  const route = resolution.value;
+  const terminal = equipmentById.get(route.terminalEquipmentId);
+
+  return (
+    <div className="mt-2 rounded border border-[var(--line)] px-2 py-2">
+      <div className="font-semibold text-[var(--muted)]">
+        Recorrido de calculo
+      </div>
+      <dl className="mt-1 grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 gap-y-1">
+        <dt>Extremo desfavorable</dt>
+        <dd className="text-right">{terminal?.name ?? route.terminalEquipmentId}</dd>
+        <dt>Longitud inicial de calculo</dt>
+        <dd className="text-right">
+          {formatCalculationMeters(route.physicalLengthMeters)}
+        </dd>
+      </dl>
+      <div className="mt-1">
+        <div className="text-[var(--muted)]">Recorrido de calculo</div>
+        <div className="break-words font-mono text-[11px]">
+          {formatTechnicalRoutePath(route.nodeIds, result.nodeLabels)}
+        </div>
+      </div>
+      {route.tiedRouteIds.length > 1 ? (
+        <div className="mt-1 text-[10px] text-[var(--muted)]">
+          Empate resuelto por id de terminal.
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function SegmentDimensioning({
   result,
   segment,
@@ -285,7 +355,9 @@ function SegmentDimensioning({
   if (resolution.status !== "resolved") {
     return (
       <div className="mt-2 rounded border border-[#f1d28a] bg-[#fffaf0] px-2 py-2">
-        <div className="font-semibold text-[var(--muted)]">Dimensionado SIGAS</div>
+        <div className="font-semibold text-[var(--muted)]">
+          Dimensionado SIGAS provisional
+        </div>
         <div className="mt-1 text-[var(--warning)]">
           {resolution.status === "unsupported"
             ? `No soportado: ${resolution.reason}`
@@ -300,7 +372,12 @@ function SegmentDimensioning({
 
   return (
     <div className="mt-2 rounded border border-[var(--line)] px-2 py-2">
-      <div className="font-semibold text-[var(--muted)]">Dimensionado SIGAS</div>
+      <div className="font-semibold text-[var(--muted)]">
+        Dimensionado SIGAS provisional
+      </div>
+      <div className="mt-1 text-[10px] text-[var(--muted)]">
+        Usa longitud local y accesorios locales; falta adoptar longitud por recorrido.
+      </div>
       <dl className="mt-1 grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 gap-y-1">
         <dt>Diametro calculado</dt>
         <dd className="text-right">{formatDiameterReference(resolution.value.calculatedDiameter)}</dd>
@@ -474,6 +551,23 @@ function formatSegmentCalculationLength(segment: TechnicalSegmentResult) {
   }
 
   return "Pendiente";
+}
+
+function formatGoverningRouteLength(segment: TechnicalSegmentResult) {
+  if (segment.governingRoutePhysicalLengthMeters !== null) {
+    return `Long. inicial ${formatCalculationMeters(
+      segment.governingRoutePhysicalLengthMeters,
+    )}`;
+  }
+
+  return "Long. inicial pendiente";
+}
+
+function formatTechnicalRoutePath(
+  nodeIds: string[],
+  labels: Record<string, string>,
+) {
+  return nodeIds.map((nodeId) => labels[nodeId] ?? nodeId).join(" -> ");
 }
 
 function formatSegmentDiameter(segment: TechnicalSegmentResult) {

@@ -88,6 +88,35 @@ export type TechnicalSegmentDimensioningResult = {
   sizingResult: PipeSegmentSizingResult;
 };
 
+export type TechnicalRoute = {
+  id: string;
+  nodeIds: string[];
+  physicalLengthMeters: number | null;
+  reason?: string;
+  segmentIds: string[];
+  status: "resolved" | "unresolved";
+  terminalEquipmentId: string;
+  terminalNodeId: string;
+};
+
+export type TechnicalSegmentGoverningRoute = {
+  nodeIds: string[];
+  physicalLengthMeters: number;
+  routeId: string;
+  segmentIds: string[];
+  terminalEquipmentId: string;
+  terminalNodeId: string;
+  tiedRouteIds: string[];
+};
+
+export type TechnicalSegmentSizingBasis = {
+  governingRouteEquivalentLengthMeters: null;
+  governingRoutePhysicalLengthMeters: number | null;
+  reason: string;
+  sizingLengthMeters: null;
+  status: "pending";
+};
+
 export type TechnicalSegmentResult = {
   accessories: TechnicalSegmentAccessoryResult[];
   accessoryEquivalentLengthMeters: number | null;
@@ -100,10 +129,16 @@ export type TechnicalSegmentResult = {
   downstreamApplianceIds: string[];
   drawingLength: number;
   fromNodeId: string;
+  governingRoute: TechnicalSegmentGoverningRoute | null;
+  governingRoutePhysicalLengthMeters: number | null;
+  governingRouteResolution: PipeSystemResolution<TechnicalSegmentGoverningRoute>;
   missingDemandEquipmentIds: string[];
   parentSegmentId: string | null;
   physicalLengthMeters: number | null;
+  routeSizingBasis: TechnicalSegmentSizingBasis;
   segmentId: string;
+  segmentPhysicalLengthMeters: number | null;
+  terminalRouteIds: string[];
   toNodeId: string;
 };
 
@@ -115,6 +150,7 @@ export type TechnicalCalculationResult = {
   rootNodeId: string | null;
   segments: TechnicalSegmentResult[];
   status: TechnicalCalculationStatus;
+  technicalRoutes: TechnicalRoute[];
   totals: {
     accumulatedFlow: number | null;
     accumulatedFlowUnit: DemandUnit | null;
@@ -136,6 +172,8 @@ type OrientedSegment = {
   toNodeId: string;
 };
 
+const ROUTE_LENGTH_EPSILON = 0.000001;
+
 export function calculateTechnicalTree(params: {
   equipment: WorkbenchEquipment[];
   minSegmentLengthSource: number;
@@ -156,6 +194,7 @@ export function calculateTechnicalTree(params: {
       rootNodeId: null,
       segments: [],
       status: "invalid",
+      technicalRoutes: [],
       totals: createEmptyTotals(),
     });
   }
@@ -180,6 +219,7 @@ export function calculateTechnicalTree(params: {
       rootNodeId: null,
       segments: [],
       status: "invalid",
+      technicalRoutes: [],
       totals: createEmptyTotals(),
     });
   }
@@ -199,6 +239,7 @@ export function calculateTechnicalTree(params: {
       rootNodeId: supplyNode.id,
       segments: [],
       status: "invalid",
+      technicalRoutes: [],
       totals: createEmptyTotals(),
     });
   }
@@ -220,15 +261,36 @@ export function calculateTechnicalTree(params: {
     params,
     connectedApplianceIds,
   );
+  const segmentLengthById = createSegmentPhysicalLengthIndex({
+    equipmentById,
+    nodeById,
+    orientedSegments: orientation.segments,
+    scaleMetersPerSourceUnit: params.scaleMetersPerSourceUnit,
+  });
+  const technicalRoutes = createTechnicalRoutes({
+    nodeById,
+    orientedSegments: orientation.segments,
+    rootNodeId: supplyNode.id,
+    segmentLengthById,
+  });
+  const routesBySegmentId = createRoutesBySegmentId(technicalRoutes);
+  const governingRouteBySegmentId =
+    createGoverningRouteBySegmentId(routesBySegmentId);
   const technicalSegments = orientation.segments.map((oriented) =>
     createTechnicalSegmentResult({
       childSegmentsByNodeId,
       equipmentById,
+      governingRouteResolution:
+        governingRouteBySegmentId.get(oriented.segment.id) ??
+        createMissingSegmentRouteResolution(oriented.segment.id),
       nodeById,
       oriented,
       pipeContext: params.pipeContextBySegmentId?.[oriented.segment.id],
       pipeSystem,
       scaleMetersPerSourceUnit: params.scaleMetersPerSourceUnit,
+      terminalRouteIds: (routesBySegmentId.get(oriented.segment.id) ?? []).map(
+        (route) => route.id,
+      ),
     }),
   );
 
@@ -283,6 +345,7 @@ export function calculateTechnicalTree(params: {
     rootNodeId: supplyNode.id,
     segments: technicalSegments,
     status,
+    technicalRoutes,
     totals,
   });
 }
@@ -514,14 +577,310 @@ function orientNetworkFromRoot(
   };
 }
 
+function createSegmentPhysicalLengthIndex(params: {
+  equipmentById: Map<string, WorkbenchEquipment>;
+  nodeById: Map<string, RouteNode>;
+  orientedSegments: OrientedSegment[];
+  scaleMetersPerSourceUnit: number | null;
+}) {
+  const map = new Map<string, number | null>();
+
+  for (const oriented of params.orientedSegments) {
+    map.set(
+      oriented.segment.id,
+      calculateSegmentPhysicalLengthMeters({
+        equipmentById: params.equipmentById,
+        fromNodeId: oriented.fromNodeId,
+        nodeById: params.nodeById,
+        scaleMetersPerSourceUnit: params.scaleMetersPerSourceUnit,
+        toNodeId: oriented.toNodeId,
+      }),
+    );
+  }
+
+  return map;
+}
+
+function calculateSegmentPhysicalLengthMeters(params: {
+  equipmentById: Map<string, WorkbenchEquipment>;
+  fromNodeId: string;
+  nodeById: Map<string, RouteNode>;
+  scaleMetersPerSourceUnit: number | null;
+  toNodeId: string;
+}) {
+  if (params.scaleMetersPerSourceUnit === null) {
+    return null;
+  }
+
+  const fromPoint = resolveTechnicalRouteNodePosition(
+    params.fromNodeId,
+    params.nodeById,
+    params.equipmentById,
+  );
+  const toPoint = resolveTechnicalRouteNodePosition(
+    params.toNodeId,
+    params.nodeById,
+    params.equipmentById,
+  );
+
+  if (!fromPoint || !toPoint) {
+    return null;
+  }
+
+  return distanceBetween(fromPoint, toPoint) * params.scaleMetersPerSourceUnit;
+}
+
+function resolveTechnicalRouteNodePosition(
+  nodeId: string,
+  nodeById: Map<string, RouteNode>,
+  equipmentById: Map<string, WorkbenchEquipment>,
+) {
+  const node = nodeById.get(nodeId);
+
+  return node ? resolveRouteNodePosition(node, equipmentById) : null;
+}
+
+function createTechnicalRoutes(params: {
+  nodeById: Map<string, RouteNode>;
+  orientedSegments: OrientedSegment[];
+  rootNodeId: string;
+  segmentLengthById: Map<string, number | null>;
+}) {
+  const parentByToNodeId = new Map(
+    params.orientedSegments.map((oriented) => [oriented.toNodeId, oriented]),
+  );
+
+  return [...params.nodeById.values()]
+    .filter((node) => node.kind === "appliance" && node.equipmentId)
+    .sort((first, second) =>
+      (first.equipmentId ?? first.id).localeCompare(
+        second.equipmentId ?? second.id,
+      ),
+    )
+    .map((terminalNode) =>
+      createTechnicalRoute({
+        parentByToNodeId,
+        rootNodeId: params.rootNodeId,
+        segmentLengthById: params.segmentLengthById,
+        terminalNode,
+      }),
+    );
+}
+
+function createTechnicalRoute(params: {
+  parentByToNodeId: Map<string, OrientedSegment>;
+  rootNodeId: string;
+  segmentLengthById: Map<string, number | null>;
+  terminalNode: RouteNode;
+}): TechnicalRoute {
+  const terminalEquipmentId = params.terminalNode.equipmentId as string;
+  const reversedNodeIds = [params.terminalNode.id];
+  const reversedSegmentIds: string[] = [];
+  let currentNodeId = params.terminalNode.id;
+
+  while (currentNodeId !== params.rootNodeId) {
+    const parent = params.parentByToNodeId.get(currentNodeId);
+
+    if (!parent) {
+      return {
+        id: createTechnicalRouteId(terminalEquipmentId),
+        nodeIds: reversedNodeIds.reverse(),
+        physicalLengthMeters: null,
+        reason:
+          "No se pudo reconstruir el recorrido desde la alimentacion hasta el terminal.",
+        segmentIds: reversedSegmentIds.reverse(),
+        status: "unresolved",
+        terminalEquipmentId,
+        terminalNodeId: params.terminalNode.id,
+      };
+    }
+
+    reversedSegmentIds.push(parent.segment.id);
+    currentNodeId = parent.fromNodeId;
+    reversedNodeIds.push(currentNodeId);
+  }
+
+  const segmentIds = reversedSegmentIds.reverse();
+  const nodeIds = reversedNodeIds.reverse();
+  let physicalLengthMeters = 0;
+
+  for (const segmentId of segmentIds) {
+    const length = params.segmentLengthById.get(segmentId) ?? null;
+
+    if (length === null) {
+      return {
+        id: createTechnicalRouteId(terminalEquipmentId),
+        nodeIds,
+        physicalLengthMeters: null,
+        reason: "Falta longitud fisica en uno o mas tramos del recorrido.",
+        segmentIds,
+        status: "unresolved",
+        terminalEquipmentId,
+        terminalNodeId: params.terminalNode.id,
+      };
+    }
+
+    physicalLengthMeters += length;
+  }
+
+  return {
+    id: createTechnicalRouteId(terminalEquipmentId),
+    nodeIds,
+    physicalLengthMeters,
+    segmentIds,
+    status: "resolved",
+    terminalEquipmentId,
+    terminalNodeId: params.terminalNode.id,
+  };
+}
+
+function createTechnicalRouteId(terminalEquipmentId: string) {
+  return `technical-route:${terminalEquipmentId}`;
+}
+
+function createRoutesBySegmentId(routes: TechnicalRoute[]) {
+  const map = new Map<string, TechnicalRoute[]>();
+
+  for (const route of routes) {
+    for (const segmentId of route.segmentIds) {
+      const current = map.get(segmentId) ?? [];
+      current.push(route);
+      current.sort((first, second) =>
+        first.terminalEquipmentId.localeCompare(second.terminalEquipmentId),
+      );
+      map.set(segmentId, current);
+    }
+  }
+
+  return map;
+}
+
+function createGoverningRouteBySegmentId(
+  routesBySegmentId: Map<string, TechnicalRoute[]>,
+) {
+  const map = new Map<
+    string,
+    PipeSystemResolution<TechnicalSegmentGoverningRoute>
+  >();
+
+  for (const [segmentId, routes] of routesBySegmentId) {
+    map.set(segmentId, resolveGoverningRouteForSegment(segmentId, routes));
+  }
+
+  return map;
+}
+
+function resolveGoverningRouteForSegment(
+  segmentId: string,
+  routes: TechnicalRoute[],
+): PipeSystemResolution<TechnicalSegmentGoverningRoute> {
+  if (routes.length === 0) {
+    return createMissingSegmentRouteResolution(segmentId);
+  }
+
+  const unresolvedRoute = routes.find((route) => route.status !== "resolved");
+
+  if (unresolvedRoute) {
+    return {
+      data: {
+        routeId: unresolvedRoute.id,
+        segmentId,
+        terminalEquipmentId: unresolvedRoute.terminalEquipmentId,
+      },
+      reason: unresolvedRoute.reason ?? "Recorrido de calculo pendiente.",
+      status: "unresolved",
+    };
+  }
+
+  const resolvedRoutes = routes.filter(
+    (route): route is TechnicalRoute & { physicalLengthMeters: number } =>
+      route.physicalLengthMeters !== null,
+  );
+
+  if (resolvedRoutes.length === 0) {
+    return {
+      data: { segmentId },
+      reason: "No hay recorridos resueltos para el tramo.",
+      status: "unresolved",
+    };
+  }
+
+  const maxLength = Math.max(
+    ...resolvedRoutes.map((route) => route.physicalLengthMeters),
+  );
+  const tiedRoutes = resolvedRoutes
+    .filter(
+      (route) =>
+        Math.abs(route.physicalLengthMeters - maxLength) <= ROUTE_LENGTH_EPSILON,
+    )
+    .sort((first, second) =>
+      first.terminalEquipmentId.localeCompare(second.terminalEquipmentId) ||
+      first.id.localeCompare(second.id),
+    );
+  const selectedRoute = tiedRoutes[0] as TechnicalRoute & {
+    physicalLengthMeters: number;
+  };
+
+  return {
+    explanation: "Recorrido terminal mas largo que contiene el tramo.",
+    status: "resolved",
+    value: {
+      nodeIds: selectedRoute.nodeIds,
+      physicalLengthMeters: selectedRoute.physicalLengthMeters,
+      routeId: selectedRoute.id,
+      segmentIds: selectedRoute.segmentIds,
+      terminalEquipmentId: selectedRoute.terminalEquipmentId,
+      terminalNodeId: selectedRoute.terminalNodeId,
+      tiedRouteIds:
+        tiedRoutes.length > 1 ? tiedRoutes.map((route) => route.id) : [],
+    },
+  };
+}
+
+function createMissingSegmentRouteResolution(
+  segmentId: string,
+): PipeSystemResolution<TechnicalSegmentGoverningRoute> {
+  return {
+    data: { segmentId },
+    reason: "El tramo no pertenece a ningun recorrido terminal.",
+    status: "unresolved",
+  };
+}
+
+function createRouteSizingBasis(
+  governingRouteResolution: PipeSystemResolution<TechnicalSegmentGoverningRoute>,
+): TechnicalSegmentSizingBasis {
+  if (governingRouteResolution.status !== "resolved") {
+    return {
+      governingRouteEquivalentLengthMeters: null,
+      governingRoutePhysicalLengthMeters: null,
+      reason: governingRouteResolution.reason,
+      sizingLengthMeters: null,
+      status: "pending",
+    };
+  }
+
+  return {
+    governingRouteEquivalentLengthMeters: null,
+    governingRoutePhysicalLengthMeters:
+      governingRouteResolution.value.physicalLengthMeters,
+    reason:
+      "Falta acumular accesorios por recorrido antes del dimensionado definitivo.",
+    sizingLengthMeters: null,
+    status: "pending",
+  };
+}
+
 function createTechnicalSegmentResult(params: {
   childSegmentsByNodeId: Map<string, OrientedSegment[]>;
   equipmentById: Map<string, WorkbenchEquipment>;
+  governingRouteResolution: PipeSystemResolution<TechnicalSegmentGoverningRoute>;
   nodeById: Map<string, RouteNode>;
   oriented: OrientedSegment;
   pipeContext: PipeSegmentPipeContext | undefined;
   pipeSystem: PipeSystem;
   scaleMetersPerSourceUnit: number | null;
+  terminalRouteIds: string[];
 }): TechnicalSegmentResult {
   const downstreamApplianceIds = collectDownstreamApplianceIds(
     params.oriented.toNodeId,
@@ -584,6 +943,10 @@ function createTechnicalSegmentResult(params: {
   const calculationLengthMeters =
     resolvedDimensioning?.calculationLengthMeters ??
     preliminaryCalculationLengthMeters;
+  const governingRoute =
+    params.governingRouteResolution.status === "resolved"
+      ? params.governingRouteResolution.value
+      : null;
 
   return {
     accessories,
@@ -597,10 +960,17 @@ function createTechnicalSegmentResult(params: {
     downstreamApplianceIds,
     drawingLength,
     fromNodeId: params.oriented.fromNodeId,
+    governingRoute,
+    governingRoutePhysicalLengthMeters:
+      governingRoute?.physicalLengthMeters ?? null,
+    governingRouteResolution: params.governingRouteResolution,
     missingDemandEquipmentIds: flow.missingEquipmentIds,
     parentSegmentId: params.oriented.parentSegmentId,
     physicalLengthMeters,
+    routeSizingBasis: createRouteSizingBasis(params.governingRouteResolution),
     segmentId: params.oriented.segment.id,
+    segmentPhysicalLengthMeters: physicalLengthMeters,
+    terminalRouteIds: params.terminalRouteIds,
     toNodeId: params.oriented.toNodeId,
   };
 }
@@ -1374,6 +1744,11 @@ function createResult(
         first.fromNodeId.localeCompare(second.fromNodeId) ||
         first.toNodeId.localeCompare(second.toNodeId) ||
         first.segmentId.localeCompare(second.segmentId),
+    ),
+    technicalRoutes: result.technicalRoutes.sort(
+      (first, second) =>
+        first.terminalEquipmentId.localeCompare(second.terminalEquipmentId) ||
+        first.id.localeCompare(second.id),
     ),
   };
 }
