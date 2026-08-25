@@ -38,6 +38,7 @@ import {
 import type { Bounds, DrawingPrimitive, NormalizedDrawing, Point2D } from "@/lib/geometry/types";
 import { worldToScreen, type ViewTransform } from "@/lib/geometry/viewport";
 import { importPdfDocument, type ImportedPdfDocument } from "@/lib/pdf/importPdf";
+import type { PdfDocumentModel } from "@/lib/pdf/types";
 import { pdfSourceToScreen, type PdfViewTransform } from "@/lib/pdf/pdfViewport";
 import {
   pointAlmostEqual,
@@ -121,6 +122,15 @@ import type {
   SemanticInspection,
   SemanticViewMode,
 } from "@/lib/semantic/types";
+import {
+  clearPersistedWorkbenchProject,
+  createPersistedWorkbenchProject,
+  loadPersistedWorkbenchProject,
+  savePersistedWorkbenchProject,
+  type PersistedSourceCalibrationState,
+  type PersistedWorkbenchBase,
+  type PersistedWorkbenchProject,
+} from "@/lib/workbench/persistence";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { DxfViewer } from "./DxfViewer";
 import { EquipmentPanel } from "./EquipmentPanel";
@@ -201,6 +211,11 @@ type BaseVisualState = {
   pdfView: PdfViewTransform | null;
 };
 
+type PersistenceNotice = {
+  message: string;
+  tone: "error" | "info" | "warning";
+};
+
 type WorkbenchBase = {
   id: string;
   type: WorkbenchBaseType;
@@ -210,6 +225,7 @@ type WorkbenchBase = {
   createdAt: number;
   drawing: NormalizedDrawing | null;
   pdfDocument: ImportedPdfDocument | null;
+  pdfModel: PdfDocumentModel | null;
   visibleLayers: LayerVisibility;
   error: string | null;
   semanticViewMode: SemanticViewMode;
@@ -276,6 +292,9 @@ export function DxfWorkbench() {
   const [routeError, setRouteError] = useState<string | null>(null);
   const [cursor, setCursor] = useState<Point2D | null>(null);
   const [sessionError, setSessionError] = useState<string | null>(null);
+  const [persistenceNotice, setPersistenceNotice] =
+    useState<PersistenceNotice | null>(null);
+  const [isPersistenceReady, setIsPersistenceReady] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const planInputRef = useRef<HTMLInputElement | null>(null);
   const sectionInputRef = useRef<HTMLInputElement | null>(null);
@@ -304,6 +323,83 @@ export function DxfWorkbench() {
     };
   }, []);
 
+  useEffect(() => {
+    const result = loadPersistedWorkbenchProject();
+
+    if (result.status === "loaded") {
+      const restoredProject = restorePersistedWorkbenchProject(result.project);
+
+      setBases(restoredProject.bases);
+      setActiveBaseId(restoredProject.activeBaseId);
+      setNextSectionNumber(result.project.nextSectionNumber);
+      setSectionPlanLinks(result.project.sectionPlanLinks);
+      setRouteProposal(restoredProject.routeProposal);
+      setRouteProposalMode(
+        restoredProject.routeProposal ? result.project.routeProposalMode : null,
+      );
+      setRouteProposalMarginInput(result.project.routeProposalMarginInput);
+
+      setPersistenceNotice({
+        message: restoredProject.hasPdfPlaceholders
+          ? "Proyecto local restaurado. Los PDF quedan como referencia y deben volver a cargarse para ver la pagina original."
+          : "Proyecto local restaurado.",
+        tone: "info",
+      });
+    } else if (result.status === "invalid") {
+      clearPersistedWorkbenchProject();
+      setPersistenceNotice({
+        message:
+          "El proyecto local guardado no se pudo leer. Se inicio un proyecto vacio.",
+        tone: "warning",
+      });
+    } else if (result.status === "unavailable") {
+      setPersistenceNotice({
+        message: "El guardado local no esta disponible en este navegador.",
+        tone: "warning",
+      });
+    }
+
+    setIsPersistenceReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!isPersistenceReady) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      const result = savePersistedWorkbenchProject(
+        createPersistedWorkbenchProject({
+          activeBaseId,
+          bases,
+          nextSectionNumber,
+          routeProposal,
+          routeProposalMarginInput,
+          routeProposalMode,
+          sectionPlanLinks,
+        }),
+      );
+
+      if (!result.ok) {
+        setPersistenceNotice({
+          message: `No se pudo guardar el proyecto local. ${result.error}`,
+          tone: "error",
+        });
+      }
+    }, 400);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    activeBaseId,
+    bases,
+    isPersistenceReady,
+    nextSectionNumber,
+    routeProposal,
+    routeProposalMarginInput,
+    routeProposalMode,
+    sectionPlanLinks,
+  ]);
+
   const activeBase = useMemo(
     () => bases.find((base) => base.id === activeBaseId) ?? null,
     [activeBaseId, bases],
@@ -326,6 +422,10 @@ export function DxfWorkbench() {
   const activeView = activeBase?.sourceType ?? "dxf";
   const drawing = activeView === "dxf" ? activeBase?.drawing ?? null : null;
   const pdfDocument = activeView === "pdf" ? activeBase?.pdfDocument ?? null : null;
+  const pdfModel =
+    activeView === "pdf"
+      ? activeBase?.pdfDocument?.model ?? activeBase?.pdfModel ?? null
+      : null;
   const activePdfPageNumber = activeBase?.visual.activePdfPageNumber ?? 1;
 
   const layerEntityCounts = useMemo(() => {
@@ -673,11 +773,11 @@ export function DxfWorkbench() {
 
   const activePdfPage = useMemo(() => {
     return (
-      pdfDocument?.model.pages.find(
+      pdfModel?.pages.find(
         (page) => page.pageNumber === activePdfPageNumber,
       ) ?? null
     );
-  }, [activePdfPageNumber, pdfDocument]);
+  }, [activePdfPageNumber, pdfModel]);
 
   const activeCalibration = activeBase?.calibration ?? createInitialCalibrationState();
   const activeOverlay = useMemo(
@@ -1165,6 +1265,56 @@ export function DxfWorkbench() {
     );
     setActiveRightPanelSection("geometry");
     setCursor(null);
+  }
+
+  function handleResetLocalProject() {
+    if (
+      (bases.length > 0 || sectionPlanLinks.length > 0 || routeProposal) &&
+      !window.confirm(
+        "Borrar el proyecto local guardado y volver al estado inicial?",
+      )
+    ) {
+      return;
+    }
+
+    for (const base of basesRef.current) {
+      cleanupBaseDocument(base);
+    }
+
+    const result = clearPersistedWorkbenchProject();
+
+    setBases([]);
+    setActiveBaseId(null);
+    setNextSectionNumber(1);
+    setSectionPlanLinks([]);
+    setSectionLinkDraft(null);
+    setSectionRegistrationDraft(null);
+    setEquipmentDraft(null);
+    setRouteDraft(null);
+    setRouteIntentDraft(null);
+    setRouteProposal(null);
+    setRouteProposalMode(null);
+    setRouteProposalMarginInput(DEFAULT_ROUTE_PROPOSAL_MARGIN_INPUT);
+    setActiveRightPanelSection("geometry");
+    setHighlightedSectionLinkId(null);
+    setHighlightedRegistrationLinkId(null);
+    setHoveredSectionLinkId(null);
+    setHoveredEquipmentId(null);
+    setEquipmentError(null);
+    setRouteError(null);
+    setCursor(null);
+    setSessionError(null);
+    setPersistenceNotice(
+      result.ok
+        ? {
+            message: "Proyecto local restablecido.",
+            tone: "info",
+          }
+        : {
+            message: `No se pudo borrar el proyecto local. ${result.error}`,
+            tone: "error",
+          },
+    );
   }
 
   function updateActiveBase(
@@ -3838,8 +3988,8 @@ export function DxfWorkbench() {
       ? drawing
         ? `${drawing.entities.length} primitivas - ${geometryPendingCount} pendientes`
         : "Sin DXF"
-      : pdfDocument?.model
-        ? `PDF - ${pdfDocument.model.pageCount} paginas`
+      : pdfModel
+        ? `PDF - ${pdfModel.pageCount} paginas`
         : "Sin PDF";
   const equipmentSummary = planBase
     ? `${supplyCount} alimentacion - ${applianceCount} artefactos - ${pendingDemandCount} pendientes`
@@ -3922,7 +4072,7 @@ export function DxfWorkbench() {
             <PdfDiagnosticsPanel
               activePage={activePdfPage}
               isSectionContent
-              pdf={pdfDocument?.model ?? null}
+              pdf={pdfModel}
             />
           )}
         </div>
@@ -4111,14 +4261,23 @@ export function DxfWorkbench() {
             </p>
           </div>
 
-          <button
-            className="rounded border border-[var(--line)] bg-white px-3 py-2 text-sm font-medium hover:border-[var(--accent)]"
-            disabled={fitDisabled}
-            type="button"
-            onClick={handleFitActiveView}
-          >
-            Ajustar a pantalla
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              className="rounded border border-[var(--line)] bg-white px-3 py-2 text-sm font-medium hover:border-[var(--accent)]"
+              type="button"
+              onClick={handleResetLocalProject}
+            >
+              Restablecer proyecto local
+            </button>
+            <button
+              className="rounded border border-[var(--line)] bg-white px-3 py-2 text-sm font-medium hover:border-[var(--accent)]"
+              disabled={fitDisabled}
+              type="button"
+              onClick={handleFitActiveView}
+            >
+              Ajustar a pantalla
+            </button>
+          </div>
         </div>
       </header>
 
@@ -4163,7 +4322,7 @@ export function DxfWorkbench() {
           ) : (
             <PdfPanel
               activePageNumber={activePdfPageNumber}
-              pdf={pdfDocument?.model ?? null}
+              pdf={pdfModel}
               onPageChange={handlePdfPageChange}
             />
           )}
@@ -4335,6 +4494,15 @@ export function DxfWorkbench() {
           {sessionError ? (
             <div className="m-4 rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
               {sessionError}
+            </div>
+          ) : null}
+          {persistenceNotice ? (
+            <div
+              className={`m-4 rounded border px-4 py-3 text-sm ${persistenceNoticeClassName(
+                persistenceNotice.tone,
+              )}`}
+            >
+              {persistenceNotice.message}
             </div>
           ) : null}
           {activeBase?.error ? (
@@ -4655,6 +4823,7 @@ async function createBaseFromFile(params: {
       ...params,
       drawing,
       pdfDocument: null,
+      pdfModel: null,
       visibleLayers: Object.fromEntries(
         drawing.layers.map((layer) => [layer.name, layer.visible]),
       ),
@@ -4667,6 +4836,7 @@ async function createBaseFromFile(params: {
     ...params,
     drawing: null,
     pdfDocument,
+    pdfModel: pdfDocument.model,
     visibleLayers: {},
   });
 }
@@ -4678,6 +4848,7 @@ function createInitialBase(params: {
   id: string;
   name: string;
   pdfDocument: ImportedPdfDocument | null;
+  pdfModel: PdfDocumentModel | null;
   sourceType: WorkbenchSource;
   type: WorkbenchBaseType;
   visibleLayers: LayerVisibility;
@@ -4691,6 +4862,7 @@ function createInitialBase(params: {
     createdAt: params.createdAt,
     drawing: params.drawing,
     pdfDocument: params.pdfDocument,
+    pdfModel: params.pdfModel,
     visibleLayers: params.visibleLayers,
     error: null,
     semanticViewMode: "original",
@@ -4718,6 +4890,91 @@ function createInitialBase(params: {
       pdfFitNonce: params.sourceType === "pdf" ? 1 : 0,
       pdfView: null,
     },
+  };
+}
+
+function restorePersistedWorkbenchProject(project: PersistedWorkbenchProject): {
+  activeBaseId: string | null;
+  bases: WorkbenchBase[];
+  hasPdfPlaceholders: boolean;
+  routeProposal: AutomaticRouteProposal | null;
+} {
+  const bases = project.bases.map(restorePersistedWorkbenchBase);
+  const baseIds = new Set(bases.map((base) => base.id));
+  const activeBaseId =
+    project.activeBaseId && baseIds.has(project.activeBaseId)
+      ? project.activeBaseId
+      : bases[0]?.id ?? null;
+  const routeProposal =
+    project.routeProposal && baseIds.has(project.routeProposal.baseId)
+      ? project.routeProposal
+      : null;
+
+  return {
+    activeBaseId,
+    bases,
+    hasPdfPlaceholders: bases.some(
+      (base) => base.sourceType === "pdf" && !base.pdfDocument,
+    ),
+    routeProposal,
+  };
+}
+
+function restorePersistedWorkbenchBase(
+  base: PersistedWorkbenchBase,
+): WorkbenchBase {
+  return {
+    id: base.id,
+    type: base.type,
+    name: base.name,
+    sourceType: base.sourceType,
+    originalFileName: base.originalFileName,
+    createdAt: base.createdAt,
+    drawing: base.sourceType === "dxf" ? base.drawing : null,
+    pdfDocument: null,
+    pdfModel: base.sourceType === "pdf" ? base.pdfModel : null,
+    visibleLayers: base.visibleLayers,
+    error:
+      base.sourceType === "pdf"
+        ? "PDF restaurado desde el proyecto local. Vuelva a cargar el archivo si necesita ver la pagina original."
+        : null,
+    semanticViewMode: base.semanticViewMode,
+    selectionMode: "pan",
+    selectedEntityIds: [],
+    semanticInspection: base.semanticInspection,
+    proposals: base.proposals,
+    semanticAssignments: base.semanticAssignments,
+    constraints: base.constraints,
+    constraintDraft: null,
+    constraintToolMode: "none",
+    selectedConstraintId: null,
+    showConstraints: base.showConstraints,
+    equipment: base.equipment,
+    selectedEquipmentId: null,
+    showEquipment: base.showEquipment,
+    routeIntentConnections: base.routeIntentConnections,
+    routeNetwork: base.routeNetwork,
+    showRoute: base.showRoute,
+    calibration: restorePersistedCalibrationState(base.calibration),
+    visual: {
+      activePdfPageNumber: base.visual.activePdfPageNumber,
+      dxfFitNonce: base.sourceType === "dxf" ? 1 : 0,
+      dxfView: null,
+      pdfFitNonce: base.sourceType === "pdf" ? 1 : 0,
+      pdfView: null,
+    },
+  };
+}
+
+function restorePersistedCalibrationState(
+  state: PersistedSourceCalibrationState,
+): SourceCalibrationState {
+  return {
+    toolMode: "idle",
+    calibration: state.calibration,
+    draft: state.draft,
+    measurementPoints: [],
+    error: null,
   };
 }
 
@@ -6337,7 +6594,7 @@ function routeSourceBounds(plan: WorkbenchBase): Bounds | null {
 
   const pageNumber = routeProposalPdfPageNumber(plan);
   const page =
-    plan.pdfDocument?.model.pages.find(
+    (plan.pdfDocument?.model ?? plan.pdfModel)?.pages.find(
       (currentPage) => currentPage.pageNumber === pageNumber,
     ) ?? null;
 
@@ -7121,4 +7378,16 @@ function formatNumber(value: number) {
   return new Intl.NumberFormat("es-AR", {
     maximumFractionDigits: 3,
   }).format(value);
+}
+
+function persistenceNoticeClassName(tone: PersistenceNotice["tone"]) {
+  if (tone === "error") {
+    return "border-red-200 bg-red-50 text-red-800";
+  }
+
+  if (tone === "warning") {
+    return "border-[#ecd5ad] bg-[#fff9ec] text-[var(--warning)]";
+  }
+
+  return "border-[#badbcc] bg-[#f1faf4] text-[#1f6b45]";
 }
