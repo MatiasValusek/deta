@@ -12,7 +12,13 @@ import {
   type PipeSystem,
   type PipeSystemIdentity,
   type PipeSystemResolution,
+  type PipeSystemResolutionStatus,
 } from "@/lib/calculation/pipeSystem";
+import {
+  resolveTechnicalRouteAccessories,
+  type TechnicalRouteAccessoryResolution,
+  type TechnicalRouteAccessorySegmentContext,
+} from "@/lib/calculation/technicalRouteAccessories";
 import {
   applianceNodesAreTerminal,
   buildEquipmentIndex,
@@ -37,6 +43,11 @@ import type {
   RouteSegment,
 } from "@/lib/routing/types";
 
+export type {
+  TechnicalRouteAccessoryContribution,
+  TechnicalRouteAccessoryResolution,
+} from "@/lib/calculation/technicalRouteAccessories";
+
 export type TechnicalCalculationStatus = "valid" | "incomplete" | "invalid";
 
 export type TechnicalCalculationIssue = {
@@ -59,7 +70,8 @@ export type TechnicalCalculationIssue = {
     | "missing_demand"
     | "mixed_demand_units"
     | "pending_equivalent_length"
-    | "pending_diameter_sizing";
+    | "pending_diameter_sizing"
+    | "pending_route_sizing_length";
   equipmentId?: string;
   message: string;
   nodeId?: string;
@@ -110,11 +122,12 @@ export type TechnicalSegmentGoverningRoute = {
 };
 
 export type TechnicalSegmentSizingBasis = {
-  governingRouteEquivalentLengthMeters: null;
+  governingRouteAccessoryEquivalentLengthMeters: number | null;
   governingRoutePhysicalLengthMeters: number | null;
-  reason: string;
-  sizingLengthMeters: null;
-  status: "pending";
+  reasons: string[];
+  routeAccessoryResolutionId: string | null;
+  sizingLengthMeters: number | null;
+  status: PipeSystemResolutionStatus;
 };
 
 export type TechnicalSegmentResult = {
@@ -148,6 +161,7 @@ export type TechnicalCalculationResult = {
   nodeLabels: Record<string, string>;
   pipeSystem: PipeSystemIdentity;
   rootNodeId: string | null;
+  routeAccessoryResolutions: Record<string, TechnicalRouteAccessoryResolution>;
   segments: TechnicalSegmentResult[];
   status: TechnicalCalculationStatus;
   technicalRoutes: TechnicalRoute[];
@@ -192,6 +206,7 @@ export function calculateTechnicalTree(params: {
       nodeLabels: createNodeLabels(params.network, params.equipment, []),
       pipeSystem: pipeSystem.identity,
       rootNodeId: null,
+      routeAccessoryResolutions: {},
       segments: [],
       status: "invalid",
       technicalRoutes: [],
@@ -217,6 +232,7 @@ export function calculateTechnicalTree(params: {
       nodeLabels: createNodeLabels(params.network, params.equipment, []),
       pipeSystem: pipeSystem.identity,
       rootNodeId: null,
+      routeAccessoryResolutions: {},
       segments: [],
       status: "invalid",
       technicalRoutes: [],
@@ -237,6 +253,7 @@ export function calculateTechnicalTree(params: {
       nodeLabels: createNodeLabels(params.network, params.equipment, []),
       pipeSystem: pipeSystem.identity,
       rootNodeId: supplyNode.id,
+      routeAccessoryResolutions: {},
       segments: [],
       status: "invalid",
       technicalRoutes: [],
@@ -293,8 +310,28 @@ export function calculateTechnicalTree(params: {
       ),
     }),
   );
+  const provisionalDiameterBySegmentId = createProvisionalDiameterBySegmentId({
+    pipeContextBySegmentId: params.pipeContextBySegmentId,
+    segments: technicalSegments,
+  });
+  const routeAccessoryResolutions = createRouteAccessoryResolutions({
+    diameterBySegmentId: provisionalDiameterBySegmentId,
+    pipeContextBySegmentId: params.pipeContextBySegmentId,
+    pipeSystem,
+    routeSegmentContextBySegmentId:
+      createRouteAccessorySegmentContextBySegmentId(technicalSegments),
+    routes: technicalRoutes,
+    segments: params.network.segments,
+  });
+  const technicalSegmentsWithRouteSizing = technicalSegments.map((segment) => ({
+    ...segment,
+    routeSizingBasis: createRouteSizingBasis({
+      governingRouteResolution: segment.governingRouteResolution,
+      routeAccessoryResolutions,
+    }),
+  }));
 
-  for (const segment of technicalSegments) {
+  for (const segment of technicalSegmentsWithRouteSizing) {
     for (const equipmentId of segment.missingDemandEquipmentIds) {
       incompleteIssues.push({
         code: "missing_demand",
@@ -324,6 +361,10 @@ export function calculateTechnicalTree(params: {
     if (segment.dimensioningResolution.status !== "resolved") {
       incompleteIssues.push(createDimensioningIssue(segment));
     }
+
+    if (segment.routeSizingBasis.status !== "resolved") {
+      incompleteIssues.push(createRouteSizingIssue(segment));
+    }
   }
 
   if (params.scaleMetersPerSourceUnit === null) {
@@ -333,7 +374,7 @@ export function calculateTechnicalTree(params: {
     });
   }
 
-  const totals = createTotals(technicalSegments, params.equipment);
+  const totals = createTotals(technicalSegmentsWithRouteSizing, params.equipment);
   const status: TechnicalCalculationStatus =
     incompleteIssues.length > 0 ? "incomplete" : "valid";
 
@@ -343,7 +384,8 @@ export function calculateTechnicalTree(params: {
     nodeLabels,
     pipeSystem: pipeSystem.identity,
     rootNodeId: supplyNode.id,
-    segments: technicalSegments,
+    routeAccessoryResolutions,
+    segments: technicalSegmentsWithRouteSizing,
     status,
     technicalRoutes,
     totals,
@@ -847,27 +889,139 @@ function createMissingSegmentRouteResolution(
   };
 }
 
-function createRouteSizingBasis(
+function createProvisionalDiameterBySegmentId(params: {
+  pipeContextBySegmentId:
+    | Record<string, PipeSegmentPipeContext | undefined>
+    | undefined;
+  segments: TechnicalSegmentResult[];
+}) {
+  const map = new Map<string, PipeDiameterReference>();
+
+  for (const segment of params.segments) {
+    const explicitDiameter =
+      params.pipeContextBySegmentId?.[segment.segmentId]?.diameter ?? null;
+
+    if (explicitDiameter) {
+      map.set(segment.segmentId, explicitDiameter);
+      continue;
+    }
+
+    if (segment.dimensioningResolution.status === "resolved") {
+      map.set(
+        segment.segmentId,
+        segment.dimensioningResolution.value.calculatedDiameter,
+      );
+    }
+  }
+
+  return map;
+}
+
+function createRouteAccessorySegmentContextBySegmentId(
+  segments: TechnicalSegmentResult[],
+) {
+  const map = new Map<string, TechnicalRouteAccessorySegmentContext>();
+
+  for (const segment of segments) {
+    map.set(segment.segmentId, {
+      accumulatedFlow: segment.accumulatedFlow,
+      accumulatedFlowUnit: segment.accumulatedFlowUnit,
+      drawingLength: segment.drawingLength,
+      physicalLengthMeters: segment.segmentPhysicalLengthMeters,
+    });
+  }
+
+  return map;
+}
+
+function createRouteAccessoryResolutions(params: {
+  diameterBySegmentId: Map<string, PipeDiameterReference>;
+  pipeContextBySegmentId:
+    | Record<string, PipeSegmentPipeContext | undefined>
+    | undefined;
+  pipeSystem: PipeSystem;
+  routeSegmentContextBySegmentId: Map<
+    string,
+    TechnicalRouteAccessorySegmentContext
+  >;
+  routes: TechnicalRoute[];
+  segments: RouteSegment[];
+}) {
+  return Object.fromEntries(
+    params.routes.map((route) => [
+      route.id,
+      resolveTechnicalRouteAccessories({
+        diameterBySegmentId: params.diameterBySegmentId,
+        pipeContextBySegmentId: params.pipeContextBySegmentId,
+        pipeSystem: params.pipeSystem,
+        route,
+        segmentContextBySegmentId: params.routeSegmentContextBySegmentId,
+        segments: params.segments,
+      }),
+    ]),
+  );
+}
+
+function createPendingRouteSizingBasis(
   governingRouteResolution: PipeSystemResolution<TechnicalSegmentGoverningRoute>,
 ): TechnicalSegmentSizingBasis {
   if (governingRouteResolution.status !== "resolved") {
     return {
-      governingRouteEquivalentLengthMeters: null,
+      governingRouteAccessoryEquivalentLengthMeters: null,
       governingRoutePhysicalLengthMeters: null,
-      reason: governingRouteResolution.reason,
+      reasons: [governingRouteResolution.reason],
+      routeAccessoryResolutionId: null,
       sizingLengthMeters: null,
-      status: "pending",
+      status: governingRouteResolution.status,
     };
   }
 
   return {
-    governingRouteEquivalentLengthMeters: null,
+    governingRouteAccessoryEquivalentLengthMeters: null,
     governingRoutePhysicalLengthMeters:
       governingRouteResolution.value.physicalLengthMeters,
-    reason:
+    reasons: [
       "Falta acumular accesorios por recorrido antes del dimensionado definitivo.",
+    ],
+    routeAccessoryResolutionId: null,
     sizingLengthMeters: null,
-    status: "pending",
+    status: "unresolved",
+  };
+}
+
+function createRouteSizingBasis(params: {
+  governingRouteResolution: PipeSystemResolution<TechnicalSegmentGoverningRoute>;
+  routeAccessoryResolutions: Record<string, TechnicalRouteAccessoryResolution>;
+}): TechnicalSegmentSizingBasis {
+  if (params.governingRouteResolution.status !== "resolved") {
+    return createPendingRouteSizingBasis(params.governingRouteResolution);
+  }
+
+  const routeId = params.governingRouteResolution.value.routeId;
+  const routeAccessoryResolution =
+    params.routeAccessoryResolutions[routeId] ?? null;
+
+  if (!routeAccessoryResolution) {
+    return {
+      governingRouteAccessoryEquivalentLengthMeters: null,
+      governingRoutePhysicalLengthMeters:
+        params.governingRouteResolution.value.physicalLengthMeters,
+      reasons: ["No se encontro la resolucion de accesorios del recorrido."],
+      routeAccessoryResolutionId: routeId,
+      sizingLengthMeters: null,
+      status: "unresolved",
+    };
+  }
+
+  return {
+    governingRouteAccessoryEquivalentLengthMeters:
+      routeAccessoryResolution.governingRouteAccessoryEquivalentLengthMeters,
+    governingRoutePhysicalLengthMeters:
+      params.governingRouteResolution.value.physicalLengthMeters,
+    reasons: routeAccessoryResolution.reasons,
+    routeAccessoryResolutionId: routeAccessoryResolution.routeId,
+    sizingLengthMeters: routeAccessoryResolution.sizingLengthMeters,
+    status: routeAccessoryResolution.status,
   };
 }
 
@@ -967,7 +1121,9 @@ function createTechnicalSegmentResult(params: {
     missingDemandEquipmentIds: flow.missingEquipmentIds,
     parentSegmentId: params.oriented.parentSegmentId,
     physicalLengthMeters,
-    routeSizingBasis: createRouteSizingBasis(params.governingRouteResolution),
+    routeSizingBasis: createPendingRouteSizingBasis(
+      params.governingRouteResolution,
+    ),
     segmentId: params.oriented.segment.id,
     segmentPhysicalLengthMeters: physicalLengthMeters,
     terminalRouteIds: params.terminalRouteIds,
@@ -1599,6 +1755,23 @@ function createDimensioningIssue(
         : resolution.status === "resolved"
           ? "Dimensionado pendiente."
           : resolution.reason,
+    segmentId: segment.segmentId,
+  };
+}
+
+function createRouteSizingIssue(
+  segment: TechnicalSegmentResult,
+): TechnicalCalculationIssue {
+  const reason =
+    segment.routeSizingBasis.reasons[0] ??
+    "Longitud de dimensionado por recorrido pendiente.";
+
+  return {
+    code: "pending_route_sizing_length",
+    message:
+      segment.routeSizingBasis.status === "unsupported"
+        ? `Recorrido no soportado: ${reason}`
+        : `Recorrido pendiente: ${reason}`,
     segmentId: segment.segmentId,
   };
 }

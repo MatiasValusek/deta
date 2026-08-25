@@ -11,6 +11,8 @@ import {
   routeAccessoryTypeLabel,
   technicalCalculationStatusLabel,
   type TechnicalCalculationResult,
+  type TechnicalRouteAccessoryContribution,
+  type TechnicalRouteAccessoryResolution,
   type TechnicalSegmentAccessoryResult,
   type TechnicalSegmentResult,
 } from "@/lib/calculation/technicalTree";
@@ -126,7 +128,7 @@ function CalculationSummary({ result }: { result: TechnicalCalculationResult }) 
       <dd className="text-right">{formatPipeSystemLabel(result)}</dd>
       <dt>Longitud fisica</dt>
       <dd className="text-right">{physicalLength}</dd>
-      <dt>Equiv. accesorios</dt>
+      <dt>Equiv. accesorios tramo</dt>
       <dd className="text-right">{equivalentLength}</dd>
       <dt>Long. calculo prov.</dt>
       <dd className="text-right">{calculationLength}</dd>
@@ -238,7 +240,7 @@ function SegmentDetail({
         <dd className="text-right">
           {formatCalculationMeters(segment.segmentPhysicalLengthMeters)}
         </dd>
-        <dt>Equiv. accesorios</dt>
+        <dt>Equiv. accesorios tramo</dt>
         <dd className="text-right">
           {formatCalculationMeters(segment.accessoryEquivalentLengthMeters, "Pendiente")}
         </dd>
@@ -314,6 +316,8 @@ function RouteBasisDetail({
 
   const route = resolution.value;
   const terminal = equipmentById.get(route.terminalEquipmentId);
+  const routeAccessoryResolution =
+    result.routeAccessoryResolutions[route.routeId] ?? null;
 
   return (
     <div className="mt-2 rounded border border-[var(--line)] px-2 py-2">
@@ -327,6 +331,14 @@ function RouteBasisDetail({
         <dd className="text-right">
           {formatCalculationMeters(route.physicalLengthMeters)}
         </dd>
+        <dt>Equiv. accesorios recorrido</dt>
+        <dd className="text-right">
+          {formatRouteAccessoryEquivalentLength(routeAccessoryResolution)}
+        </dd>
+        <dt>Longitud dimensionado</dt>
+        <dd className="text-right">
+          {formatRouteSizingLength(routeAccessoryResolution)}
+        </dd>
       </dl>
       <div className="mt-1">
         <div className="text-[var(--muted)]">Recorrido de calculo</div>
@@ -334,6 +346,10 @@ function RouteBasisDetail({
           {formatTechnicalRoutePath(route.nodeIds, result.nodeLabels)}
         </div>
       </div>
+      <RouteAccessoryContributionList
+        resolution={routeAccessoryResolution}
+        result={result}
+      />
       {route.tiedRouteIds.length > 1 ? (
         <div className="mt-1 text-[10px] text-[var(--muted)]">
           Empate resuelto por id de terminal.
@@ -400,6 +416,92 @@ function SegmentDimensioning({
   );
 }
 
+function RouteAccessoryContributionList({
+  resolution,
+  result,
+}: {
+  resolution: TechnicalRouteAccessoryResolution | null;
+  result: TechnicalCalculationResult;
+}) {
+  if (!resolution) {
+    return (
+      <div className="mt-2 text-[var(--warning)]">
+        Accesorios del recorrido pendientes.
+      </div>
+    );
+  }
+
+  if (resolution.contributions.length === 0) {
+    return (
+      <div className="mt-2 text-[var(--muted)]">
+        Sin accesorios en el recorrido.
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-2">
+      <div className="font-semibold text-[var(--muted)]">
+        Accesorios del recorrido
+      </div>
+      <ul className="mt-1 space-y-1">
+        {resolution.contributions.map((contribution, index) => (
+          <RouteAccessoryContributionItem
+            contribution={contribution}
+            key={`${contribution.ownerSegmentId}:${contribution.accessoryId}:${index}`}
+            result={result}
+          />
+        ))}
+      </ul>
+      {resolution.status !== "resolved" && resolution.reasons.length > 0 ? (
+        <div className="mt-1 text-[var(--warning)]">
+          {resolution.reasons.join(" ")}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function RouteAccessoryContributionItem({
+  contribution,
+  result,
+}: {
+  contribution: TechnicalRouteAccessoryContribution;
+  result: TechnicalCalculationResult;
+}) {
+  const ownerSegment = result.segments.find(
+    (segment) => segment.segmentId === contribution.ownerSegmentId,
+  );
+
+  return (
+    <li>
+      <div className="break-words">
+        <span className="font-mono">
+          {ownerSegment
+            ? segmentLabel(ownerSegment, result.nodeLabels)
+            : contribution.ownerSegmentId}
+        </span>
+        {" - "}
+        {formatContributionDiameter(contribution)}
+        {" - "}
+        {formatContributionName(contribution)}
+        {" x "}
+        {formatAccessoryQuantity(contribution.quantity)}
+        {" - "}
+        {formatCalculationMeters(
+          contribution.totalEquivalentLengthMeters,
+          "Pendiente",
+        )}
+      </div>
+      {contribution.status !== "resolved" && contribution.reason ? (
+        <div className="mt-0.5 text-[10px] text-[var(--warning)]">
+          {contribution.reason}
+        </div>
+      ) : null}
+    </li>
+  );
+}
+
 function AccessoryList({
   accessories,
 }: {
@@ -415,7 +517,7 @@ function AccessoryList({
 
   return (
     <div className="mt-2">
-      <div className="font-semibold text-[var(--muted)]">Accesorios</div>
+      <div className="font-semibold text-[var(--muted)]">Accesorios del tramo</div>
       <dl className="mt-1 grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 gap-y-1">
         {summaries.map((summary) => (
           <AccessorySummaryRow key={summary.type} summary={summary} />
@@ -563,11 +665,59 @@ function formatGoverningRouteLength(segment: TechnicalSegmentResult) {
   return "Long. inicial pendiente";
 }
 
+function formatRouteAccessoryEquivalentLength(
+  resolution: TechnicalRouteAccessoryResolution | null,
+) {
+  return resolution
+    ? formatCalculationMeters(
+        resolution.governingRouteAccessoryEquivalentLengthMeters,
+        "Pendiente",
+      )
+    : "Pendiente";
+}
+
+function formatRouteSizingLength(
+  resolution: TechnicalRouteAccessoryResolution | null,
+) {
+  return resolution
+    ? formatCalculationMeters(resolution.sizingLengthMeters, "Pendiente")
+    : "Pendiente";
+}
+
 function formatTechnicalRoutePath(
   nodeIds: string[],
   labels: Record<string, string>,
 ) {
   return nodeIds.map((nodeId) => labels[nodeId] ?? nodeId).join(" -> ");
+}
+
+function formatContributionDiameter(
+  contribution: TechnicalRouteAccessoryContribution,
+) {
+  if (contribution.equivalentLengthSource === "manual") {
+    return contribution.diameter
+      ? formatCompactDiameterReference(contribution.diameter)
+      : "Manual";
+  }
+
+  return contribution.diameter
+    ? formatCompactDiameterReference(contribution.diameter)
+    : "Diam. pendiente";
+}
+
+function formatContributionName(
+  contribution: TechnicalRouteAccessoryContribution,
+) {
+  const tableLabel = recordStringValue(
+    contribution.equivalentLengthResolution.data,
+    "tableLabel",
+  );
+
+  return (
+    tableLabel ??
+    contribution.catalogCode ??
+    routeAccessoryTypeLabel(contribution.type)
+  );
 }
 
 function formatSegmentDiameter(segment: TechnicalSegmentResult) {
@@ -603,6 +753,18 @@ function formatDiameterReference(
   return diameter.label;
 }
 
+function formatCompactDiameterReference(
+  diameter: TechnicalRouteAccessoryContribution["diameter"],
+) {
+  if (!diameter) {
+    return "Diam. pendiente";
+  }
+
+  const external = formatOptionalNumber(diameter.externalDiameterMillimeters);
+
+  return external ? `DE ${external} mm` : diameter.label;
+}
+
 function formatRecordMeters(data: Record<string, unknown>, key: string) {
   const value = finiteRecordNumber(data, key);
 
@@ -618,8 +780,8 @@ function formatRecordFlow(data: Record<string, unknown>, key: string) {
 }
 
 function formatRecordSource(data: Record<string, unknown>) {
-  const sourceTable = stringRecordValue(data, "sourceTable");
-  const sourceFile = stringRecordValue(data, "sourceFile");
+  const sourceTable = recordStringValue(data, "sourceTable");
+  const sourceFile = recordStringValue(data, "sourceFile");
 
   return [sourceTable, sourceFile].filter(Boolean).join(" - ") || "Pendiente";
 }
@@ -630,8 +792,11 @@ function finiteRecordNumber(data: Record<string, unknown>, key: string) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
-function stringRecordValue(data: Record<string, unknown>, key: string) {
-  const value = data[key];
+function recordStringValue(
+  data: Record<string, unknown> | undefined,
+  key: string,
+) {
+  const value = data?.[key];
 
   return typeof value === "string" ? value : null;
 }
