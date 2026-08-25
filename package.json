@@ -1,0 +1,25 @@
+{
+  "name": "deta",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Prueba tecnica DXF de deta",
+  "scripts": {
+    "dev": "next dev",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "dxf-parser": "^1.1.2",
+    "next": "^16.3.2",
+    "pdfjs-dist": "^6.2.108",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/node": "^26.2.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.5",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2"
+  }
+}
