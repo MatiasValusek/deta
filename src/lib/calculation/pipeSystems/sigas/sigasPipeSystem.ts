@@ -1,6 +1,8 @@
 import type {
   PipeAccessoryEquivalentLengthContext,
   PipeDiameterReference,
+  PipeDiameterTransitionEquivalentLengthContext,
+  PipeDiameterTransitionEquivalentLengthResult,
   PipeSegmentSizingContext,
   PipeSegmentSizingResult,
   PipeSystem,
@@ -47,6 +49,9 @@ export const SIGAS_PIPE_SYSTEM: PipeSystem = {
       catalogFamilyId: context.accessory.catalogFamilyId,
       diameter: context.pipe?.diameter,
     }),
+  resolveDiameterTransitionEquivalentLength: (
+    context: PipeDiameterTransitionEquivalentLengthContext,
+  ) => resolveSigasDiameterTransitionEquivalentLength(context),
   sizeSegment: (context: PipeSegmentSizingContext) => {
     if (context.calculationLengthMeters === null) {
       return {
@@ -269,6 +274,114 @@ export function resolveSigasAccessoryEquivalentLength(params: {
   };
 }
 
+export function resolveSigasDiameterTransitionEquivalentLength(
+  context: PipeDiameterTransitionEquivalentLengthContext,
+): PipeSystemResolution<PipeDiameterTransitionEquivalentLengthResult> {
+  const upstreamDiameter = resolveSigasDiameter(context.upstreamDiameter);
+  const downstreamDiameter = resolveSigasDiameter(context.downstreamDiameter);
+
+  if (!upstreamDiameter || !downstreamDiameter) {
+    return {
+      data: {
+        downstreamDiameterId: context.downstreamDiameter.id,
+        sourceFile: SIGAS_TABLES_SOURCE.fileName,
+        sourceTable: SIGAS_TABLES_SOURCE.accessoryEquivalentLengthTable,
+        upstreamDiameterId: context.upstreamDiameter.id,
+      },
+      reason:
+        "Falta un diametro SIGAS reconocido para resolver la transicion.",
+      status: "unresolved",
+    };
+  }
+
+  const catalogFamilyId = context.transition.catalogFamilyId;
+
+  if (!catalogFamilyId) {
+    return {
+      data: {
+        transitionId: context.transition.id,
+      },
+      reason: "Falta familia SIGAS confirmada para la transicion.",
+      status: "unresolved",
+    };
+  }
+
+  const rows = findAccessoryRowsForCatalogCode(catalogFamilyId);
+
+  if (rows.length === 0) {
+    return {
+      data: {
+        catalogFamilyId,
+        sourceFile: SIGAS_TABLES_SOURCE.fileName,
+        sourceTable: SIGAS_TABLES_SOURCE.accessoryEquivalentLengthTable,
+      },
+      reason: "La familia SIGAS confirmada no existe en la Tabla No 3.",
+      status: "unsupported",
+    };
+  }
+
+  const pair = normalizeTransitionPair({
+    downstreamDiameter,
+    upstreamDiameter,
+  });
+  const matchingRows = rows.filter((row) => {
+    const rowPair = transitionPairForRow(row);
+
+    return (
+      rowPair !== null &&
+      sameNumber(
+        rowPair.largerExternalDiameterMillimeters,
+        pair.largerExternalDiameterMillimeters,
+      ) &&
+      sameNumber(
+        rowPair.smallerExternalDiameterMillimeters,
+        pair.smallerExternalDiameterMillimeters,
+      )
+    );
+  });
+
+  if (matchingRows.length === 0) {
+    return {
+      data: {
+        catalogFamilyId,
+        downstreamDiameterId: downstreamDiameter.id,
+        largerExternalDiameterMillimeters:
+          pair.largerExternalDiameterMillimeters,
+        smallerExternalDiameterMillimeters:
+          pair.smallerExternalDiameterMillimeters,
+        sourceFile: SIGAS_TABLES_SOURCE.fileName,
+        sourceTable: SIGAS_TABLES_SOURCE.accessoryEquivalentLengthTable,
+        upstreamDiameterId: upstreamDiameter.id,
+      },
+      reason:
+        "La familia SIGAS confirmada no posee variante compatible con el par de diametros actual.",
+      status: "unsupported",
+    };
+  }
+
+  if (matchingRows.length > 1) {
+    return {
+      data: {
+        catalogFamilyId,
+        matchingRows: matchingRows.map((row) => row.code),
+        sourceFile: SIGAS_TABLES_SOURCE.fileName,
+        sourceTable: SIGAS_TABLES_SOURCE.accessoryEquivalentLengthTable,
+      },
+      reason:
+        "La familia SIGAS confirmada coincide con mas de una variante para el par de diametros.",
+      status: "unsupported",
+    };
+  }
+
+  return createResolvedDiameterTransition({
+    catalogFamilyId,
+    downstreamDiameter: toPipeDiameterReference(downstreamDiameter),
+    pair,
+    row: matchingRows[0] as SigasAccessoryEquivalentLengthRow,
+    upstreamDiameter: toPipeDiameterReference(upstreamDiameter),
+  });
+}
+
 export function getSigasNaturalGasCapacity(
   lengthMeters: number,
   diameterId: string,
@@ -344,6 +457,18 @@ function accessoryFamilyCode(row: SigasAccessoryEquivalentLengthRow) {
     return "codo-90-rosca-hembra";
   }
 
+  if (row.label.startsWith("Cupla Reduccion HH ")) {
+    return "cupla-reduccion-hh";
+  }
+
+  if (row.label.startsWith("Buje Reduccion MH ")) {
+    return "buje-reduccion-mh";
+  }
+
+  if (row.label.startsWith("Reductor Anular ")) {
+    return "reductor-anular";
+  }
+
   if (row.label.startsWith("Te Normal ") && row.label.includes("flujo a 90")) {
     return "te-normal-flujo-a-90";
   }
@@ -353,6 +478,20 @@ function accessoryFamilyCode(row: SigasAccessoryEquivalentLengthRow) {
     row.label.includes("flujo a traves")
   ) {
     return "te-normal-flujo-a-traves";
+  }
+
+  if (
+    row.label.startsWith("Te Reduc. Central ") &&
+    row.label.includes("flujo a 90")
+  ) {
+    return "te-reduc-central-flujo-a-90";
+  }
+
+  if (
+    row.label.startsWith("Te Reduc. Central ") &&
+    row.label.includes("flujo a traves")
+  ) {
+    return "te-reduc-central-flujo-a-traves";
   }
 
   if (row.label.startsWith("Llave Esferica ")) {
@@ -412,6 +551,56 @@ function createAccessoryData(
   };
 }
 
+function createResolvedDiameterTransition(params: {
+  catalogFamilyId: string;
+  downstreamDiameter: PipeDiameterReference;
+  pair: {
+    largerExternalDiameterMillimeters: number;
+    smallerExternalDiameterMillimeters: number;
+  };
+  row: SigasAccessoryEquivalentLengthRow;
+  upstreamDiameter: PipeDiameterReference;
+}): PipeSystemResolution<PipeDiameterTransitionEquivalentLengthResult> {
+  return {
+    data: {
+      catalogCode: params.row.code,
+      catalogFamilyId: params.catalogFamilyId,
+      downstreamDiameterId: params.downstreamDiameter.id,
+      equivalentDiameterCount: params.row.equivalentDiameterCount,
+      equivalentLengthMeters: params.row.equivalentLengthMeters,
+      externalDiameterMeters: params.row.externalDiameterMeters,
+      sourceFile: SIGAS_TABLES_SOURCE.fileName,
+      sourcePage: params.row.sourcePage,
+      sourceTable: SIGAS_TABLES_SOURCE.accessoryEquivalentLengthTable,
+      tableLabel: params.row.label,
+      upstreamDiameterId: params.upstreamDiameter.id,
+    },
+    explanation:
+      `Longitud equivalente SIGAS ${params.row.equivalentLengthMeters} m para ${params.row.label}.`,
+    status: "resolved",
+    value: {
+      catalogCode: params.row.code,
+      catalogFamilyId: params.catalogFamilyId,
+      downstreamDiameter: params.downstreamDiameter,
+      equivalentLengthMeters: params.row.equivalentLengthMeters,
+      source: {
+        fileName: SIGAS_TABLES_SOURCE.fileName,
+        page: params.row.sourcePage,
+        table: SIGAS_TABLES_SOURCE.accessoryEquivalentLengthTable,
+      },
+      upstreamDiameter: params.upstreamDiameter,
+      variant: {
+        equivalentDiameterCount: params.row.equivalentDiameterCount,
+        largerExternalDiameterMillimeters:
+          params.pair.largerExternalDiameterMillimeters,
+        label: params.row.label,
+        smallerExternalDiameterMillimeters:
+          params.pair.smallerExternalDiameterMillimeters,
+      },
+    },
+  };
+}
+
 function accessoryRowMatchesDiameter(
   row: SigasAccessoryEquivalentLengthRow,
   diameter: SigasDiameter,
@@ -420,6 +609,42 @@ function accessoryRowMatchesDiameter(
     row.externalDiameterMeters,
     diameter.externalDiameterMillimeters / 1000,
   );
+}
+
+function normalizeTransitionPair(params: {
+  downstreamDiameter: SigasDiameter;
+  upstreamDiameter: SigasDiameter;
+}) {
+  return {
+    largerExternalDiameterMillimeters: Math.max(
+      params.upstreamDiameter.externalDiameterMillimeters,
+      params.downstreamDiameter.externalDiameterMillimeters,
+    ),
+    smallerExternalDiameterMillimeters: Math.min(
+      params.upstreamDiameter.externalDiameterMillimeters,
+      params.downstreamDiameter.externalDiameterMillimeters,
+    ),
+  };
+}
+
+function transitionPairForRow(row: SigasAccessoryEquivalentLengthRow) {
+  const match = row.label.match(/(\d{2,3})\s*(?:a|x|-)\s*(\d{2,3})/i);
+
+  if (!match) {
+    return null;
+  }
+
+  const first = Number(match[1]);
+  const second = Number(match[2]);
+
+  if (!Number.isFinite(first) || !Number.isFinite(second)) {
+    return null;
+  }
+
+  return {
+    largerExternalDiameterMillimeters: Math.max(first, second),
+    smallerExternalDiameterMillimeters: Math.min(first, second),
+  };
 }
 
 function resolveSigasDiameter(reference?: PipeDiameterReference) {

@@ -57,6 +57,37 @@ export type PipeAccessoryEquivalentLengthContext = {
   };
 };
 
+export type PipeDiameterTransitionEquivalentLengthContext = {
+  downstreamDiameter: PipeDiameterReference;
+  transition: {
+    catalogFamilyId?: string;
+    id: string;
+    kind: string;
+    nodeId: string;
+  };
+  upstreamDiameter: PipeDiameterReference;
+  junction?: Record<string, unknown>;
+};
+
+export type PipeDiameterTransitionEquivalentLengthResult = {
+  catalogCode: string;
+  catalogFamilyId: string;
+  downstreamDiameter: PipeDiameterReference;
+  equivalentLengthMeters: number;
+  source: {
+    fileName?: string;
+    page?: number;
+    table?: string;
+  };
+  upstreamDiameter: PipeDiameterReference;
+  variant: {
+    equivalentDiameterCount?: number;
+    largerExternalDiameterMillimeters: number;
+    label: string;
+    smallerExternalDiameterMillimeters: number;
+  };
+};
+
 export type PipeAvailableDiametersContext = {
   pipe?: PipeSegmentPipeContext;
 };
@@ -85,6 +116,9 @@ export type PipeSystem = {
   resolveAccessoryEquivalentLength(
     context: PipeAccessoryEquivalentLengthContext,
   ): PipeSystemResolution<number>;
+  resolveDiameterTransitionEquivalentLength(
+    context: PipeDiameterTransitionEquivalentLengthContext,
+  ): PipeSystemResolution<PipeDiameterTransitionEquivalentLengthResult>;
   sizeSegment(
     context: PipeSegmentSizingContext,
   ): PipeSystemResolution<PipeSegmentSizingResult>;
@@ -102,6 +136,11 @@ export const UNCONFIGURED_PIPE_SYSTEM: PipeSystem = {
   resolveAccessoryEquivalentLength: () => ({
     reason:
       "No hay un sistema de canerias configurado para resolver la longitud equivalente.",
+    status: "unresolved",
+  }),
+  resolveDiameterTransitionEquivalentLength: () => ({
+    reason:
+      "No hay un sistema de canerias configurado para resolver transiciones de diametro.",
     status: "unresolved",
   }),
   sizeSegment: () => ({

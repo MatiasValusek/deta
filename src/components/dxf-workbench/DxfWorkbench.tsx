@@ -41,6 +41,10 @@ import {
   formatTechnicalFlow,
   technicalCalculationStatusLabel,
 } from "@/lib/calculation/technicalTree";
+import {
+  resolveTechnicalRouteTransitions,
+  type TechnicalRouteTransitionResolution,
+} from "@/lib/calculation/technicalRouteTransitions";
 import { SIGAS_PIPE_SYSTEM } from "@/lib/calculation/pipeSystems/sigas";
 import {
   getSigasAccessoryCatalogCandidates,
@@ -970,6 +974,30 @@ export function DxfWorkbench() {
         : proposal;
     });
   }, [diameterTransitionProposalReviews, rawDiameterTransitionProposals]);
+  const routeTransitionResolutions = useMemo(() => {
+    if (!technicalCalculationResult) {
+      return {};
+    }
+
+    return Object.fromEntries(
+      technicalCalculationResult.technicalRoutes.map((route) => [
+        route.id,
+        resolveTechnicalRouteTransitions({
+          diameterBySegmentId: finalDiameterBySegmentId,
+          governingRouteAccessoryEquivalentLengthMeters:
+            technicalCalculationResult.routeAccessoryResolutions[route.id]
+              ?.governingRouteAccessoryEquivalentLengthMeters ?? null,
+          pipeSystem: SIGAS_PIPE_SYSTEM,
+          route,
+          transitions: diameterTransitionProposals,
+        }),
+      ]),
+    ) as Record<string, TechnicalRouteTransitionResolution>;
+  }, [
+    diameterTransitionProposals,
+    finalDiameterBySegmentId,
+    technicalCalculationResult,
+  ]);
 
   useEffect(() => {
     if (!planBase) {
@@ -4622,6 +4650,7 @@ export function DxfWorkbench() {
           isPlanActive={activeBase?.type === "plan"}
           planReady={Boolean(planBase)}
           result={technicalCalculationResult}
+          routeTransitionResolutions={routeTransitionResolutions}
           onConfirmAccessoryProposal={handleConfirmAccessoryProposal}
           onConfirmDiameterTransition={handleConfirmDiameterTransition}
           onGoToPlan={handleGoToPlanForRoute}

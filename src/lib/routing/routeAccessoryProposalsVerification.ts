@@ -468,6 +468,10 @@ function testPipeSystem(): PipeSystem {
             reason: "Accesorio de prueba no soportado.",
             status: "unsupported",
           },
+    resolveDiameterTransitionEquivalentLength: () => ({
+      reason: "Transiciones fuera de la verificacion 09A.",
+      status: "unresolved",
+    }),
     sizeSegment: () => ({
       explanation: "Diametro de prueba.",
       status: "resolved",

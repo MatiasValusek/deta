@@ -2,6 +2,7 @@ export {
   getSigasAccessoryEquivalentLengthRow,
   getSigasNaturalGasCapacity,
   lookupSigasNaturalGasDiameter,
+  resolveSigasDiameterTransitionEquivalentLength,
   resolveSigasAccessoryEquivalentLength,
   SIGAS_PIPE_SYSTEM,
 } from "./sigasPipeSystem";

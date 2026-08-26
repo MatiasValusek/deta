@@ -750,6 +750,10 @@ function recalculationPipeSystem(): PipeSystem {
         value: context.pipe?.diameter?.id === "test-20" ? 20 : 20,
       };
     },
+    resolveDiameterTransitionEquivalentLength: () => ({
+      reason: "Transiciones fuera de la verificacion 09B.",
+      status: "unresolved",
+    }),
     sizeSegment: (context): PipeSystemResolution<PipeSegmentSizingResult> => {
       if (context.calculationLengthMeters === null) {
         return {

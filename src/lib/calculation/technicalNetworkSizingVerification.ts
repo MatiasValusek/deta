@@ -697,6 +697,10 @@ function createTestPipeSystem(options: TestPipeSystemOptions = {}): PipeSystem {
     resolveAccessoryEquivalentLength: (
       context: PipeAccessoryEquivalentLengthContext,
     ) => resolveTestAccessoryEquivalentLength(context, options),
+    resolveDiameterTransitionEquivalentLength: () => ({
+      reason: "Transiciones fuera del solver 08C2C.",
+      status: "unresolved",
+    }),
     sizeSegment: (context: PipeSegmentSizingContext) =>
       sizeTestSegment(context, thresholds, options.maxLengthMeters),
   };

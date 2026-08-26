@@ -28,6 +28,10 @@ import type {
   DiameterTransitionProposal,
   DiameterTransitionTechnicalReview,
 } from "@/lib/calculation/diameterTransitionProposals";
+import type {
+  TechnicalRouteTransitionContribution,
+  TechnicalRouteTransitionResolution,
+} from "@/lib/calculation/technicalRouteTransitions";
 
 type CalculationPanelProps = {
   accessoryProposals: AccessoryProposal[];
@@ -39,6 +43,7 @@ type CalculationPanelProps = {
   isPlanActive: boolean;
   planReady: boolean;
   result: TechnicalCalculationResult | null;
+  routeTransitionResolutions: Record<string, TechnicalRouteTransitionResolution>;
   onConfirmAccessoryProposal: (proposalId: string, candidateId: string) => void;
   onConfirmDiameterTransition: (transitionId: string, candidateId: string) => void;
   onGoToPlan: () => void;
@@ -56,6 +61,7 @@ export function CalculationPanel({
   isPlanActive,
   planReady,
   result,
+  routeTransitionResolutions,
   onConfirmAccessoryProposal,
   onConfirmDiameterTransition,
   onGoToPlan,
@@ -119,6 +125,7 @@ export function CalculationPanel({
           <DiameterTransitionProposalList
             nodeLabels={result.nodeLabels}
             proposals={diameterTransitionProposals}
+            routeTransitionResolutions={routeTransitionResolutions}
             reviews={diameterTransitionReviews}
             onConfirm={onConfirmDiameterTransition}
             onReject={onRejectDiameterTransition}
@@ -132,6 +139,7 @@ export function CalculationPanel({
             <SegmentDetail
               equipment={equipment}
               result={result}
+              routeTransitionResolutions={routeTransitionResolutions}
               segment={selectedSegment}
             />
           ) : null}
@@ -254,12 +262,14 @@ function AccessoryProposalList({
 function DiameterTransitionProposalList({
   nodeLabels,
   proposals,
+  routeTransitionResolutions,
   reviews,
   onConfirm,
   onReject,
 }: {
   nodeLabels: Record<string, string>;
   proposals: DiameterTransitionProposal[];
+  routeTransitionResolutions: Record<string, TechnicalRouteTransitionResolution>;
   reviews: DiameterTransitionTechnicalReview[];
   onConfirm: (transitionId: string, candidateId: string) => void;
   onReject: (transitionId: string) => void;
@@ -334,6 +344,14 @@ function DiameterTransitionProposalList({
                         {review.reason}
                       </div>
                     ) : null}
+                    <DiameterTransitionPreview
+                      contribution={previewContributionForTransition(
+                        proposal.id,
+                        routeTransitionResolutions,
+                      )}
+                      proposal={proposal}
+                      review={review}
+                    />
                     {review &&
                     proposal.state !== "confirmed" &&
                     proposal.state !== "rejected" &&
@@ -433,6 +451,51 @@ function DiameterTransitionCandidateSelector({
   );
 }
 
+function DiameterTransitionPreview({
+  contribution,
+  proposal,
+  review,
+}: {
+  contribution: TechnicalRouteTransitionContribution | null;
+  proposal: DiameterTransitionProposal;
+  review: DiameterTransitionTechnicalReview | null;
+}) {
+  const familyLabel =
+    review?.selectedCandidate?.label ??
+    review?.candidates.find(
+      (candidate) => candidate.familyId === proposal.selectedCatalogFamilyId,
+    )?.label ??
+    proposal.selectedCatalogFamilyId ??
+    null;
+
+  if (!familyLabel && !contribution) {
+    return null;
+  }
+
+  return (
+    <div className="mt-1 text-[10px] text-[var(--muted)]">
+      {familyLabel ? <div>Familia: {familyLabel}</div> : null}
+      {contribution ? (
+        <>
+          <div>
+            Variante:{" "}
+            {contribution.variant?.label ??
+              contribution.reason ??
+              "Pendiente"}
+          </div>
+          <div>
+            Equivalencia:{" "}
+            {formatCalculationMeters(
+              contribution.equivalentLengthMeters,
+              "Pendiente",
+            )}
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 function ProposalTechnicalContext({
   review,
 }: {
@@ -522,6 +585,22 @@ function candidateOptionLabel(candidate: AccessoryCatalogCandidate) {
         : " - requiere datos";
 
   return `${candidate.label}${suffix}`;
+}
+
+function previewContributionForTransition(
+  transitionId: string,
+  routeTransitionResolutions: Record<string, TechnicalRouteTransitionResolution>,
+) {
+  return (
+    Object.values(routeTransitionResolutions)
+      .flatMap((resolution) => resolution.contributions)
+      .filter((contribution) => contribution.transitionId === transitionId)
+      .sort(
+        (first, second) =>
+          first.order - second.order ||
+          first.routeId.localeCompare(second.routeId),
+      )[0] ?? null
+  );
 }
 
 function diameterTransitionMainLabel(proposal: DiameterTransitionProposal) {
@@ -843,10 +922,12 @@ function SegmentList({
 function SegmentDetail({
   equipment,
   result,
+  routeTransitionResolutions,
   segment,
 }: {
   equipment: WorkbenchEquipment[];
   result: TechnicalCalculationResult;
+  routeTransitionResolutions: Record<string, TechnicalRouteTransitionResolution>;
   segment: TechnicalSegmentResult;
 }) {
   const equipmentById = new Map(equipment.map((item) => [item.id, item]));
@@ -876,6 +957,7 @@ function SegmentDetail({
       <RouteBasisDetail
         equipmentById={equipmentById}
         result={result}
+        routeTransitionResolutions={routeTransitionResolutions}
         segment={segment}
       />
       <AccessoryList accessories={segment.accessories} />
@@ -906,10 +988,12 @@ function SegmentDetail({
 function RouteBasisDetail({
   equipmentById,
   result,
+  routeTransitionResolutions,
   segment,
 }: {
   equipmentById: Map<string, WorkbenchEquipment>;
   result: TechnicalCalculationResult;
+  routeTransitionResolutions: Record<string, TechnicalRouteTransitionResolution>;
   segment: TechnicalSegmentResult;
 }) {
   const resolution = segment.governingRouteResolution;
@@ -939,6 +1023,8 @@ function RouteBasisDetail({
   const terminal = equipmentById.get(route.terminalEquipmentId);
   const routeAccessoryResolution =
     result.routeAccessoryResolutions[route.routeId] ?? null;
+  const routeTransitionResolution =
+    routeTransitionResolutions[route.routeId] ?? null;
   const routeSizingReasons = segment.routeSizingBasis.reasons;
 
   return (
@@ -971,6 +1057,10 @@ function RouteBasisDetail({
       <RouteAccessoryContributionList
         resolution={routeAccessoryResolution}
         result={result}
+      />
+      <RouteTransitionPreviewDetail
+        resolution={routeTransitionResolution}
+        segment={segment}
       />
       {segment.routeSizingBasis.status !== "resolved" &&
       routeSizingReasons.length > 0 ? (
@@ -1120,6 +1210,68 @@ function RouteAccessoryContributionList({
       </ul>
       {resolution.status !== "resolved" && resolution.reasons.length > 0 ? (
         <div className="mt-1 text-[var(--warning)]">
+          {resolution.reasons.join(" ")}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function RouteTransitionPreviewDetail({
+  resolution,
+  segment,
+}: {
+  resolution: TechnicalRouteTransitionResolution | null;
+  segment: TechnicalSegmentResult;
+}) {
+  return (
+    <div className="mt-2 rounded border border-[#dbeafe] bg-[#eff6ff] px-2 py-2">
+      <div className="font-semibold text-[#1d4ed8]">
+        Preview transiciones
+      </div>
+      <dl className="mt-1 grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 gap-y-1">
+        <dt>Longitud actual usada por solver</dt>
+        <dd className="text-right">{formatRouteSizingLength(segment)}</dd>
+        <dt>Equiv. transiciones preview</dt>
+        <dd className="text-right">
+          {formatCalculationMeters(
+            resolution?.equivalentLengthMeters ?? null,
+            "Pendiente",
+          )}
+        </dd>
+        <dt>Longitud proyectada con transiciones</dt>
+        <dd className="text-right">
+          {formatCalculationMeters(
+            resolution?.projectedSizingLengthMeters ?? null,
+            "Pendiente",
+          )}
+        </dd>
+      </dl>
+      <div className="mt-1 text-[10px] text-[#1d4ed8]">
+        Preview: las transiciones todavia no modifican el dimensionado global.
+      </div>
+      {resolution && resolution.contributions.length > 0 ? (
+        <ul className="mt-1 space-y-1 text-[10px] text-[var(--muted)]">
+          {resolution.contributions.map((contribution, index) => (
+            <li key={`${contribution.transitionId}:${index}`}>
+              <div>{formatTransitionContribution(contribution)}</div>
+              {contribution.reason &&
+              contribution.status !== "resolved" &&
+              contribution.status !== "inactive" ? (
+                <div className="text-[var(--warning)]">
+                  {contribution.reason}
+                </div>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <div className="mt-1 text-[10px] text-[var(--muted)]">
+          Sin transiciones atravesadas por este recorrido.
+        </div>
+      )}
+      {resolution && resolution.status !== "resolved" && resolution.reasons.length > 0 ? (
+        <div className="mt-1 text-[10px] text-[var(--warning)]">
           {resolution.reasons.join(" ")}
         </div>
       ) : null}
@@ -1382,6 +1534,25 @@ function formatContributionName(
     contribution.catalogCode ??
     routeAccessoryTypeLabel(contribution.type)
   );
+}
+
+function formatTransitionContribution(
+  contribution: TechnicalRouteTransitionContribution,
+) {
+  const length =
+    contribution.status === "inactive"
+      ? "0 m"
+      : formatCalculationMeters(contribution.equivalentLengthMeters, "Pendiente");
+  const variant =
+    contribution.variant?.label ??
+    contribution.catalogFamilyId ??
+    diameterTransitionKindLabel(contribution.transitionKind);
+
+  return `${formatCompactDiameterReference(
+    contribution.upstreamDiameter,
+  )} -> ${formatCompactDiameterReference(
+    contribution.downstreamDiameter,
+  )} - ${variant} - ${length}`;
 }
 
 function formatSegmentDiameter(
