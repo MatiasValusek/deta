@@ -86,6 +86,7 @@ export type TechnicalCalculationIssue = {
 
 export type TechnicalSegmentAccessoryResult = {
   catalogCode?: string;
+  catalogFamilyId?: string;
   equivalentLengthResolution: PipeSystemResolution<number>;
   equivalentLengthMetersPerUnit: number | null;
   equivalentLengthSource: RouteAccessoryEquivalentLengthSource;
@@ -1299,6 +1300,7 @@ function createTechnicalAccessoryResults(params: {
       const equivalentLengthResolution = resolveAccessoryEquivalentLength({
         accessory: {
           catalogCode: accessory.catalogCode,
+          catalogFamilyId: accessory.catalogFamilyId,
           id: accessory.id,
           quantity,
           type: accessory.type,
@@ -1320,6 +1322,7 @@ function createTechnicalAccessoryResults(params: {
         equivalentLengthMetersPerUnit,
         equivalentLengthSource: accessory.equivalentLengthSource,
         catalogCode: accessory.catalogCode,
+        catalogFamilyId: accessory.catalogFamilyId,
         id: accessory.id,
         quantity,
         segmentId: params.segment.id,
@@ -1340,6 +1343,7 @@ function createTechnicalAccessoryResults(params: {
 function resolveAccessoryEquivalentLength(params: {
   accessory: {
     catalogCode?: string;
+    catalogFamilyId?: string;
     id: string;
     quantity: number;
     type: RouteAccessoryType;

@@ -44,6 +44,7 @@ export const SIGAS_PIPE_SYSTEM: PipeSystem = {
     resolveSigasAccessoryEquivalentLength({
       accessoryType: context.accessory.type,
       catalogCode: context.accessory.catalogCode,
+      catalogFamilyId: context.accessory.catalogFamilyId,
       diameter: context.pipe?.diameter,
     }),
   sizeSegment: (context: PipeSegmentSizingContext) => {
@@ -170,6 +171,7 @@ export function lookupSigasNaturalGasDiameter(params: {
 export function resolveSigasAccessoryEquivalentLength(params: {
   accessoryType: RouteAccessoryType;
   catalogCode?: string;
+  catalogFamilyId?: string;
   diameter?: PipeDiameterReference;
 }): PipeSystemResolution<number> {
   const diameter = resolveSigasDiameter(params.diameter);
@@ -182,13 +184,16 @@ export function resolveSigasAccessoryEquivalentLength(params: {
     };
   }
 
-  if (params.catalogCode) {
-    const rows = findAccessoryRowsForCatalogCode(params.catalogCode);
+  const catalogLookup = params.catalogFamilyId ?? params.catalogCode;
+
+  if (catalogLookup) {
+    const rows = findAccessoryRowsForCatalogCode(catalogLookup);
 
     if (rows.length === 0) {
       return {
         data: {
           catalogCode: params.catalogCode,
+          catalogFamilyId: params.catalogFamilyId,
           sourceFile: SIGAS_TABLES_SOURCE.fileName,
           sourceTable: SIGAS_TABLES_SOURCE.accessoryEquivalentLengthTable,
         },
@@ -205,12 +210,15 @@ export function resolveSigasAccessoryEquivalentLength(params: {
       return {
         data: {
           catalogCode: params.catalogCode,
+          catalogFamilyId: params.catalogFamilyId,
           pipeDiameterId: diameter.id,
           sourceFile: SIGAS_TABLES_SOURCE.fileName,
           sourceTable: SIGAS_TABLES_SOURCE.accessoryEquivalentLengthTable,
         },
         reason:
-          "El accesorio SIGAS indicado no corresponde al diametro del tramo.",
+          params.catalogFamilyId
+            ? "La familia SIGAS confirmada no posee variante compatible con el diametro del tramo."
+            : "El accesorio SIGAS indicado no corresponde al diametro del tramo.",
         status: "unsupported",
       };
     }
@@ -219,6 +227,7 @@ export function resolveSigasAccessoryEquivalentLength(params: {
       return {
         data: {
           catalogCode: params.catalogCode,
+          catalogFamilyId: params.catalogFamilyId,
           matchingRows: matchingRows.map((row) => row.code),
           pipeDiameterId: diameter.id,
           sourceFile: SIGAS_TABLES_SOURCE.fileName,
@@ -331,6 +340,21 @@ function accessoryFamilyCode(row: SigasAccessoryEquivalentLengthRow) {
     return "codo-mh-a-90";
   }
 
+  if (row.label.startsWith("Codo 90 con rosca hembra")) {
+    return "codo-90-rosca-hembra";
+  }
+
+  if (row.label.startsWith("Te Normal ") && row.label.includes("flujo a 90")) {
+    return "te-normal-flujo-a-90";
+  }
+
+  if (
+    row.label.startsWith("Te Normal ") &&
+    row.label.includes("flujo a traves")
+  ) {
+    return "te-normal-flujo-a-traves";
+  }
+
   if (row.label.startsWith("Llave Esferica ")) {
     return "llave-esferica";
   }
@@ -377,6 +401,7 @@ function createAccessoryData(
 ) {
   return {
     catalogCode: row.code,
+    catalogFamilyId: accessoryFamilyCode(row) ?? row.code,
     equivalentDiameterCount: row.equivalentDiameterCount,
     externalDiameterMeters: row.externalDiameterMeters,
     pipeDiameterId: diameter.id,

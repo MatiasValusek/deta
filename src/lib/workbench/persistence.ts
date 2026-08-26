@@ -841,7 +841,15 @@ function isOptionalAccessoryProposalDecisionArray(
         isString(decision.proposalId) &&
         isString(decision.geometryKey) &&
         isFiniteNumber(decision.decidedAt) &&
-        (decision.status === "confirmed" || decision.status === "rejected") &&
+        (decision.status === "pending" ||
+          decision.status === "confirmed" ||
+          decision.status === "rejected") &&
+        (decision.catalogFamilyId === undefined ||
+          isString(decision.catalogFamilyId)) &&
+        (decision.pipeSystemId === undefined || isString(decision.pipeSystemId)) &&
+        (decision.origin === undefined ||
+          decision.origin === "automatic_confirmed" ||
+          decision.origin === "user_confirmed") &&
         (decision.ownerSegmentId === undefined ||
           isString(decision.ownerSegmentId)) &&
         (decision.accessoryId === undefined || isString(decision.accessoryId)),
@@ -899,6 +907,12 @@ function isRouteAccessoryArray(value: unknown) {
         isString(accessory.segmentId) &&
         (accessory.catalogCode === undefined ||
           isString(accessory.catalogCode)) &&
+        (accessory.catalogFamilyId === undefined ||
+          isString(accessory.catalogFamilyId)) &&
+        (accessory.origin === undefined ||
+          accessory.origin === "manual" ||
+          accessory.origin === "automatic_confirmed" ||
+          accessory.origin === "user_confirmed") &&
         (accessory.type === "elbow" ||
           accessory.type === "tee" ||
           accessory.type === "valve" ||

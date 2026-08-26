@@ -21,12 +21,19 @@ import type {
 } from "@/lib/constraints/types";
 import { importDxf } from "@/lib/dxf/importDxf";
 import {
+  accessoryCatalogSelectionFromCandidate,
+  type AccessoryProposalTechnicalReview,
+} from "@/lib/calculation/accessoryCatalogCandidates";
+import {
   calculateTechnicalTree,
   formatTechnicalFlow,
   technicalCalculationStatusLabel,
 } from "@/lib/calculation/technicalTree";
 import { SIGAS_PIPE_SYSTEM } from "@/lib/calculation/pipeSystems/sigas";
-import { matchSigasAccessoryProposal } from "@/lib/calculation/pipeSystems/sigas/sigasAccessoryProposal";
+import {
+  getSigasAccessoryCatalogCandidates,
+  matchSigasAccessoryProposal,
+} from "@/lib/calculation/pipeSystems/sigas/sigasAccessoryProposal";
 import {
   equipmentDefinitionForType,
   equipmentTypeLabel,
@@ -90,6 +97,8 @@ import {
   detectRouteAccessoryProposals,
   reconcileRouteAccessoryProposalState,
   rejectRouteAccessoryProposal,
+  resolveAccessoryProposalTechnicalOwner,
+  routeAccessoryProposalHasManualAccessory,
   upsertAccessoryProposalDecision,
   withAccessoryProposalSystemMatch,
   type AccessoryProposalDecision,
@@ -811,6 +820,67 @@ export function DxfWorkbench() {
       ),
     );
   }, [accessoryProposalDiameterBySegmentId, planBase]);
+  const routeAccessoryProposalReviews = useMemo(() => {
+    if (!planBase) {
+      return [];
+    }
+
+    return routeAccessoryProposals.map((proposal): AccessoryProposalTechnicalReview => {
+      const ownerResolution = resolveAccessoryProposalTechnicalOwner({
+        diameterBySegmentId: accessoryProposalDiameterBySegmentId,
+        network: planBase.routeNetwork,
+        proposal,
+      });
+      const hasManualAccessory = routeAccessoryProposalHasManualAccessory({
+        network: planBase.routeNetwork,
+        proposal,
+        type: proposal.domainAccessory?.type,
+      });
+      const candidates = getSigasAccessoryCatalogCandidates({
+        diameterBySegmentId: accessoryProposalDiameterBySegmentId,
+        hasManualAccessory,
+        ownerResolution,
+        proposal,
+      });
+      const selectedDiameter =
+        ownerResolution.status === "unambiguous"
+          ? accessoryProposalDiameterBySegmentId.get(
+              ownerResolution.ownerSegmentId,
+            ) ?? null
+          : null;
+      const compatibleCandidates = candidates.filter(
+        (candidate) => candidate.status === "compatible",
+      );
+      const reason =
+        hasManualAccessory
+          ? "Ya existe un accesorio manual compatible en un tramo incidente."
+          : ownerResolution.status !== "unambiguous"
+            ? ownerResolution.reason
+            : candidates.length === 0
+              ? "No hay candidatos tecnicos compatibles con esta propuesta."
+              : compatibleCandidates.length === 0
+                ? candidates[0]?.reason ?? null
+                : null;
+
+      return {
+        candidates,
+        incidentSegments: proposal.incidentSegmentIds.map((segmentId) => ({
+          diameter: accessoryProposalDiameterBySegmentId.get(segmentId) ?? null,
+          segmentId,
+        })),
+        ownerResolution,
+        proposalId: proposal.id,
+        reason,
+        selectedDiameter,
+        status:
+          compatibleCandidates.length > 0 && !hasManualAccessory
+            ? "compatible"
+            : candidates.some((candidate) => candidate.status === "incompatible")
+              ? "incompatible"
+              : "requires_more_information",
+      };
+    });
+  }, [accessoryProposalDiameterBySegmentId, planBase, routeAccessoryProposals]);
 
   useEffect(() => {
     if (!planBase) {
@@ -3301,7 +3371,10 @@ export function DxfWorkbench() {
     setRouteError(null);
   }
 
-  function handleConfirmAccessoryProposal(proposalId: string) {
+  function handleConfirmAccessoryProposal(
+    proposalId: string,
+    candidateId: string,
+  ) {
     setActiveRightPanelSection("calculation");
 
     if (!planBase) {
@@ -3317,10 +3390,28 @@ export function DxfWorkbench() {
       return;
     }
 
+    const review = routeAccessoryProposalReviews.find(
+      (item) => item.proposalId === proposalId,
+    );
+    const candidate = review?.candidates.find((item) => item.id === candidateId);
+
+    if (!review || !candidate) {
+      setRouteError("Selecciona una familia tecnica compatible.");
+      return;
+    }
+
+    if (candidate.status !== "compatible") {
+      setRouteError(candidate.reason);
+      return;
+    }
+
     const result = confirmRouteAccessoryProposal({
       decidedAt: Date.now(),
       network: planBase.routeNetwork,
+      origin: "user_confirmed",
+      ownerResolution: review.ownerResolution,
       proposal,
+      selection: accessoryCatalogSelectionFromCandidate(candidate),
     });
 
     if (!result.ok) {
@@ -4325,6 +4416,7 @@ export function DxfWorkbench() {
       content: (
         <CalculationPanel
           accessoryProposals={routeAccessoryProposals}
+          accessoryProposalReviews={routeAccessoryProposalReviews}
           equipment={planEquipment}
           hasPendingProposal={Boolean(routeProposal)}
           isPlanActive={activeBase?.type === "plan"}

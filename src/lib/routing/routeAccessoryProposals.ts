@@ -1,5 +1,6 @@
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
 import type { Point2D } from "@/lib/geometry/types";
+import type { AccessoryCatalogSelection } from "@/lib/calculation/accessoryCatalogCandidates";
 import {
   buildEquipmentIndex,
   distanceBetween,
@@ -43,13 +44,22 @@ export type AccessoryProposalGeometryClassification =
 
 export type AccessoryProposalConfidence = "high" | "medium" | "low";
 
-export type AccessoryProposalDecisionStatus = "confirmed" | "rejected";
+export type AccessoryProposalDecisionOrigin =
+  | "automatic_confirmed"
+  | "user_confirmed";
+export type AccessoryProposalDecisionStatus =
+  | "confirmed"
+  | "pending"
+  | "rejected";
 
 export type AccessoryProposalDecision = {
   accessoryId?: string;
+  catalogFamilyId?: string;
   decidedAt: number;
   geometryKey: string;
+  origin?: AccessoryProposalDecisionOrigin;
   ownerSegmentId?: string;
+  pipeSystemId?: string;
   proposalId: string;
   status: AccessoryProposalDecisionStatus;
 };
@@ -70,6 +80,7 @@ export type AccessoryProposalBranchRole = {
 
 export type AccessoryProposalDomainAccessory = {
   catalogCode?: string;
+  catalogFamilyId?: string;
   equivalentLengthSource: RouteAccessoryEquivalentLengthSource;
   reason?: string;
   type: RouteAccessoryType;
@@ -400,6 +411,10 @@ export function applyAccessoryProposalDecisions(params: {
       return proposal;
     }
 
+    if (decision.status === "pending") {
+      return proposal;
+    }
+
     return {
       ...proposal,
       state: decision.status,
@@ -408,9 +423,12 @@ export function applyAccessoryProposalDecisions(params: {
 }
 
 export function confirmRouteAccessoryProposal(params: {
+  origin?: AccessoryProposalDecisionOrigin;
   decidedAt: number;
   network: ManualRouteNetwork;
+  ownerResolution?: AccessoryProposalOwnerResolution;
   proposal: AccessoryProposal;
+  selection?: AccessoryCatalogSelection;
 }):
   | {
       decision: AccessoryProposalDecision;
@@ -421,42 +439,73 @@ export function confirmRouteAccessoryProposal(params: {
       message: string;
       ok: false;
     } {
-  if (params.proposal.ownerResolution.status !== "unambiguous") {
+  const ownerResolution =
+    params.ownerResolution ?? params.proposal.ownerResolution;
+  const selectedDomainAccessory = params.selection
+    ? {
+        catalogCode: params.selection.familyId,
+        catalogFamilyId: params.selection.familyId,
+        equivalentLengthSource: "pipe_system" as const,
+        type: params.selection.type,
+      }
+    : params.proposal.domainAccessory;
+
+  if (ownerResolution.status !== "unambiguous") {
     return {
-      message: params.proposal.ownerResolution.reason,
+      message: ownerResolution.reason,
       ok: false,
     };
   }
 
   if (
-    !params.proposal.domainAccessory ||
-    params.proposal.domainAccessory.equivalentLengthSource !== "pipe_system"
+    !selectedDomainAccessory ||
+    selectedDomainAccessory.equivalentLengthSource !== "pipe_system"
   ) {
     return {
       message:
-        params.proposal.domainAccessory?.reason ??
+        selectedDomainAccessory?.reason ??
         "La propuesta no tiene un accesorio tecnico resoluble.",
       ok: false,
     };
   }
 
-  if (!params.proposal.domainAccessory.catalogCode) {
+  const catalogFamilyId =
+    selectedDomainAccessory.catalogFamilyId ?? selectedDomainAccessory.catalogCode;
+
+  if (!catalogFamilyId) {
     return {
-      message: "Falta un catalogCode inequivoco para confirmar la propuesta.",
+      message:
+        "Falta una familia tecnica inequivoca para confirmar la propuesta.",
       ok: false,
     };
   }
 
-  const ownerSegmentId = params.proposal.ownerResolution.ownerSegmentId;
+  if (
+    routeAccessoryProposalHasManualAccessory({
+      network: params.network,
+      proposal: params.proposal,
+      type: selectedDomainAccessory.type,
+    })
+  ) {
+    return {
+      message:
+        "Ya existe un accesorio manual compatible en un tramo incidente; no se crea duplicado automatico.",
+      ok: false,
+    };
+  }
+
+  const ownerSegmentId = ownerResolution.ownerSegmentId;
   const accessoryId = automaticAccessoryId(params.proposal.id);
   const accessory: RouteSegmentAccessory = {
-    catalogCode: params.proposal.domainAccessory.catalogCode,
+    catalogCode: catalogFamilyId,
+    catalogFamilyId,
     equivalentLengthMetersPerUnit: null,
     equivalentLengthSource: "pipe_system",
     id: accessoryId,
+    origin: params.origin ?? "automatic_confirmed",
     quantity: 1,
     segmentId: ownerSegmentId,
-    type: params.proposal.domainAccessory.type,
+    type: selectedDomainAccessory.type,
   };
   const network = upsertRouteSegmentAccessory({
     accessory,
@@ -467,9 +516,12 @@ export function confirmRouteAccessoryProposal(params: {
   return {
     decision: {
       accessoryId,
+      catalogFamilyId,
       decidedAt: params.decidedAt,
       geometryKey: params.proposal.geometryKey,
+      origin: params.origin ?? "automatic_confirmed",
       ownerSegmentId,
+      pipeSystemId: params.selection?.pipeSystemId,
       proposalId: params.proposal.id,
       status: "confirmed",
     },
@@ -554,6 +606,76 @@ export function accessoryProposalStateAllowsRejection(
 
 export function automaticAccessoryId(proposalId: string) {
   return `route-accessory:${proposalId}`;
+}
+
+export function resolveAccessoryProposalTechnicalOwner(params: {
+  diameterBySegmentId?: AccessoryProposalDiameterBySegmentId;
+  network: ManualRouteNetwork;
+  proposal: AccessoryProposal;
+}): AccessoryProposalOwnerResolution {
+  const candidateSegmentIds = [...params.proposal.incidentSegmentIds].sort();
+
+  if (candidateSegmentIds.length === 0) {
+    return {
+      candidateSegmentIds,
+      reason: "No hay tramos candidatos para alojar el accesorio.",
+      status: "ambiguous",
+    };
+  }
+
+  const diameters = candidateSegmentIds.map((segmentId) =>
+    getDiameter(params.diameterBySegmentId, segmentId),
+  );
+
+  if (diameters.some((diameter) => !diameter)) {
+    return {
+      candidateSegmentIds,
+      reason: "Falta diametro calculado en algun tramo incidente.",
+      status: "ambiguous",
+    };
+  }
+
+  const [firstDiameter] = diameters;
+  const sameDiameter = diameters.every(
+    (diameter) =>
+      diameter && firstDiameter && diameterKey(diameter) === diameterKey(firstDiameter),
+  );
+
+  if (!sameDiameter) {
+    return {
+      candidateSegmentIds,
+      reason: "Cambio de diametro detectado; requiere resolver transicion.",
+      status: "ambiguous",
+    };
+  }
+
+  return {
+    candidateSegmentIds,
+    ownerSegmentId:
+      upstreamIncidentSegmentId(params.network, params.proposal) ??
+      candidateSegmentIds[0],
+    status: "unambiguous",
+  };
+}
+
+export function routeAccessoryProposalHasManualAccessory(params: {
+  network: ManualRouteNetwork;
+  proposal: AccessoryProposal;
+  type?: RouteAccessoryType;
+}) {
+  const incidentSegmentIds = new Set(params.proposal.incidentSegmentIds);
+
+  return params.network.segments
+    .filter((segment) => incidentSegmentIds.has(segment.id))
+    .some((segment) =>
+      (segment.accessories ?? []).some(
+        (accessory) =>
+          !accessory.id.startsWith(AUTOMATIC_ACCESSORY_ID_PREFIX) &&
+          accessory.origin !== "automatic_confirmed" &&
+          accessory.origin !== "user_confirmed" &&
+          (!params.type || accessory.type === params.type),
+      ),
+    );
 }
 
 function createProposal(params: {
@@ -799,6 +921,41 @@ function branchRoleForNeighbor(params: {
   }
 
   return neighborDistance < nodeDistance ? "upstream" : "branch";
+}
+
+function upstreamIncidentSegmentId(
+  network: ManualRouteNetwork,
+  proposal: AccessoryProposal,
+) {
+  const distances = calculateNodeDistancesFromSupply(network);
+  const proposalDistance = distances.get(proposal.nodeId);
+
+  if (proposalDistance === undefined) {
+    return null;
+  }
+
+  return (
+    [...network.segments]
+      .filter((segment) => proposal.incidentSegmentIds.includes(segment.id))
+      .map((segment) => {
+        const neighborNodeId =
+          segment.fromNodeId === proposal.nodeId
+            ? segment.toNodeId
+            : segment.toNodeId === proposal.nodeId
+              ? segment.fromNodeId
+              : null;
+        const neighborDistance = neighborNodeId
+          ? distances.get(neighborNodeId)
+          : undefined;
+
+        return neighborDistance !== undefined &&
+          neighborDistance < proposalDistance
+          ? segment.id
+          : null;
+      })
+      .filter((segmentId): segmentId is string => Boolean(segmentId))
+      .sort()[0] ?? null
+  );
 }
 
 function removeAutomaticAccessoryById(

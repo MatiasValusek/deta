@@ -33,6 +33,7 @@ export type TechnicalRouteAccessorySegmentContext = {
 export type TechnicalRouteAccessoryContribution = {
   accessoryId: string;
   catalogCode?: string;
+  catalogFamilyId?: string;
   diameter: PipeDiameterReference | null;
   equivalentLengthMetersPerUnit: number | null;
   equivalentLengthResolution: PipeSystemResolution<number>;
@@ -102,6 +103,7 @@ export function resolveTechnicalRouteAccessories(params: {
         contributions.push({
           accessoryId: accessory.id,
           catalogCode: accessory.catalogCode,
+          catalogFamilyId: accessory.catalogFamilyId,
           diameter: resolveDiameter(params.diameterBySegmentId, segment.id),
           equivalentLengthMetersPerUnit: null,
           equivalentLengthResolution: {
@@ -212,6 +214,7 @@ function createAccessoryContribution(params: {
   return {
     accessoryId: params.accessory.id,
     catalogCode: params.accessory.catalogCode,
+    catalogFamilyId: params.accessory.catalogFamilyId,
     diameter: params.diameter,
     equivalentLengthMetersPerUnit,
     equivalentLengthResolution,
@@ -273,6 +276,7 @@ function resolveContributionEquivalentLength(params: {
       params.pipeSystem.resolveAccessoryEquivalentLength({
         accessory: {
           catalogCode: params.accessory.catalogCode,
+          catalogFamilyId: params.accessory.catalogFamilyId,
           id: params.accessory.id,
           quantity: normalizeAccessoryQuantity(params.accessory.quantity),
           type: params.accessory.type,

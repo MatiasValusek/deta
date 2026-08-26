@@ -7,6 +7,10 @@ export type RouteAccessoryEquivalentLengthSource =
   | "manual"
   | "pipe_system"
   | "unresolved";
+export type RouteAccessoryOrigin =
+  | "automatic_confirmed"
+  | "manual"
+  | "user_confirmed";
 
 export type RouteNode = {
   id: string;
@@ -19,9 +23,11 @@ export type RouteNode = {
 
 export type RouteSegmentAccessory = {
   catalogCode?: string;
+  catalogFamilyId?: string;
   equivalentLengthMetersPerUnit: number | null;
   equivalentLengthSource: RouteAccessoryEquivalentLengthSource;
   id: string;
+  origin?: RouteAccessoryOrigin;
   quantity: number;
   segmentId: string;
   type: RouteAccessoryType;

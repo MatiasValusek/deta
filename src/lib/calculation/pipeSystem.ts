@@ -42,6 +42,7 @@ export type PipeSegmentPipeContext = {
 export type PipeAccessoryEquivalentLengthContext = {
   accessory: {
     catalogCode?: string;
+    catalogFamilyId?: string;
     id: string;
     quantity: number;
     type: RouteAccessoryType;

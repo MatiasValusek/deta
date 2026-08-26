@@ -18,24 +18,29 @@ import {
   type TechnicalSegmentResult,
 } from "@/lib/calculation/technicalTree";
 import {
-  accessoryProposalStateAllowsConfirmation,
+  type AccessoryCatalogCandidate,
+  type AccessoryProposalTechnicalReview,
+} from "@/lib/calculation/accessoryCatalogCandidates";
+import {
   type AccessoryProposal,
 } from "@/lib/routing/routeAccessoryProposals";
 
 type CalculationPanelProps = {
   accessoryProposals: AccessoryProposal[];
+  accessoryProposalReviews: AccessoryProposalTechnicalReview[];
   equipment: WorkbenchEquipment[];
   hasPendingProposal: boolean;
   isPlanActive: boolean;
   planReady: boolean;
   result: TechnicalCalculationResult | null;
-  onConfirmAccessoryProposal: (proposalId: string) => void;
+  onConfirmAccessoryProposal: (proposalId: string, candidateId: string) => void;
   onGoToPlan: () => void;
   onRejectAccessoryProposal: (proposalId: string) => void;
 };
 
 export function CalculationPanel({
   accessoryProposals,
+  accessoryProposalReviews,
   equipment,
   hasPendingProposal,
   isPlanActive,
@@ -95,6 +100,7 @@ export function CalculationPanel({
           <CalculationIssues result={result} />
           <AccessoryProposalList
             proposals={accessoryProposals}
+            reviews={accessoryProposalReviews}
             onConfirm={onConfirmAccessoryProposal}
             onReject={onRejectAccessoryProposal}
           />
@@ -118,13 +124,18 @@ export function CalculationPanel({
 
 function AccessoryProposalList({
   proposals,
+  reviews,
   onConfirm,
   onReject,
 }: {
   proposals: AccessoryProposal[];
-  onConfirm: (proposalId: string) => void;
+  reviews: AccessoryProposalTechnicalReview[];
+  onConfirm: (proposalId: string, candidateId: string) => void;
   onReject: (proposalId: string) => void;
 }) {
+  const [selectedCandidateByProposalId, setSelectedCandidateByProposalId] =
+    useState<Record<string, string>>({});
+
   if (proposals.length === 0) {
     return (
       <section className="mt-3 rounded border border-[var(--line)] px-3 py-2 text-xs text-[var(--muted)]">
@@ -140,8 +151,19 @@ function AccessoryProposalList({
       </h3>
       <div className="space-y-1">
         {proposals.map((proposal) => {
-          const canConfirm = accessoryProposalStateAllowsConfirmation(proposal);
-          const canReject = proposal.state === "proposed";
+          const review =
+            reviews.find((item) => item.proposalId === proposal.id) ?? null;
+          const selectedCandidateId =
+            selectedCandidateByProposalId[proposal.id] ?? "";
+          const selectedCandidate =
+            review?.candidates.find((item) => item.id === selectedCandidateId) ??
+            null;
+          const canConfirm =
+            proposal.state !== "confirmed" &&
+            proposal.state !== "rejected" &&
+            selectedCandidate?.status === "compatible";
+          const canReject =
+            proposal.state !== "confirmed" && proposal.state !== "rejected";
 
           return (
             <div
@@ -159,10 +181,24 @@ function AccessoryProposalList({
                   <div className="mt-0.5 text-[10px] text-[var(--muted)]">
                     {proposalEvidenceLabel(proposal)}
                   </div>
+                  {review ? <ProposalTechnicalContext review={review} /> : null}
                   {proposalReviewReason(proposal) ? (
                     <div className="mt-0.5 text-[10px] text-[var(--warning)]">
                       {proposalReviewReason(proposal)}
                     </div>
+                  ) : null}
+                  {review && proposal.state !== "confirmed" && proposal.state !== "rejected" ? (
+                    <CandidateSelector
+                      proposal={proposal}
+                      review={review}
+                      selectedCandidateId={selectedCandidateId}
+                      onSelect={(candidateId) =>
+                        setSelectedCandidateByProposalId((current) => ({
+                          ...current,
+                          [proposal.id]: candidateId,
+                        }))
+                      }
+                    />
                   ) : null}
                 </div>
                 {canConfirm || canReject ? (
@@ -171,7 +207,7 @@ function AccessoryProposalList({
                       <button
                         className="rounded border border-[var(--line)] bg-white px-2 py-1 text-[11px] hover:border-[var(--accent)]"
                         type="button"
-                        onClick={() => onConfirm(proposal.id)}
+                        onClick={() => onConfirm(proposal.id, selectedCandidateId)}
                       >
                         Confirmar
                       </button>
@@ -194,6 +230,97 @@ function AccessoryProposalList({
       </div>
     </section>
   );
+}
+
+function ProposalTechnicalContext({
+  review,
+}: {
+  review: AccessoryProposalTechnicalReview;
+}) {
+  const diameters = review.incidentSegments
+    .map(
+      (segment) =>
+        `${segment.segmentId}: ${
+          segment.diameter ? formatDiameterReference(segment.diameter) : "Pendiente"
+        }`,
+    )
+    .join(" - ");
+  const owner =
+    review.ownerResolution.status === "unambiguous"
+      ? `Owner ${review.ownerResolution.ownerSegmentId}`
+      : review.ownerResolution.reason;
+
+  return (
+    <div className="mt-0.5 text-[10px] text-[var(--muted)]">
+      {diameters}
+      {diameters ? " - " : ""}
+      {owner}
+    </div>
+  );
+}
+
+function CandidateSelector({
+  proposal,
+  review,
+  selectedCandidateId,
+  onSelect,
+}: {
+  proposal: AccessoryProposal;
+  review: AccessoryProposalTechnicalReview;
+  selectedCandidateId: string;
+  onSelect: (candidateId: string) => void;
+}) {
+  if (review.candidates.length === 0) {
+    return (
+      <div className="mt-1 text-[10px] text-[var(--warning)]">
+        {review.reason ?? "No hay familias tecnicas compatibles."}
+      </div>
+    );
+  }
+
+  const selectedCandidate =
+    review.candidates.find((candidate) => candidate.id === selectedCandidateId) ??
+    null;
+
+  return (
+    <div className="mt-2 space-y-1">
+      <label className="block text-[10px] font-semibold uppercase text-[var(--muted)]">
+        Tipo de accesorio
+      </label>
+      <select
+        className="w-full rounded border border-[var(--line)] bg-white px-2 py-1 text-xs"
+        value={selectedCandidateId}
+        onChange={(event) => onSelect(event.target.value)}
+      >
+        <option value="">Seleccionar familia</option>
+        {review.candidates.map((candidate) => (
+          <option
+            disabled={candidate.status !== "compatible"}
+            key={candidate.id}
+            value={candidate.id}
+          >
+            {candidateOptionLabel(candidate)}
+          </option>
+        ))}
+      </select>
+      <div className="text-[10px] text-[var(--muted)]">
+        {selectedCandidate
+          ? selectedCandidate.reason
+          : review.reason ?? proposal.reason}
+      </div>
+    </div>
+  );
+}
+
+function candidateOptionLabel(candidate: AccessoryCatalogCandidate) {
+  const suffix =
+    candidate.status === "compatible"
+      ? ""
+      : candidate.status === "incompatible"
+        ? " - incompatible"
+        : " - requiere datos";
+
+  return `${candidate.label}${suffix}`;
 }
 
 function accessoryProposalKindLabel(kind: AccessoryProposal["kind"]) {
