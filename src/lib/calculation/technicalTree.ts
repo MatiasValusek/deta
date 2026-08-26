@@ -19,7 +19,12 @@ import {
   type TechnicalNetworkSizingResult,
   type TechnicalNetworkSizingSegmentResult,
 } from "@/lib/calculation/technicalNetworkSizing";
+import {
+  solveTechnicalNetworkSizingWithTransitions,
+  type TechnicalTransitionAwareNetworkSizingResult,
+} from "@/lib/calculation/technicalNetworkSizingWithTransitions";
 import type { TechnicalRouteAccessoryResolution } from "@/lib/calculation/technicalRouteAccessories";
+import type { DiameterTransitionDecision } from "@/lib/calculation/diameterTransitionProposals";
 import {
   applianceNodesAreTerminal,
   buildEquipmentIndex,
@@ -48,6 +53,11 @@ export type {
   TechnicalNetworkSizingResult,
   TechnicalNetworkSizingSegmentResult,
 } from "@/lib/calculation/technicalNetworkSizing";
+
+export type {
+  TechnicalTransitionAwareNetworkSizingResult,
+  TechnicalTransitionAwareNetworkSizingSegmentResult,
+} from "@/lib/calculation/technicalNetworkSizingWithTransitions";
 
 export type {
   TechnicalRouteAccessoryContribution,
@@ -184,6 +194,7 @@ export type TechnicalCalculationResult = {
     physicalLengthMeters: number | null;
     segmentCount: number;
   };
+  transitionAwareNetworkSizing: TechnicalTransitionAwareNetworkSizingResult | null;
 };
 
 type OrientedSegment = {
@@ -197,6 +208,7 @@ type OrientedSegment = {
 const ROUTE_LENGTH_EPSILON = 0.000001;
 
 export function calculateTechnicalTree(params: {
+  diameterTransitionDecisions?: DiameterTransitionDecision[];
   equipment: WorkbenchEquipment[];
   minSegmentLengthSource: number;
   network: ManualRouteNetwork;
@@ -220,6 +232,7 @@ export function calculateTechnicalTree(params: {
       status: "invalid",
       technicalRoutes: [],
       totals: createEmptyTotals(),
+      transitionAwareNetworkSizing: null,
     });
   }
 
@@ -247,6 +260,7 @@ export function calculateTechnicalTree(params: {
       status: "invalid",
       technicalRoutes: [],
       totals: createEmptyTotals(),
+      transitionAwareNetworkSizing: null,
     });
   }
 
@@ -269,6 +283,7 @@ export function calculateTechnicalTree(params: {
       status: "invalid",
       technicalRoutes: [],
       totals: createEmptyTotals(),
+      transitionAwareNetworkSizing: null,
     });
   }
 
@@ -322,6 +337,17 @@ export function calculateTechnicalTree(params: {
     }),
   );
   const networkSizing = solveTechnicalNetworkSizing({
+    pipeContextBySegmentId: params.pipeContextBySegmentId,
+    pipeSystem,
+    routeSegments: params.network.segments,
+    routes: technicalRoutes,
+    segments: technicalSegments,
+  });
+  const transitionAwareNetworkSizing = solveTechnicalNetworkSizingWithTransitions({
+    baselineSizing: networkSizing,
+    decisions: params.diameterTransitionDecisions ?? [],
+    equipment: params.equipment,
+    network: params.network,
     pipeContextBySegmentId: params.pipeContextBySegmentId,
     pipeSystem,
     routeSegments: params.network.segments,
@@ -400,6 +426,7 @@ export function calculateTechnicalTree(params: {
     status,
     technicalRoutes,
     totals,
+    transitionAwareNetworkSizing,
   });
 }
 

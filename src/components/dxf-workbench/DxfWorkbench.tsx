@@ -802,6 +802,7 @@ export function DxfWorkbench() {
     () =>
       planBase
         ? calculateTechnicalTree({
+            diameterTransitionDecisions: planBase.diameterTransitionDecisions,
             equipment: planBase.equipment,
             minSegmentLengthSource: MIN_SECTION_LINK_LENGTH,
             network: planBase.routeNetwork,
@@ -813,7 +814,12 @@ export function DxfWorkbench() {
   );
   const finalDiameterBySegmentId = useMemo(() => {
     const finalDiameters =
-      technicalCalculationResult?.networkSizing?.finalDiameterBySegmentId ?? {};
+      technicalCalculationResult?.transitionAwareNetworkSizing?.status ===
+      "resolved"
+        ? technicalCalculationResult.transitionAwareNetworkSizing
+            .finalDiameterBySegmentId
+        : technicalCalculationResult?.networkSizing?.finalDiameterBySegmentId ??
+          {};
 
     return new Map<string, PipeDiameterReference>(
       Object.entries(finalDiameters),
@@ -977,6 +983,14 @@ export function DxfWorkbench() {
   const routeTransitionResolutions = useMemo(() => {
     if (!technicalCalculationResult) {
       return {};
+    }
+
+    if (
+      technicalCalculationResult.transitionAwareNetworkSizing?.status ===
+      "resolved"
+    ) {
+      return technicalCalculationResult.transitionAwareNetworkSizing
+        .routeTransitionResolutions;
     }
 
     return Object.fromEntries(

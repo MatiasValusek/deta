@@ -11,7 +11,7 @@ import {
   routeAccessoryTypeLabel,
   technicalCalculationStatusLabel,
   type TechnicalCalculationResult,
-  type TechnicalNetworkSizingSegmentResult,
+  type TechnicalTransitionAwareNetworkSizingSegmentResult,
   type TechnicalRouteAccessoryContribution,
   type TechnicalRouteAccessoryResolution,
   type TechnicalSegmentAccessoryResult,
@@ -810,6 +810,7 @@ function CalculationSummary({ result }: { result: TechnicalCalculationResult }) 
     "Pendiente",
   );
   const calculationLength = formatTotalCalculationLength(result);
+  const transitionAwareSizing = result.transitionAwareNetworkSizing;
 
   return (
     <dl className="mt-3 grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 gap-y-1 text-xs">
@@ -832,6 +833,19 @@ function CalculationSummary({ result }: { result: TechnicalCalculationResult }) 
       <dd className="text-right">{equivalentLength}</dd>
       <dt>Long. calculo local</dt>
       <dd className="text-right">{calculationLength}</dd>
+      <dt>Dimensionado completo</dt>
+      <dd className="text-right">
+        {formatTransitionAwareSizingStatus(result)}
+      </dd>
+      {transitionAwareSizing ? (
+        <>
+          <dt>Estados 09C2B</dt>
+          <dd className="text-right font-mono">
+            {transitionAwareSizing.evaluatedStateCount}/
+            {formatStateCount(transitionAwareSizing.theoreticalStateCount)}
+          </dd>
+        </>
+      ) : null}
     </dl>
   );
 }
@@ -1059,6 +1073,7 @@ function RouteBasisDetail({
         result={result}
       />
       <RouteTransitionPreviewDetail
+        result={result}
         resolution={routeTransitionResolution}
         segment={segment}
       />
@@ -1084,6 +1099,72 @@ function NetworkSegmentSizing({
   result: TechnicalCalculationResult;
   segment: TechnicalSegmentResult;
 }) {
+  const transitionAwareResult = result.transitionAwareNetworkSizing;
+  const transitionAwareSegment = getTransitionAwareSizingSegment(
+    result,
+    segment.segmentId,
+  );
+
+  if (
+    transitionAwareResult?.status === "resolved" &&
+    transitionAwareSegment?.status === "resolved" &&
+    transitionAwareSegment.finalDiameter
+  ) {
+    return (
+      <>
+        <TransitionAwareNetworkSegmentSizing
+          result={result}
+          sizing={transitionAwareSegment}
+        />
+        <BaselineNetworkSegmentSizing
+          result={result}
+          segment={segment}
+          title="Dimensionado base sin transiciones"
+        />
+      </>
+    );
+  }
+
+  if (transitionAwareResult && transitionAwareResult.status !== "resolved") {
+    return (
+      <>
+        <div className="mt-2 rounded border border-[#f1d28a] bg-[#fffaf0] px-2 py-2">
+          <div className="font-semibold text-[var(--muted)]">
+            Dimensionado completo
+          </div>
+          <div className="mt-1 text-[var(--warning)]">
+            {transitionAwareSegment?.issues[0]?.message ??
+              transitionAwareResult.issues[0]?.message ??
+              "Dimensionado con transiciones pendiente."}
+          </div>
+        </div>
+        <BaselineNetworkSegmentSizing
+          result={result}
+          segment={segment}
+          title="Dimensionado base sin transiciones"
+        />
+      </>
+    );
+  }
+
+  return (
+    <BaselineNetworkSegmentSizing
+      result={result}
+      segment={segment}
+      title="Dimensionado global"
+    />
+  );
+}
+
+function BaselineNetworkSegmentSizing({
+  result,
+  segment,
+  title,
+}: {
+  result: TechnicalCalculationResult;
+  segment: TechnicalSegmentResult;
+  title: string;
+}) {
   const sizing = getNetworkSizingSegment(result, segment.segmentId);
   const issues = sizing?.issues ?? [];
 
@@ -1091,7 +1172,7 @@ function NetworkSegmentSizing({
     return (
       <div className="mt-2 rounded border border-[#f1d28a] bg-[#fffaf0] px-2 py-2">
         <div className="font-semibold text-[var(--muted)]">
-          Dimensionado global
+          {title}
         </div>
         <div className="mt-1 text-[var(--warning)]">
           {issues[0]?.message ??
@@ -1109,7 +1190,7 @@ function NetworkSegmentSizing({
   return (
     <div className="mt-2 rounded border border-[var(--line)] px-2 py-2">
       <div className="font-semibold text-[var(--muted)]">
-        Dimensionado global
+        {title}
       </div>
       <dl className="mt-1 grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 gap-y-1">
         <dt>Caudal</dt>
@@ -1217,29 +1298,140 @@ function RouteAccessoryContributionList({
   );
 }
 
+function TransitionAwareNetworkSegmentSizing({
+  result,
+  sizing,
+}: {
+  result: TechnicalCalculationResult;
+  sizing: TechnicalTransitionAwareNetworkSizingSegmentResult;
+}) {
+  const showBaseline =
+    sizing.baselineDiameter !== null &&
+    sizing.finalDiameter !== null &&
+    sizing.baselineDiameter.id !== sizing.finalDiameter.id;
+
+  return (
+    <div className="mt-2 rounded border border-[#badbcc] bg-[#f1faf4] px-2 py-2">
+      <div className="font-semibold text-[#1f6b45]">
+        Dimensionado con transiciones
+      </div>
+      <dl className="mt-1 grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 gap-y-1">
+        <dt>Caudal</dt>
+        <dd className="text-right">
+          {formatTechnicalFlow(sizing.accumulatedFlow, sizing.accumulatedFlowUnit)}
+        </dd>
+        {showBaseline ? (
+          <>
+            <dt>Diametro base</dt>
+            <dd className="text-right">
+              {formatDiameterReference(sizing.baselineDiameter)}
+            </dd>
+          </>
+        ) : null}
+        <dt>Diametro final con transiciones</dt>
+        <dd className="text-right">
+          {formatDiameterReference(sizing.finalDiameter)}
+        </dd>
+        <dt>Diametro requerido</dt>
+        <dd className="text-right">
+          {formatDiameterReference(sizing.requiredDiameter)}
+        </dd>
+        <dt>Longitud fisica recorrido</dt>
+        <dd className="text-right">
+          {formatCalculationMeters(sizing.governingRoutePhysicalLengthMeters)}
+        </dd>
+        <dt>Accesorios</dt>
+        <dd className="text-right">
+          {formatCalculationMeters(
+            sizing.governingRouteAccessoryEquivalentLengthMeters,
+            "Pendiente",
+          )}
+        </dd>
+        <dt>Transiciones</dt>
+        <dd className="text-right">
+          {formatCalculationMeters(
+            sizing.governingRouteTransitionEquivalentLengthMeters,
+            "Pendiente",
+          )}
+        </dd>
+        <dt>Longitud final dimensionado</dt>
+        <dd className="text-right">
+          {formatCalculationMeters(
+            sizing.transitionAwareSizingLengthMeters,
+            "Pendiente",
+          )}
+        </dd>
+        <dt>Diametro interior</dt>
+        <dd className="text-right">{formatInternalDiameter(sizing)}</dd>
+        <dt>Longitud tabulada</dt>
+        <dd className="text-right">
+          {formatCalculationMeters(sizing.tabulatedLengthMeters, "Pendiente")}
+        </dd>
+        <dt>Capacidad tabulada</dt>
+        <dd className="text-right">{formatTabulatedCapacity(sizing)}</dd>
+        <dt>Sistema</dt>
+        <dd className="text-right">{formatPipeSystemLabel(result)}</dd>
+      </dl>
+      {sizing.explanation ? (
+        <div className="mt-1 text-[10px] text-[var(--muted)]">
+          {sizing.explanation}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function RouteTransitionPreviewDetail({
+  result,
   resolution,
   segment,
 }: {
+  result: TechnicalCalculationResult;
   resolution: TechnicalRouteTransitionResolution | null;
   segment: TechnicalSegmentResult;
 }) {
+  const isTransitionAwareResolved =
+    result.transitionAwareNetworkSizing?.status === "resolved";
+  const transitionAwareSegment = getTransitionAwareSizingSegment(
+    result,
+    segment.segmentId,
+  );
+  const solverSizingLength = isTransitionAwareResolved
+    ? transitionAwareSegment?.transitionAwareSizingLengthMeters ?? null
+    : segment.routeSizingBasis.sizingLengthMeters;
+
   return (
     <div className="mt-2 rounded border border-[#dbeafe] bg-[#eff6ff] px-2 py-2">
       <div className="font-semibold text-[#1d4ed8]">
-        Preview transiciones
+        {isTransitionAwareResolved
+          ? "Transiciones del recorrido"
+          : "Preview transiciones"}
       </div>
       <dl className="mt-1 grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 gap-y-1">
-        <dt>Longitud actual usada por solver</dt>
-        <dd className="text-right">{formatRouteSizingLength(segment)}</dd>
-        <dt>Equiv. transiciones preview</dt>
+        <dt>
+          {isTransitionAwareResolved
+            ? "Longitud final usada por solver"
+            : "Longitud actual usada por solver"}
+        </dt>
+        <dd className="text-right">
+          {formatCalculationMeters(solverSizingLength, "Pendiente")}
+        </dd>
+        <dt>
+          {isTransitionAwareResolved
+            ? "Equiv. transiciones"
+            : "Equiv. transiciones preview"}
+        </dt>
         <dd className="text-right">
           {formatCalculationMeters(
             resolution?.equivalentLengthMeters ?? null,
             "Pendiente",
           )}
         </dd>
-        <dt>Longitud proyectada con transiciones</dt>
+        <dt>
+          {isTransitionAwareResolved
+            ? "Longitud con transiciones"
+            : "Longitud proyectada con transiciones"}
+        </dt>
         <dd className="text-right">
           {formatCalculationMeters(
             resolution?.projectedSizingLengthMeters ?? null,
@@ -1247,9 +1439,11 @@ function RouteTransitionPreviewDetail({
           )}
         </dd>
       </dl>
-      <div className="mt-1 text-[10px] text-[#1d4ed8]">
-        Preview: las transiciones todavia no modifican el dimensionado global.
-      </div>
+      {!isTransitionAwareResolved ? (
+        <div className="mt-1 text-[10px] text-[#1d4ed8]">
+          Preview: las transiciones todavia no modifican el dimensionado global.
+        </div>
+      ) : null}
       {resolution && resolution.contributions.length > 0 ? (
         <ul className="mt-1 space-y-1 text-[10px] text-[var(--muted)]">
           {resolution.contributions.map((contribution, index) => (
@@ -1456,6 +1650,32 @@ function formatTotalCalculationLength(result: TechnicalCalculationResult) {
   return "Pendiente";
 }
 
+function formatTransitionAwareSizingStatus(result: TechnicalCalculationResult) {
+  const sizing = result.transitionAwareNetworkSizing;
+
+  if (!sizing) {
+    return "No disponible";
+  }
+
+  if (sizing.status === "resolved") {
+    return `Resuelto +${sizing.additionalDiameterStepCost ?? 0}`;
+  }
+
+  if (result.networkSizing?.status === "resolved") {
+    return "Pendiente";
+  }
+
+  return "Base pendiente";
+}
+
+function formatStateCount(value: number) {
+  if (!Number.isFinite(value)) {
+    return ">";
+  }
+
+  return value.toLocaleString("es-AR");
+}
+
 function formatSegmentCalculationLength(segment: TechnicalSegmentResult) {
   if (segment.calculationLengthMeters !== null) {
     return formatCalculationMeters(segment.calculationLengthMeters);
@@ -1585,13 +1805,28 @@ function getNetworkSizingSegment(
   );
 }
 
-function formatInternalDiameter(sizing: TechnicalNetworkSizingSegmentResult) {
+function getTransitionAwareSizingSegment(
+  result: TechnicalCalculationResult,
+  segmentId: string,
+) {
+  return (
+    result.transitionAwareNetworkSizing?.segments.find(
+      (segment) => segment.segmentId === segmentId,
+    ) ?? null
+  );
+}
+
+function formatInternalDiameter(sizing: {
+  internalDiameterMillimeters: number | null;
+}) {
   const value = formatOptionalNumber(sizing.internalDiameterMillimeters ?? undefined);
 
   return value ? `DI ${value} mm` : "Pendiente";
 }
 
-function formatTabulatedCapacity(sizing: TechnicalNetworkSizingSegmentResult) {
+function formatTabulatedCapacity(sizing: {
+  tabulatedCapacityM3h: number | null;
+}) {
   const value = formatOptionalNumber(sizing.tabulatedCapacityM3h ?? undefined);
 
   return value ? `${value} m3/h` : "Pendiente";
