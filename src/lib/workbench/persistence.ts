@@ -8,6 +8,7 @@ import type {
   ManualRouteNetwork,
   RouteIntentConnection,
 } from "@/lib/routing/types";
+import type { AccessoryProposalDecision } from "@/lib/routing/routeAccessoryProposals";
 import type { SectionRegistration } from "@/lib/sections/registration";
 import type {
   ClassificationProposal,
@@ -52,6 +53,7 @@ export type PersistedWorkbenchBase = {
   equipment: WorkbenchEquipment[];
   showEquipment: boolean;
   routeIntentConnections: RouteIntentConnection[];
+  routeAccessoryProposalDecisions: AccessoryProposalDecision[];
   routeNetwork: ManualRouteNetwork;
   showRoute: boolean;
   calibration: PersistedSourceCalibrationState;
@@ -294,6 +296,7 @@ function createPersistedWorkbenchBase(
     equipment: base.equipment,
     showEquipment: base.showEquipment,
     routeIntentConnections: base.routeIntentConnections,
+    routeAccessoryProposalDecisions: base.routeAccessoryProposalDecisions,
     routeNetwork: base.routeNetwork,
     showRoute: base.showRoute,
     calibration: {
@@ -379,6 +382,9 @@ function parseWorkbenchBase(value: unknown): PersistedWorkbenchBase | null {
     !isEquipmentArray(value.equipment) ||
     !isBoolean(value.showEquipment) ||
     !isRouteIntentConnectionArray(value.routeIntentConnections) ||
+    !isOptionalAccessoryProposalDecisionArray(
+      value.routeAccessoryProposalDecisions,
+    ) ||
     !isRouteNetwork(value.routeNetwork) ||
     !isBoolean(value.showRoute)
   ) {
@@ -414,6 +420,8 @@ function parseWorkbenchBase(value: unknown): PersistedWorkbenchBase | null {
     equipment: value.equipment,
     showEquipment: value.showEquipment,
     routeIntentConnections: value.routeIntentConnections,
+    routeAccessoryProposalDecisions:
+      value.routeAccessoryProposalDecisions ?? [],
     routeNetwork: value.routeNetwork,
     showRoute: value.showRoute,
     calibration: parseCalibrationState(value.calibration),
@@ -814,6 +822,29 @@ function isRouteIntentConnectionArray(
         connection.origin === "manual" &&
         isRouteIntentEndpoint(connection.from) &&
         isRouteIntentEndpoint(connection.to),
+    )
+  );
+}
+
+function isOptionalAccessoryProposalDecisionArray(
+  value: unknown,
+): value is AccessoryProposalDecision[] | undefined {
+  if (value === undefined) {
+    return true;
+  }
+
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (decision) =>
+        isRecord(decision) &&
+        isString(decision.proposalId) &&
+        isString(decision.geometryKey) &&
+        isFiniteNumber(decision.decidedAt) &&
+        (decision.status === "confirmed" || decision.status === "rejected") &&
+        (decision.ownerSegmentId === undefined ||
+          isString(decision.ownerSegmentId)) &&
+        (decision.accessoryId === undefined || isString(decision.accessoryId)),
     )
   );
 }

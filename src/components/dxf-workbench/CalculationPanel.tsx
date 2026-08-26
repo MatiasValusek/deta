@@ -17,23 +17,33 @@ import {
   type TechnicalSegmentAccessoryResult,
   type TechnicalSegmentResult,
 } from "@/lib/calculation/technicalTree";
+import {
+  accessoryProposalStateAllowsConfirmation,
+  type AccessoryProposal,
+} from "@/lib/routing/routeAccessoryProposals";
 
 type CalculationPanelProps = {
+  accessoryProposals: AccessoryProposal[];
   equipment: WorkbenchEquipment[];
   hasPendingProposal: boolean;
   isPlanActive: boolean;
   planReady: boolean;
   result: TechnicalCalculationResult | null;
+  onConfirmAccessoryProposal: (proposalId: string) => void;
   onGoToPlan: () => void;
+  onRejectAccessoryProposal: (proposalId: string) => void;
 };
 
 export function CalculationPanel({
+  accessoryProposals,
   equipment,
   hasPendingProposal,
   isPlanActive,
   planReady,
   result,
+  onConfirmAccessoryProposal,
   onGoToPlan,
+  onRejectAccessoryProposal,
 }: CalculationPanelProps) {
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null);
   const selectedSegment =
@@ -83,6 +93,11 @@ export function CalculationPanel({
         <>
           <CalculationSummary result={result} />
           <CalculationIssues result={result} />
+          <AccessoryProposalList
+            proposals={accessoryProposals}
+            onConfirm={onConfirmAccessoryProposal}
+            onReject={onRejectAccessoryProposal}
+          />
           <SegmentList
             result={result}
             selectedSegmentId={selectedSegment?.segmentId ?? null}
@@ -99,6 +114,171 @@ export function CalculationPanel({
       ) : null}
     </section>
   );
+}
+
+function AccessoryProposalList({
+  proposals,
+  onConfirm,
+  onReject,
+}: {
+  proposals: AccessoryProposal[];
+  onConfirm: (proposalId: string) => void;
+  onReject: (proposalId: string) => void;
+}) {
+  if (proposals.length === 0) {
+    return (
+      <section className="mt-3 rounded border border-[var(--line)] px-3 py-2 text-xs text-[var(--muted)]">
+        Sin accesorios geometricos detectados.
+      </section>
+    );
+  }
+
+  return (
+    <section className="mt-3">
+      <h3 className="mb-2 text-xs font-semibold uppercase text-[var(--muted)]">
+        Accesorios detectados
+      </h3>
+      <div className="space-y-1">
+        {proposals.map((proposal) => {
+          const canConfirm = accessoryProposalStateAllowsConfirmation(proposal);
+          const canReject = proposal.state === "proposed";
+
+          return (
+            <div
+              className="rounded border border-[var(--line)] px-2 py-2 text-xs"
+              key={proposal.id}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-medium">
+                    {proposalStateSymbol(proposal.state)}{" "}
+                    {accessoryProposalKindLabel(proposal.kind)} - nodo{" "}
+                    <span className="font-mono">{proposal.nodeId}</span> -{" "}
+                    {accessoryProposalStateLabel(proposal)}
+                  </div>
+                  <div className="mt-0.5 text-[10px] text-[var(--muted)]">
+                    {proposalEvidenceLabel(proposal)}
+                  </div>
+                  {proposalReviewReason(proposal) ? (
+                    <div className="mt-0.5 text-[10px] text-[var(--warning)]">
+                      {proposalReviewReason(proposal)}
+                    </div>
+                  ) : null}
+                </div>
+                {canConfirm || canReject ? (
+                  <div className="flex shrink-0 gap-1">
+                    {canConfirm ? (
+                      <button
+                        className="rounded border border-[var(--line)] bg-white px-2 py-1 text-[11px] hover:border-[var(--accent)]"
+                        type="button"
+                        onClick={() => onConfirm(proposal.id)}
+                      >
+                        Confirmar
+                      </button>
+                    ) : null}
+                    {canReject ? (
+                      <button
+                        className="rounded border border-[var(--line)] bg-white px-2 py-1 text-[11px] hover:border-[var(--accent)]"
+                        type="button"
+                        onClick={() => onReject(proposal.id)}
+                      >
+                        Rechazar
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function accessoryProposalKindLabel(kind: AccessoryProposal["kind"]) {
+  switch (kind) {
+    case "elbow":
+      return "Codo";
+    case "tee":
+      return "Tee";
+    case "straight":
+      return "Paso recto";
+    case "terminal":
+      return "Terminal";
+    case "unsupported":
+      return "Revision";
+  }
+}
+
+function accessoryProposalStateLabel(proposal: AccessoryProposal) {
+  if (proposal.state === "confirmed") {
+    return "confirmado";
+  }
+
+  if (proposal.state === "rejected") {
+    return "rechazado";
+  }
+
+  if (proposal.state === "needs_review") {
+    return proposal.kind === "unsupported" ? "no soportado" : "requiere revision";
+  }
+
+  return "propuesto";
+}
+
+function proposalStateSymbol(state: AccessoryProposal["state"]) {
+  switch (state) {
+    case "confirmed":
+      return "OK";
+    case "rejected":
+      return "x";
+    case "needs_review":
+      return "?";
+    case "proposed":
+      return "+";
+  }
+}
+
+function proposalEvidenceLabel(proposal: AccessoryProposal) {
+  const segments = proposal.incidentSegmentIds.join(", ");
+  const angle =
+    proposal.evidence.angleDegrees === undefined
+      ? null
+      : `${proposal.evidence.angleDegrees.toLocaleString("es-AR", {
+          maximumFractionDigits: 1,
+        })} deg`;
+
+  return [
+    `grado ${proposal.evidence.degree}`,
+    angle,
+    segments ? `tramos ${segments}` : null,
+    proposal.suggestedCatalogCode
+      ? `SIGAS ${proposal.suggestedCatalogCode}`
+      : null,
+  ]
+    .filter(Boolean)
+    .join(" - ");
+}
+
+function proposalReviewReason(proposal: AccessoryProposal) {
+  if (proposal.state === "confirmed" || proposal.state === "rejected") {
+    return null;
+  }
+
+  if (proposal.systemMatch?.status === "needs_review") {
+    return proposal.systemMatch.reason;
+  }
+
+  if (proposal.systemMatch?.status === "unsupported") {
+    return proposal.systemMatch.reason;
+  }
+
+  if (proposal.ownerResolution.status === "ambiguous") {
+    return proposal.ownerResolution.reason;
+  }
+
+  return proposal.reason;
 }
 
 function CalculationSummary({ result }: { result: TechnicalCalculationResult }) {

@@ -26,6 +26,7 @@ import {
   technicalCalculationStatusLabel,
 } from "@/lib/calculation/technicalTree";
 import { SIGAS_PIPE_SYSTEM } from "@/lib/calculation/pipeSystems/sigas";
+import { matchSigasAccessoryProposal } from "@/lib/calculation/pipeSystems/sigas/sigasAccessoryProposal";
 import {
   equipmentDefinitionForType,
   equipmentTypeLabel,
@@ -84,6 +85,16 @@ import {
   routeIntentConnectionsEqual,
   routeIntentEndpointKey,
 } from "@/lib/routing/intentProposal";
+import {
+  confirmRouteAccessoryProposal,
+  detectRouteAccessoryProposals,
+  reconcileRouteAccessoryProposalState,
+  rejectRouteAccessoryProposal,
+  upsertAccessoryProposalDecision,
+  withAccessoryProposalSystemMatch,
+  type AccessoryProposalDecision,
+  type AccessoryProposalDiameterReference,
+} from "@/lib/routing/routeAccessoryProposals";
 import type {
   AutomaticRouteProposal,
   AutomaticRouteRestriction,
@@ -244,6 +255,7 @@ type WorkbenchBase = {
   selectedEquipmentId: string | null;
   showEquipment: boolean;
   routeIntentConnections: RouteIntentConnection[];
+  routeAccessoryProposalDecisions: AccessoryProposalDecision[];
   routeNetwork: ManualRouteNetwork;
   showRoute: boolean;
   calibration: SourceCalibrationState;
@@ -772,6 +784,61 @@ export function DxfWorkbench() {
         : null,
     [planBase],
   );
+  const accessoryProposalDiameterBySegmentId = useMemo(() => {
+    const sizingSegments = technicalCalculationResult?.networkSizing?.segments ?? [];
+
+    return new Map(
+      sizingSegments.map((segment) => [
+        segment.segmentId,
+        segment.calculatedDiameter as AccessoryProposalDiameterReference | null,
+      ]),
+    );
+  }, [technicalCalculationResult]);
+  const routeAccessoryProposals = useMemo(() => {
+    if (!planBase) {
+      return [];
+    }
+
+    return detectRouteAccessoryProposals({
+      decisions: planBase.routeAccessoryProposalDecisions,
+      diameterBySegmentId: accessoryProposalDiameterBySegmentId,
+      equipment: planBase.equipment,
+      network: planBase.routeNetwork,
+    }).map((proposal) =>
+      withAccessoryProposalSystemMatch(
+        proposal,
+        matchSigasAccessoryProposal(proposal),
+      ),
+    );
+  }, [accessoryProposalDiameterBySegmentId, planBase]);
+
+  useEffect(() => {
+    if (!planBase) {
+      return;
+    }
+
+    const reconciled = reconcileRouteAccessoryProposalState({
+      decisions: planBase.routeAccessoryProposalDecisions,
+      network: planBase.routeNetwork,
+      proposals: routeAccessoryProposals,
+    });
+
+    if (
+      reconciled.network === planBase.routeNetwork &&
+      accessoryProposalDecisionsEqual(
+        reconciled.decisions,
+        planBase.routeAccessoryProposalDecisions,
+      )
+    ) {
+      return;
+    }
+
+    updateBase(planBase.id, (base) => ({
+      ...base,
+      routeAccessoryProposalDecisions: reconciled.decisions,
+      routeNetwork: reconciled.network,
+    }));
+  }, [planBase, routeAccessoryProposals]);
 
   const activePdfPage = useMemo(() => {
     return (
@@ -3234,6 +3301,79 @@ export function DxfWorkbench() {
     setRouteError(null);
   }
 
+  function handleConfirmAccessoryProposal(proposalId: string) {
+    setActiveRightPanelSection("calculation");
+
+    if (!planBase) {
+      return;
+    }
+
+    const proposal = routeAccessoryProposals.find(
+      (item) => item.id === proposalId,
+    );
+
+    if (!proposal) {
+      setRouteError("La propuesta de accesorio ya no existe en la red.");
+      return;
+    }
+
+    const result = confirmRouteAccessoryProposal({
+      decidedAt: Date.now(),
+      network: planBase.routeNetwork,
+      proposal,
+    });
+
+    if (!result.ok) {
+      setRouteError(result.message);
+      return;
+    }
+
+    updateBase(planBase.id, (base) => ({
+      ...base,
+      routeAccessoryProposalDecisions: upsertAccessoryProposalDecision(
+        base.routeAccessoryProposalDecisions,
+        result.decision,
+      ),
+      routeNetwork: result.network,
+      showRoute: true,
+    }));
+    setRouteError(null);
+  }
+
+  function handleRejectAccessoryProposal(proposalId: string) {
+    setActiveRightPanelSection("calculation");
+
+    if (!planBase) {
+      return;
+    }
+
+    const proposal = routeAccessoryProposals.find(
+      (item) => item.id === proposalId,
+    );
+
+    if (!proposal) {
+      setRouteError("La propuesta de accesorio ya no existe en la red.");
+      return;
+    }
+
+    const result = rejectRouteAccessoryProposal({
+      decidedAt: Date.now(),
+      network: planBase.routeNetwork,
+      proposal,
+    });
+
+    updateBase(planBase.id, (base) => ({
+      ...base,
+      routeAccessoryProposalDecisions: upsertAccessoryProposalDecision(
+        base.routeAccessoryProposalDecisions,
+        result.decision,
+      ),
+      routeNetwork: result.network,
+      showRoute: true,
+    }));
+    setRouteError(null);
+  }
+
   function handleViewSectionRegistration(link: SectionPlanLink) {
     if (!link.registration) {
       return;
@@ -4184,12 +4324,15 @@ export function DxfWorkbench() {
       disabledReason: planOnlyDisabledReason,
       content: (
         <CalculationPanel
+          accessoryProposals={routeAccessoryProposals}
           equipment={planEquipment}
           hasPendingProposal={Boolean(routeProposal)}
           isPlanActive={activeBase?.type === "plan"}
           planReady={Boolean(planBase)}
           result={technicalCalculationResult}
+          onConfirmAccessoryProposal={handleConfirmAccessoryProposal}
           onGoToPlan={handleGoToPlanForRoute}
+          onRejectAccessoryProposal={handleRejectAccessoryProposal}
         />
       ),
     },
@@ -4882,6 +5025,7 @@ function createInitialBase(params: {
     selectedEquipmentId: null,
     showEquipment: true,
     routeIntentConnections: [],
+    routeAccessoryProposalDecisions: [],
     routeNetwork: createEmptyRouteNetwork(),
     showRoute: true,
     calibration: createInitialCalibrationState(),
@@ -4955,6 +5099,7 @@ function restorePersistedWorkbenchBase(
     selectedEquipmentId: null,
     showEquipment: base.showEquipment,
     routeIntentConnections: base.routeIntentConnections,
+    routeAccessoryProposalDecisions: base.routeAccessoryProposalDecisions,
     routeNetwork: base.routeNetwork,
     showRoute: base.showRoute,
     calibration: restorePersistedCalibrationState(base.calibration),
@@ -6587,6 +6732,28 @@ function routeNetworkSignature(network: ManualRouteNetwork) {
     .join("|");
 
   return `${nodes}||${segments}`;
+}
+
+function accessoryProposalDecisionsEqual(
+  first: AccessoryProposalDecision[],
+  second: AccessoryProposalDecision[],
+) {
+  if (first.length !== second.length) {
+    return false;
+  }
+
+  return first.every((decision, index) => {
+    const other = second[index];
+
+    return (
+      other !== undefined &&
+      decision.proposalId === other.proposalId &&
+      decision.geometryKey === other.geometryKey &&
+      decision.status === other.status &&
+      decision.ownerSegmentId === other.ownerSegmentId &&
+      decision.accessoryId === other.accessoryId
+    );
+  });
 }
 
 function routeSourceBounds(plan: WorkbenchBase): Bounds | null {
