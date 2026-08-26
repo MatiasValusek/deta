@@ -8,6 +8,7 @@ import type {
   AccessoryCatalogCandidate,
   AccessoryCatalogCandidateStatus,
 } from "@/lib/calculation/accessoryCatalogCandidates";
+import type { DiameterTransitionProposal } from "@/lib/calculation/diameterTransitionProposals";
 import {
   SIGAS_ACCESSORY_EQUIVALENT_LENGTHS,
   SIGAS_DIAMETERS,
@@ -25,6 +26,19 @@ type SigasAccessoryFamily = {
   label: string;
   rows: SigasAccessoryEquivalentLengthRow[];
   type: "elbow" | "tee";
+};
+
+type SigasTransitionFamily = {
+  familyId: string;
+  label: string;
+  rows: SigasAccessoryEquivalentLengthRow[];
+  transitionKind: "inline_reduction" | "reduced_tee";
+  type: "other" | "tee";
+};
+
+type TransitionDiameterPair = {
+  largerExternalMillimeters: number;
+  smallerExternalMillimeters: number;
 };
 
 export function matchSigasAccessoryProposal(
@@ -97,6 +111,26 @@ export function getSigasAccessoryCatalogCandidates(params: {
       ownerResolution: params.ownerResolution,
     }),
   );
+}
+
+export function getSigasDiameterTransitionCatalogCandidates(
+  proposal: DiameterTransitionProposal,
+): AccessoryCatalogCandidate[] {
+  const pair = transitionDiameterPairForProposal(proposal);
+
+  if (!pair) {
+    return [];
+  }
+
+  return sigasTransitionFamiliesForProposal(proposal)
+    .filter((family) => transitionFamilyHasPair(family, pair))
+    .map((family) =>
+      createSigasDiameterTransitionCandidate({
+        family,
+        pair,
+        proposal,
+      }),
+    );
 }
 
 function matchFamilySet(params: {
@@ -304,6 +338,321 @@ function getDiameter(
   return diameterBySegmentId instanceof Map
     ? diameterBySegmentId.get(segmentId) ?? null
     : diameterBySegmentId[segmentId] ?? null;
+}
+
+function createSigasDiameterTransitionCandidate(params: {
+  family: SigasTransitionFamily;
+  pair: TransitionDiameterPair;
+  proposal: DiameterTransitionProposal;
+}): AccessoryCatalogCandidate {
+  const status = transitionCandidateStatus(params.proposal);
+  const reason = transitionCandidateReason({
+    family: params.family,
+    pair: params.pair,
+    proposal: params.proposal,
+    status,
+  });
+
+  return {
+    compatibleDiameterIds: transitionFamilyCompatibleDiameterIds(params.family),
+    diameterCompatibility: status,
+    familyId: params.family.familyId,
+    geometryCompatibility: "compatible",
+    id: `${SIGAS_PIPE_SYSTEM_IDENTITY.id}:${params.family.familyId}`,
+    label: params.family.label,
+    originalLabels: params.family.rows.map((row) => row.label).sort(),
+    pipeSystem: SIGAS_PIPE_SYSTEM_IDENTITY,
+    reason,
+    requiredInformation: status === "compatible" ? [] : [reason],
+    status,
+    type: params.family.type,
+  };
+}
+
+function transitionCandidateStatus(
+  proposal: DiameterTransitionProposal,
+): AccessoryCatalogCandidateStatus {
+  if (proposal.state === "unresolved") {
+    return "requires_more_information";
+  }
+
+  if (proposal.state === "unsupported") {
+    return "incompatible";
+  }
+
+  if (
+    proposal.kind === "simple_transition" &&
+    proposal.direction === "expanding"
+  ) {
+    return "requires_more_information";
+  }
+
+  if (proposal.direction === "unknown") {
+    return "requires_more_information";
+  }
+
+  return "compatible";
+}
+
+function transitionCandidateReason(params: {
+  family: SigasTransitionFamily;
+  pair: TransitionDiameterPair;
+  proposal: DiameterTransitionProposal;
+  status: AccessoryCatalogCandidateStatus;
+}) {
+  const pairLabel = `${params.pair.largerExternalMillimeters} a ${params.pair.smallerExternalMillimeters} mm`;
+
+  if (params.status === "requires_more_information") {
+    if (params.proposal.kind === "simple_transition") {
+      return `La Tabla No 3 contiene ${params.family.label} para ${pairLabel}, pero el sentido actual es expansivo y requiere confirmacion profesional.`;
+    }
+
+    return `La Tabla No 3 contiene ${params.family.label} para ${pairLabel}, pero falta confirmar orientacion hidraulica.`;
+  }
+
+  if (params.status === "incompatible") {
+    return `La familia ${params.family.label} no aplica a esta configuracion de transicion.`;
+  }
+
+  return `Compatible con transicion ${pairLabel} segun Tabla No 3 SIGAS.`;
+}
+
+function sigasTransitionFamiliesForProposal(
+  proposal: DiameterTransitionProposal,
+) {
+  const families = createSigasTransitionFamilies();
+
+  if (
+    proposal.kind === "simple_reduction" ||
+    proposal.kind === "simple_transition"
+  ) {
+    return families.filter(
+      (family) => family.transitionKind === "inline_reduction",
+    );
+  }
+
+  if (proposal.kind === "branch_transition") {
+    return families.filter(
+      (family) => family.transitionKind === "reduced_tee",
+    );
+  }
+
+  return [];
+}
+
+function createSigasTransitionFamilies() {
+  const byFamily = new Map<string, SigasTransitionFamily>();
+
+  for (const row of SIGAS_ACCESSORY_EQUIVALENT_LENGTHS) {
+    const family = sigasTransitionFamilyForRow(row);
+
+    if (!family) {
+      continue;
+    }
+
+    const current = byFamily.get(family.familyId);
+
+    if (!current) {
+      byFamily.set(family.familyId, family);
+      continue;
+    }
+
+    current.rows.push(row);
+  }
+
+  return [...byFamily.values()].sort((first, second) =>
+    first.label.localeCompare(second.label),
+  );
+}
+
+function sigasTransitionFamilyForRow(
+  row: SigasAccessoryEquivalentLengthRow,
+): SigasTransitionFamily | null {
+  const label = normalizeLabel(row.label);
+
+  if (label.startsWith("cupla reduccion hh")) {
+    return transitionFamily(
+      "cupla-reduccion-hh",
+      "Cupla Reduccion HH",
+      "inline_reduction",
+      "other",
+      row,
+    );
+  }
+
+  if (label.startsWith("buje reduccion mh")) {
+    return transitionFamily(
+      "buje-reduccion-mh",
+      "Buje Reduccion MH",
+      "inline_reduction",
+      "other",
+      row,
+    );
+  }
+
+  if (label.startsWith("reductor anular")) {
+    return transitionFamily(
+      "reductor-anular",
+      "Reductor Anular",
+      "inline_reduction",
+      "other",
+      row,
+    );
+  }
+
+  if (label.startsWith("te reduc. central") && label.includes("flujo a 90")) {
+    return transitionFamily(
+      "te-reduc-central-flujo-a-90",
+      "Te Reduc. Central, flujo a 90",
+      "reduced_tee",
+      "tee",
+      row,
+    );
+  }
+
+  if (
+    label.startsWith("te reduc. central") &&
+    label.includes("flujo a traves")
+  ) {
+    return transitionFamily(
+      "te-reduc-central-flujo-a-traves",
+      "Te Reduc. Central, flujo a traves",
+      "reduced_tee",
+      "tee",
+      row,
+    );
+  }
+
+  return null;
+}
+
+function transitionFamily(
+  familyId: string,
+  label: string,
+  transitionKind: SigasTransitionFamily["transitionKind"],
+  type: SigasTransitionFamily["type"],
+  row: SigasAccessoryEquivalentLengthRow,
+): SigasTransitionFamily {
+  return {
+    familyId,
+    label,
+    rows: [row],
+    transitionKind,
+    type,
+  };
+}
+
+function transitionFamilyHasPair(
+  family: SigasTransitionFamily,
+  pair: TransitionDiameterPair,
+) {
+  return family.rows.some((row) => {
+    const rowPair = transitionPairForRow(row);
+
+    return (
+      rowPair !== null &&
+      rowPair.largerExternalMillimeters === pair.largerExternalMillimeters &&
+      rowPair.smallerExternalMillimeters === pair.smallerExternalMillimeters
+    );
+  });
+}
+
+function transitionFamilyCompatibleDiameterIds(family: SigasTransitionFamily) {
+  const externalMillimeters = new Set<number>();
+
+  for (const row of family.rows) {
+    const pair = transitionPairForRow(row);
+
+    if (!pair) {
+      continue;
+    }
+
+    externalMillimeters.add(pair.largerExternalMillimeters);
+    externalMillimeters.add(pair.smallerExternalMillimeters);
+  }
+
+  return SIGAS_DIAMETERS.filter((diameter) =>
+    externalMillimeters.has(diameter.externalDiameterMillimeters),
+  ).map((diameter) => diameter.id);
+}
+
+function transitionDiameterPairForProposal(
+  proposal: DiameterTransitionProposal,
+): TransitionDiameterPair | null {
+  const values = proposal.incidentSegments
+    .map((segment) => transitionDiameterMillimeters(segment.diameter))
+    .filter((value): value is number => value !== null);
+
+  if (values.length !== proposal.incidentSegments.length) {
+    return null;
+  }
+
+  const uniqueValues = [...new Set(values)].sort((first, second) => first - second);
+
+  if (uniqueValues.length !== 2) {
+    return null;
+  }
+
+  return {
+    largerExternalMillimeters: uniqueValues[1] as number,
+    smallerExternalMillimeters: uniqueValues[0] as number,
+  };
+}
+
+function transitionPairForRow(
+  row: SigasAccessoryEquivalentLengthRow,
+): TransitionDiameterPair | null {
+  const label = normalizeLabel(row.label);
+  const match = label.match(/(\d{2,3})\s*(?:a|x|-)\s*(\d{2,3})/);
+
+  if (!match) {
+    return null;
+  }
+
+  const first = Number(match[1]);
+  const second = Number(match[2]);
+
+  if (!Number.isFinite(first) || !Number.isFinite(second)) {
+    return null;
+  }
+
+  return {
+    largerExternalMillimeters: Math.max(first, second),
+    smallerExternalMillimeters: Math.min(first, second),
+  };
+}
+
+function transitionDiameterMillimeters(
+  diameter: { externalDiameterMillimeters?: number; label: string; id: string } | null,
+) {
+  if (!diameter) {
+    return null;
+  }
+
+  if (
+    diameter.externalDiameterMillimeters !== undefined &&
+    Number.isFinite(diameter.externalDiameterMillimeters)
+  ) {
+    return diameter.externalDiameterMillimeters;
+  }
+
+  return parseMillimeters(diameter.label) ?? parseMillimeters(diameter.id);
+}
+
+function parseMillimeters(value: string | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const match = value.match(/(?:^|[^0-9])([0-9]{2,3})(?:\s*mm)?(?:$|[^0-9])/i);
+
+  if (!match) {
+    return null;
+  }
+
+  const parsed = Number(match[1]);
+
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function createSigasAccessoryFamilies() {
