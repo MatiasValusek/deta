@@ -24,6 +24,18 @@ import {
   accessoryCatalogSelectionFromCandidate,
   type AccessoryProposalTechnicalReview,
 } from "@/lib/calculation/accessoryCatalogCandidates";
+import type { PipeDiameterReference } from "@/lib/calculation/pipeSystem";
+import {
+  confirmDiameterTransitionProposal,
+  detectDiameterTransitionProposals,
+  reconcileDiameterTransitionDecisions,
+  rejectDiameterTransitionProposal,
+  upsertDiameterTransitionDecision,
+  withDiameterTransitionTechnicalReview,
+  type DiameterTransitionDecision,
+  type DiameterTransitionProposal,
+  type DiameterTransitionTechnicalReview,
+} from "@/lib/calculation/diameterTransitionProposals";
 import {
   calculateTechnicalTree,
   formatTechnicalFlow,
@@ -32,6 +44,7 @@ import {
 import { SIGAS_PIPE_SYSTEM } from "@/lib/calculation/pipeSystems/sigas";
 import {
   getSigasAccessoryCatalogCandidates,
+  getSigasDiameterTransitionCatalogCandidates,
   matchSigasAccessoryProposal,
 } from "@/lib/calculation/pipeSystems/sigas/sigasAccessoryProposal";
 import {
@@ -264,6 +277,7 @@ type WorkbenchBase = {
   selectedEquipmentId: string | null;
   showEquipment: boolean;
   routeIntentConnections: RouteIntentConnection[];
+  diameterTransitionDecisions: DiameterTransitionDecision[];
   routeAccessoryProposalDecisions: AccessoryProposalDecision[];
   routeNetwork: ManualRouteNetwork;
   showRoute: boolean;
@@ -793,16 +807,16 @@ export function DxfWorkbench() {
         : null,
     [planBase],
   );
-  const accessoryProposalDiameterBySegmentId = useMemo(() => {
-    const sizingSegments = technicalCalculationResult?.networkSizing?.segments ?? [];
+  const finalDiameterBySegmentId = useMemo(() => {
+    const finalDiameters =
+      technicalCalculationResult?.networkSizing?.finalDiameterBySegmentId ?? {};
 
-    return new Map(
-      sizingSegments.map((segment) => [
-        segment.segmentId,
-        segment.calculatedDiameter as AccessoryProposalDiameterReference | null,
-      ]),
+    return new Map<string, PipeDiameterReference>(
+      Object.entries(finalDiameters),
     );
   }, [technicalCalculationResult]);
+  const accessoryProposalDiameterBySegmentId =
+    finalDiameterBySegmentId as Map<string, AccessoryProposalDiameterReference>;
   const routeAccessoryProposals = useMemo(() => {
     if (!planBase) {
       return [];
@@ -881,6 +895,81 @@ export function DxfWorkbench() {
       };
     });
   }, [accessoryProposalDiameterBySegmentId, planBase, routeAccessoryProposals]);
+  const rawDiameterTransitionProposals = useMemo(() => {
+    if (!planBase) {
+      return [];
+    }
+
+    return detectDiameterTransitionProposals({
+      decisions: planBase.diameterTransitionDecisions,
+      diameterBySegmentId: finalDiameterBySegmentId,
+      equipment: planBase.equipment,
+      network: planBase.routeNetwork,
+    });
+  }, [finalDiameterBySegmentId, planBase]);
+  const diameterTransitionProposalReviews = useMemo(
+    () =>
+      rawDiameterTransitionProposals.map(
+        (proposal): DiameterTransitionTechnicalReview => {
+          const candidates =
+            getSigasDiameterTransitionCatalogCandidates(proposal);
+          const selectedCandidate = proposal.selectedCatalogFamilyId
+            ? candidates.find(
+                (candidate) =>
+                  candidate.familyId === proposal.selectedCatalogFamilyId &&
+                  (!proposal.decision?.pipeSystemId ||
+                    candidate.pipeSystem.id === proposal.decision.pipeSystemId),
+              ) ?? null
+            : null;
+          const compatibleCandidates = candidates.filter(
+            (candidate) => candidate.status === "compatible",
+          );
+
+          return {
+            candidates,
+            downstreamDiameters: proposal.downstreamDiameters.map((item) => ({
+              diameter: item.diameter,
+              segmentId: item.segmentId,
+            })),
+            reason: diameterTransitionReviewReason({
+              candidates,
+              compatibleCandidates,
+              proposal,
+              selectedCandidate,
+            }),
+            selectedCandidate,
+            status:
+              selectedCandidate?.status ??
+              (compatibleCandidates.length > 0
+                ? "compatible"
+                : candidates.some(
+                    (candidate) => candidate.status === "incompatible",
+                  )
+                  ? "incompatible"
+                  : "requires_more_information"),
+            transitionId: proposal.id,
+            upstreamDiameter: proposal.upstreamDiameter?.diameter ?? null,
+          };
+        },
+      ),
+    [rawDiameterTransitionProposals],
+  );
+  const diameterTransitionProposals = useMemo(() => {
+    const reviewById = new Map(
+      diameterTransitionProposalReviews.map((review) => [
+        review.transitionId,
+        review,
+      ]),
+    );
+
+    return rawDiameterTransitionProposals.map((proposal) => {
+      const review = reviewById.get(proposal.id);
+
+      return review
+        ? withDiameterTransitionTechnicalReview(proposal, review)
+        : proposal;
+    });
+  }, [diameterTransitionProposalReviews, rawDiameterTransitionProposals]);
 
   useEffect(() => {
     if (!planBase) {
@@ -909,6 +998,31 @@ export function DxfWorkbench() {
       routeNetwork: reconciled.network,
     }));
   }, [planBase, routeAccessoryProposals]);
+
+  useEffect(() => {
+    if (!planBase) {
+      return;
+    }
+
+    const decisions = reconcileDiameterTransitionDecisions({
+      decisions: planBase.diameterTransitionDecisions,
+      proposals: rawDiameterTransitionProposals,
+    });
+
+    if (
+      diameterTransitionDecisionsEqual(
+        decisions,
+        planBase.diameterTransitionDecisions,
+      )
+    ) {
+      return;
+    }
+
+    updateBase(planBase.id, (base) => ({
+      ...base,
+      diameterTransitionDecisions: decisions,
+    }));
+  }, [planBase, rawDiameterTransitionProposals]);
 
   const activePdfPage = useMemo(() => {
     return (
@@ -3465,6 +3579,90 @@ export function DxfWorkbench() {
     setRouteError(null);
   }
 
+  function handleConfirmDiameterTransition(
+    transitionId: string,
+    candidateId: string,
+  ) {
+    setActiveRightPanelSection("calculation");
+
+    if (!planBase) {
+      return;
+    }
+
+    const proposal = diameterTransitionProposals.find(
+      (item) => item.id === transitionId,
+    );
+
+    if (!proposal) {
+      setRouteError("La transicion de diametro ya no existe en la red.");
+      return;
+    }
+
+    const review = diameterTransitionProposalReviews.find(
+      (item) => item.transitionId === transitionId,
+    );
+    const candidate = review?.candidates.find((item) => item.id === candidateId);
+
+    if (!review || !candidate) {
+      setRouteError("Selecciona una familia tecnica compatible.");
+      return;
+    }
+
+    const result = confirmDiameterTransitionProposal({
+      candidate,
+      decidedAt: Date.now(),
+      origin: "user_confirmed",
+      proposal,
+    });
+
+    if (!result.ok) {
+      setRouteError(result.message);
+      return;
+    }
+
+    updateBase(planBase.id, (base) => ({
+      ...base,
+      diameterTransitionDecisions: upsertDiameterTransitionDecision(
+        base.diameterTransitionDecisions,
+        result.decision,
+      ),
+      showRoute: true,
+    }));
+    setRouteError(null);
+  }
+
+  function handleRejectDiameterTransition(transitionId: string) {
+    setActiveRightPanelSection("calculation");
+
+    if (!planBase) {
+      return;
+    }
+
+    const proposal = diameterTransitionProposals.find(
+      (item) => item.id === transitionId,
+    );
+
+    if (!proposal) {
+      setRouteError("La transicion de diametro ya no existe en la red.");
+      return;
+    }
+
+    const decision = rejectDiameterTransitionProposal({
+      decidedAt: Date.now(),
+      proposal,
+    });
+
+    updateBase(planBase.id, (base) => ({
+      ...base,
+      diameterTransitionDecisions: upsertDiameterTransitionDecision(
+        base.diameterTransitionDecisions,
+        decision,
+      ),
+      showRoute: true,
+    }));
+    setRouteError(null);
+  }
+
   function handleViewSectionRegistration(link: SectionPlanLink) {
     if (!link.registration) {
       return;
@@ -4417,14 +4615,18 @@ export function DxfWorkbench() {
         <CalculationPanel
           accessoryProposals={routeAccessoryProposals}
           accessoryProposalReviews={routeAccessoryProposalReviews}
+          diameterTransitionProposals={diameterTransitionProposals}
+          diameterTransitionReviews={diameterTransitionProposalReviews}
           equipment={planEquipment}
           hasPendingProposal={Boolean(routeProposal)}
           isPlanActive={activeBase?.type === "plan"}
           planReady={Boolean(planBase)}
           result={technicalCalculationResult}
           onConfirmAccessoryProposal={handleConfirmAccessoryProposal}
+          onConfirmDiameterTransition={handleConfirmDiameterTransition}
           onGoToPlan={handleGoToPlanForRoute}
           onRejectAccessoryProposal={handleRejectAccessoryProposal}
+          onRejectDiameterTransition={handleRejectDiameterTransition}
         />
       ),
     },
@@ -5117,6 +5319,7 @@ function createInitialBase(params: {
     selectedEquipmentId: null,
     showEquipment: true,
     routeIntentConnections: [],
+    diameterTransitionDecisions: [],
     routeAccessoryProposalDecisions: [],
     routeNetwork: createEmptyRouteNetwork(),
     showRoute: true,
@@ -5191,6 +5394,7 @@ function restorePersistedWorkbenchBase(
     selectedEquipmentId: null,
     showEquipment: base.showEquipment,
     routeIntentConnections: base.routeIntentConnections,
+    diameterTransitionDecisions: base.diameterTransitionDecisions,
     routeAccessoryProposalDecisions: base.routeAccessoryProposalDecisions,
     routeNetwork: base.routeNetwork,
     showRoute: base.showRoute,
@@ -6848,6 +7052,66 @@ function accessoryProposalDecisionsEqual(
   });
 }
 
+function diameterTransitionReviewReason(params: {
+  candidates: DiameterTransitionTechnicalReview["candidates"];
+  compatibleCandidates: DiameterTransitionTechnicalReview["candidates"];
+  proposal: DiameterTransitionProposal;
+  selectedCandidate: DiameterTransitionTechnicalReview["selectedCandidate"];
+}) {
+  if (params.proposal.state === "not_required") {
+    return "No hay cambio de diametro activo con los diametros actuales.";
+  }
+
+  if (
+    params.proposal.state === "unresolved" ||
+    params.proposal.state === "unsupported"
+  ) {
+    return params.proposal.reason;
+  }
+
+  if (params.selectedCandidate) {
+    return params.selectedCandidate.status === "compatible"
+      ? null
+      : params.selectedCandidate.reason;
+  }
+
+  if (params.proposal.decision?.catalogFamilyId) {
+    return "La familia confirmada no existe entre las familias SIGAS aplicables a la geometria actual.";
+  }
+
+  if (params.candidates.length === 0) {
+    return params.proposal.reason;
+  }
+
+  if (params.compatibleCandidates.length === 0) {
+    return params.candidates[0]?.reason ?? params.proposal.reason;
+  }
+
+  return null;
+}
+
+function diameterTransitionDecisionsEqual(
+  first: DiameterTransitionDecision[],
+  second: DiameterTransitionDecision[],
+) {
+  if (first.length !== second.length) {
+    return false;
+  }
+
+  return first.every((decision, index) => {
+    const other = second[index];
+
+    return (
+      other !== undefined &&
+      decision.transitionId === other.transitionId &&
+      decision.geometryKey === other.geometryKey &&
+      decision.status === other.status &&
+      decision.catalogFamilyId === other.catalogFamilyId &&
+      decision.pipeSystemId === other.pipeSystemId
+    );
+  });
+}
+
 function routeSourceBounds(plan: WorkbenchBase): Bounds | null {
   if (plan.sourceType === "dxf") {
     return plan.drawing?.bounds ?? boundsForRoutePoints(plan.equipment);
@@ -7016,6 +7280,8 @@ function baseHasUserWork(base: WorkbenchBase) {
     base.constraints.length > 0 ||
     base.equipment.length > 0 ||
     base.routeIntentConnections.length > 0 ||
+    base.diameterTransitionDecisions.length > 0 ||
+    base.routeAccessoryProposalDecisions.length > 0 ||
     base.routeNetwork.nodes.length > 0 ||
     base.routeNetwork.segments.length > 0 ||
     base.calibration.calibration !== null ||

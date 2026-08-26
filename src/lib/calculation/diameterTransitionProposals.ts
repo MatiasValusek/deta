@@ -74,6 +74,12 @@ export type DiameterTransitionIncidentSegment = {
   segmentId: string;
 };
 
+export type DiameterTransitionDiameterContext = {
+  diameter: PipeDiameterReference | null;
+  role: DiameterTransitionSegmentRole;
+  segmentId: string;
+};
+
 export type DiameterTransitionGeometryClassification =
   | "ambiguous"
   | "branch"
@@ -92,6 +98,7 @@ export type DiameterTransitionEvidence = {
 export type DiameterTransitionProposal = {
   decision?: DiameterTransitionDecision;
   direction: DiameterTransitionDirection;
+  downstreamDiameters: DiameterTransitionDiameterContext[];
   downstreamSegmentIds: string[];
   evidence: DiameterTransitionEvidence;
   geometryKey: string;
@@ -103,6 +110,7 @@ export type DiameterTransitionProposal = {
   reason: string;
   selectedCatalogFamilyId?: string;
   state: DiameterTransitionState;
+  upstreamDiameter: DiameterTransitionDiameterContext | null;
   upstreamSegmentId: string | null;
 };
 
@@ -300,6 +308,7 @@ export function rejectDiameterTransitionProposal(params: {
   return {
     decidedAt: params.decidedAt,
     geometryKey: params.proposal.geometryKey,
+    origin: "user_confirmed",
     status: "rejected",
     transitionId: params.proposal.id,
   };
@@ -391,7 +400,7 @@ function createDiameterTransitionProposal(params: {
     return {
       ...base,
       kind: "unresolved",
-      reason: "incident_segment_diameter_unresolved",
+      reason: `Falta diametro calculado en tramos incidentes: ${unresolvedSegmentIds.join(", ")}.`,
       state: "unresolved",
     };
   }
@@ -409,10 +418,7 @@ function createDiameterTransitionProposal(params: {
     if (angleClassification === "colinear") {
       return {
         ...base,
-        kind:
-          base.direction === "expanding"
-            ? "simple_transition"
-            : "simple_reduction",
+        kind: "simple_reduction",
         reason: "Cambio de diametro en paso recto colineal.",
         state: "transition_required",
       };
@@ -480,11 +486,29 @@ function createBaseTransition(params: {
     .filter((item) => item.role === "downstream" || item.role === "branch")
     .map((item) => item.segmentId)
     .sort();
+  const upstreamDiameter =
+    incidentSegments.find((item) => item.segmentId === upstreamSegmentId) ??
+    null;
+  const downstreamDiameters = incidentSegments
+    .filter((item) => downstreamSegmentIds.includes(item.segmentId))
+    .map((item) => ({
+      diameter: item.diameter,
+      role: item.role,
+      segmentId: item.segmentId,
+    }))
+    .sort((first, second) => first.segmentId.localeCompare(second.segmentId));
+  const roleKey = incidentSegments
+    .map((item) =>
+      [item.segmentId, item.neighborNodeId, item.role].join(":"),
+    )
+    .sort()
+    .join(",");
   const geometryKey = [
     params.nodeId,
     pointKey(params.position),
     incidentSegmentIds.join(","),
     params.incidentNodeIds.join(","),
+    roleKey,
     params.degree,
     params.angleClassification,
     params.angleDegrees ?? "",
@@ -497,6 +521,7 @@ function createBaseTransition(params: {
       incidentSegments,
       upstreamSegmentId,
     }),
+    downstreamDiameters,
     downstreamSegmentIds,
     evidence: {
       angleClassification: params.angleClassification,
@@ -513,6 +538,13 @@ function createBaseTransition(params: {
     position: params.position,
     reason: "Transicion pendiente de clasificar.",
     state: "unresolved",
+    upstreamDiameter: upstreamDiameter
+      ? {
+          diameter: upstreamDiameter.diameter,
+          role: upstreamDiameter.role,
+          segmentId: upstreamDiameter.segmentId,
+        }
+      : null,
     upstreamSegmentId,
   };
 }

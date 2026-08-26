@@ -122,15 +122,13 @@ export function getSigasDiameterTransitionCatalogCandidates(
     return [];
   }
 
-  return sigasTransitionFamiliesForProposal(proposal)
-    .filter((family) => transitionFamilyHasPair(family, pair))
-    .map((family) =>
-      createSigasDiameterTransitionCandidate({
-        family,
-        pair,
-        proposal,
-      }),
-    );
+  return sigasTransitionFamiliesForProposal(proposal).map((family) =>
+    createSigasDiameterTransitionCandidate({
+      family,
+      pair,
+      proposal,
+    }),
+  );
 }
 
 function matchFamilySet(params: {
@@ -345,9 +343,14 @@ function createSigasDiameterTransitionCandidate(params: {
   pair: TransitionDiameterPair;
   proposal: DiameterTransitionProposal;
 }): AccessoryCatalogCandidate {
-  const status = transitionCandidateStatus(params.proposal);
+  const hasCompatiblePair = transitionFamilyHasPair(params.family, params.pair);
+  const status = transitionCandidateStatus({
+    hasCompatiblePair,
+    proposal: params.proposal,
+  });
   const reason = transitionCandidateReason({
     family: params.family,
+    hasCompatiblePair,
     pair: params.pair,
     proposal: params.proposal,
     status,
@@ -369,25 +372,27 @@ function createSigasDiameterTransitionCandidate(params: {
   };
 }
 
-function transitionCandidateStatus(
-  proposal: DiameterTransitionProposal,
-): AccessoryCatalogCandidateStatus {
-  if (proposal.state === "unresolved") {
-    return "requires_more_information";
-  }
-
-  if (proposal.state === "unsupported") {
+function transitionCandidateStatus(params: {
+  hasCompatiblePair: boolean;
+  proposal: DiameterTransitionProposal;
+}): AccessoryCatalogCandidateStatus {
+  if (!params.hasCompatiblePair) {
     return "incompatible";
   }
 
-  if (
-    proposal.kind === "simple_transition" &&
-    proposal.direction === "expanding"
-  ) {
+  if (params.proposal.state === "unresolved") {
     return "requires_more_information";
   }
 
-  if (proposal.direction === "unknown") {
+  if (params.proposal.state === "unsupported") {
+    return "incompatible";
+  }
+
+  if (params.proposal.direction === "expanding") {
+    return "requires_more_information";
+  }
+
+  if (params.proposal.direction === "unknown") {
     return "requires_more_information";
   }
 
@@ -396,14 +401,19 @@ function transitionCandidateStatus(
 
 function transitionCandidateReason(params: {
   family: SigasTransitionFamily;
+  hasCompatiblePair: boolean;
   pair: TransitionDiameterPair;
   proposal: DiameterTransitionProposal;
   status: AccessoryCatalogCandidateStatus;
 }) {
   const pairLabel = `${params.pair.largerExternalMillimeters} a ${params.pair.smallerExternalMillimeters} mm`;
 
+  if (!params.hasCompatiblePair) {
+    return `La familia ${params.family.label} no posee variante compatible con ${pairLabel}.`;
+  }
+
   if (params.status === "requires_more_information") {
-    if (params.proposal.kind === "simple_transition") {
+    if (params.proposal.direction === "expanding") {
       return `La Tabla No 3 contiene ${params.family.label} para ${pairLabel}, pero el sentido actual es expansivo y requiere confirmacion profesional.`;
     }
 

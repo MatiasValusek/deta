@@ -24,31 +24,43 @@ import {
 import {
   type AccessoryProposal,
 } from "@/lib/routing/routeAccessoryProposals";
+import type {
+  DiameterTransitionProposal,
+  DiameterTransitionTechnicalReview,
+} from "@/lib/calculation/diameterTransitionProposals";
 
 type CalculationPanelProps = {
   accessoryProposals: AccessoryProposal[];
   accessoryProposalReviews: AccessoryProposalTechnicalReview[];
+  diameterTransitionProposals: DiameterTransitionProposal[];
+  diameterTransitionReviews: DiameterTransitionTechnicalReview[];
   equipment: WorkbenchEquipment[];
   hasPendingProposal: boolean;
   isPlanActive: boolean;
   planReady: boolean;
   result: TechnicalCalculationResult | null;
   onConfirmAccessoryProposal: (proposalId: string, candidateId: string) => void;
+  onConfirmDiameterTransition: (transitionId: string, candidateId: string) => void;
   onGoToPlan: () => void;
   onRejectAccessoryProposal: (proposalId: string) => void;
+  onRejectDiameterTransition: (transitionId: string) => void;
 };
 
 export function CalculationPanel({
   accessoryProposals,
   accessoryProposalReviews,
+  diameterTransitionProposals,
+  diameterTransitionReviews,
   equipment,
   hasPendingProposal,
   isPlanActive,
   planReady,
   result,
   onConfirmAccessoryProposal,
+  onConfirmDiameterTransition,
   onGoToPlan,
   onRejectAccessoryProposal,
+  onRejectDiameterTransition,
 }: CalculationPanelProps) {
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null);
   const selectedSegment =
@@ -103,6 +115,13 @@ export function CalculationPanel({
             reviews={accessoryProposalReviews}
             onConfirm={onConfirmAccessoryProposal}
             onReject={onRejectAccessoryProposal}
+          />
+          <DiameterTransitionProposalList
+            nodeLabels={result.nodeLabels}
+            proposals={diameterTransitionProposals}
+            reviews={diameterTransitionReviews}
+            onConfirm={onConfirmDiameterTransition}
+            onReject={onRejectDiameterTransition}
           />
           <SegmentList
             result={result}
@@ -232,6 +251,188 @@ function AccessoryProposalList({
   );
 }
 
+function DiameterTransitionProposalList({
+  nodeLabels,
+  proposals,
+  reviews,
+  onConfirm,
+  onReject,
+}: {
+  nodeLabels: Record<string, string>;
+  proposals: DiameterTransitionProposal[];
+  reviews: DiameterTransitionTechnicalReview[];
+  onConfirm: (transitionId: string, candidateId: string) => void;
+  onReject: (transitionId: string) => void;
+}) {
+  const [selectedCandidateByTransitionId, setSelectedCandidateByTransitionId] =
+    useState<Record<string, string>>({});
+  const visibleProposals = proposals.filter(
+    (proposal) => proposal.state !== "not_required" || proposal.decision,
+  );
+
+  return (
+    <section className="mt-3">
+      <h3 className="mb-2 text-xs font-semibold uppercase text-[var(--muted)]">
+        Transiciones de diametro
+      </h3>
+      <div className="mb-2 rounded border border-[#dbeafe] bg-[#eff6ff] px-3 py-2 text-xs text-[#1d4ed8]">
+        Las transiciones todavia no participan de la longitud equivalente ni del
+        dimensionado global.
+      </div>
+      {visibleProposals.length === 0 ? (
+        <div className="rounded border border-[var(--line)] px-3 py-2 text-xs text-[var(--muted)]">
+          Sin transiciones de diametro activas.
+        </div>
+      ) : (
+        <div className="space-y-1">
+          {visibleProposals.map((proposal) => {
+            const review =
+              reviews.find((item) => item.transitionId === proposal.id) ?? null;
+            const selectedCandidateId =
+              selectedCandidateByTransitionId[proposal.id] ??
+              review?.selectedCandidate?.id ??
+              "";
+            const selectedCandidate =
+              review?.candidates.find((item) => item.id === selectedCandidateId) ??
+              null;
+            const canConfirm =
+              proposal.state !== "confirmed" &&
+              proposal.state !== "rejected" &&
+              proposal.state !== "not_required" &&
+              selectedCandidate?.status === "compatible";
+            const canReject =
+              proposal.state !== "confirmed" &&
+              proposal.state !== "rejected" &&
+              proposal.state !== "not_required";
+
+            return (
+              <div
+                className="rounded border border-[var(--line)] px-2 py-2 text-xs"
+                key={proposal.id}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="font-medium">
+                      {diameterTransitionStateSymbol(proposal.state)}{" "}
+                      {nodeLabels[proposal.nodeId] ?? proposal.nodeId} -{" "}
+                      {diameterTransitionMainLabel(proposal)}
+                    </div>
+                    <div className="mt-0.5 text-[10px] text-[var(--muted)]">
+                      {diameterTransitionKindLabel(proposal.kind)} -{" "}
+                      {diameterTransitionStateLabel(proposal)}
+                    </div>
+                    <div className="mt-0.5 text-[10px] text-[var(--muted)]">
+                      {diameterTransitionOrientationLabel(proposal)}
+                    </div>
+                    {proposal.downstreamDiameters.length > 1 ? (
+                      <div className="mt-0.5 text-[10px] text-[var(--muted)]">
+                        Ramas: {diameterTransitionBranchLabel(proposal)}
+                      </div>
+                    ) : null}
+                    {review?.reason ? (
+                      <div className="mt-0.5 text-[10px] text-[var(--warning)]">
+                        {review.reason}
+                      </div>
+                    ) : null}
+                    {review &&
+                    proposal.state !== "confirmed" &&
+                    proposal.state !== "rejected" &&
+                    proposal.state !== "not_required" ? (
+                      <DiameterTransitionCandidateSelector
+                        review={review}
+                        selectedCandidateId={selectedCandidateId}
+                        onSelect={(candidateId) =>
+                          setSelectedCandidateByTransitionId((current) => ({
+                            ...current,
+                            [proposal.id]: candidateId,
+                          }))
+                        }
+                      />
+                    ) : null}
+                  </div>
+                  {canConfirm || canReject ? (
+                    <div className="flex shrink-0 gap-1">
+                      {canConfirm ? (
+                        <button
+                          className="rounded border border-[var(--line)] bg-white px-2 py-1 text-[11px] hover:border-[var(--accent)]"
+                          type="button"
+                          onClick={() => onConfirm(proposal.id, selectedCandidateId)}
+                        >
+                          Confirmar
+                        </button>
+                      ) : null}
+                      {canReject ? (
+                        <button
+                          className="rounded border border-[var(--line)] bg-white px-2 py-1 text-[11px] hover:border-[var(--accent)]"
+                          type="button"
+                          onClick={() => onReject(proposal.id)}
+                        >
+                          Rechazar
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function DiameterTransitionCandidateSelector({
+  review,
+  selectedCandidateId,
+  onSelect,
+}: {
+  review: DiameterTransitionTechnicalReview;
+  selectedCandidateId: string;
+  onSelect: (candidateId: string) => void;
+}) {
+  if (review.candidates.length === 0) {
+    return (
+      <div className="mt-1 text-[10px] text-[var(--warning)]">
+        {review.reason ?? "No hay familias tecnicas compatibles."}
+      </div>
+    );
+  }
+
+  const selectedCandidate =
+    review.candidates.find((candidate) => candidate.id === selectedCandidateId) ??
+    null;
+
+  return (
+    <div className="mt-2 space-y-1">
+      <label className="block text-[10px] font-semibold uppercase text-[var(--muted)]">
+        Familia de transicion
+      </label>
+      <select
+        className="w-full rounded border border-[var(--line)] bg-white px-2 py-1 text-xs"
+        value={selectedCandidateId}
+        onChange={(event) => onSelect(event.target.value)}
+      >
+        <option value="">Seleccionar familia</option>
+        {review.candidates.map((candidate) => (
+          <option
+            disabled={candidate.status !== "compatible"}
+            key={candidate.id}
+            value={candidate.id}
+          >
+            {candidateOptionLabel(candidate)}
+          </option>
+        ))}
+      </select>
+      <div className="text-[10px] text-[var(--muted)]">
+        {selectedCandidate
+          ? selectedCandidate.reason
+          : review.reason ?? "Seleccion pendiente."}
+      </div>
+    </div>
+  );
+}
+
 function ProposalTechnicalContext({
   review,
 }: {
@@ -321,6 +522,114 @@ function candidateOptionLabel(candidate: AccessoryCatalogCandidate) {
         : " - requiere datos";
 
   return `${candidate.label}${suffix}`;
+}
+
+function diameterTransitionMainLabel(proposal: DiameterTransitionProposal) {
+  const upstream = proposal.upstreamDiameter?.diameter ?? null;
+  const downstream = proposal.downstreamDiameters.map((item) => item.diameter);
+
+  if (downstream.length === 0) {
+    return `Aguas arriba ${formatCompactDiameterReference(upstream)}`;
+  }
+
+  return `${formatCompactDiameterReference(upstream)} -> ${downstream
+    .map(formatCompactDiameterReference)
+    .join(" / ")}`;
+}
+
+function diameterTransitionOrientationLabel(
+  proposal: DiameterTransitionProposal,
+) {
+  const upstream = proposal.upstreamSegmentId ?? "pendiente";
+  const downstream =
+    proposal.downstreamSegmentIds.length > 0
+      ? proposal.downstreamSegmentIds.join(", ")
+      : "pendiente";
+
+  return `Upstream ${upstream} - downstream ${downstream} - ${diameterTransitionDirectionLabel(proposal.direction)}`;
+}
+
+function diameterTransitionBranchLabel(proposal: DiameterTransitionProposal) {
+  return proposal.downstreamDiameters
+    .map(
+      (item) =>
+        `${item.segmentId}: ${formatCompactDiameterReference(item.diameter)}`,
+    )
+    .join(" - ");
+}
+
+function diameterTransitionKindLabel(kind: DiameterTransitionProposal["kind"]) {
+  switch (kind) {
+    case "simple_reduction":
+      return "Reduccion en tramo recto";
+    case "simple_transition":
+      return "Transicion simple";
+    case "compound_turn_transition":
+      return "Codo con cambio de diametro";
+    case "branch_transition":
+      return "Tee multidiametro";
+    case "not_required":
+      return "Sin transicion activa";
+    case "unsupported":
+      return "Configuracion no soportada";
+    case "unresolved":
+      return "Transicion pendiente";
+  }
+}
+
+function diameterTransitionStateLabel(
+  proposal: DiameterTransitionProposal,
+) {
+  switch (proposal.state) {
+    case "confirmed":
+      return "confirmada";
+    case "rejected":
+      return "rechazada";
+    case "needs_review":
+      return "requiere revision";
+    case "not_required":
+      return "no requerida";
+    case "transition_required":
+      return "requiere seleccion";
+    case "unsupported":
+      return "no soportada";
+    case "unresolved":
+      return "pendiente";
+  }
+}
+
+function diameterTransitionStateSymbol(
+  state: DiameterTransitionProposal["state"],
+) {
+  switch (state) {
+    case "confirmed":
+      return "OK";
+    case "rejected":
+      return "x";
+    case "needs_review":
+    case "unsupported":
+    case "unresolved":
+      return "?";
+    case "not_required":
+      return "-";
+    case "transition_required":
+      return "+";
+  }
+}
+
+function diameterTransitionDirectionLabel(
+  direction: DiameterTransitionProposal["direction"],
+) {
+  switch (direction) {
+    case "reducing":
+      return "reduccion";
+    case "expanding":
+      return "expansion";
+    case "mixed":
+      return "mixta";
+    case "unknown":
+      return "orientacion pendiente";
+  }
 }
 
 function accessoryProposalKindLabel(kind: AccessoryProposal["kind"]) {
