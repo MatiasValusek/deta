@@ -442,12 +442,32 @@ function sigasTransitionFamiliesForProposal(
   }
 
   if (proposal.kind === "branch_transition") {
-    return families.filter(
-      (family) => family.transitionKind === "reduced_tee",
-    );
+    return createSigasReducedTeeTransitionFamilies();
   }
 
   return [];
+}
+
+function createSigasReducedTeeTransitionFamilies() {
+  const rows = SIGAS_ACCESSORY_EQUIVALENT_LENGTHS.filter((row) => {
+    const label = normalizeLabel(row.label);
+
+    return label.startsWith("te reduc. central");
+  });
+
+  if (rows.length === 0) {
+    return [];
+  }
+
+  return [
+    {
+      familyId: "te-reduc-central",
+      label: "Te Reduc. Central",
+      rows,
+      transitionKind: "reduced_tee" as const,
+      type: "tee" as const,
+    },
+  ];
 }
 
 function createSigasTransitionFamilies() {

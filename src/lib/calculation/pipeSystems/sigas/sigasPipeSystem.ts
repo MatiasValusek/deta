@@ -307,6 +307,12 @@ export function resolveSigasDiameterTransitionEquivalentLength(
   }
 
   const rows = findAccessoryRowsForCatalogCode(catalogFamilyId);
+  const transitionRows = filterDiameterTransitionRowsByTraversal({
+    catalogFamilyId,
+    rows,
+    traversalKind: context.transition.traversalKind,
+    transitionKind: context.transition.kind,
+  });
 
   if (rows.length === 0) {
     return {
@@ -320,11 +326,23 @@ export function resolveSigasDiameterTransitionEquivalentLength(
     };
   }
 
+  if (transitionRows.status !== "resolved") {
+    return {
+      data: {
+        catalogFamilyId,
+        traversalKind: context.transition.traversalKind,
+        transitionKind: context.transition.kind,
+      },
+      reason: transitionRows.reason,
+      status: transitionRows.status,
+    };
+  }
+
   const pair = normalizeTransitionPair({
     downstreamDiameter,
     upstreamDiameter,
   });
-  const matchingRows = rows.filter((row) => {
+  const matchingRows = transitionRows.rows.filter((row) => {
     const rowPair = transitionPairForRow(row);
 
     return (
@@ -405,6 +423,12 @@ export function getSigasAccessoryEquivalentLengthRow(code: string) {
 }
 
 function findAccessoryRowsForCatalogCode(catalogCode: string) {
+  if (catalogCode === "te-reduc-central") {
+    return SIGAS_ACCESSORY_EQUIVALENT_LENGTHS.filter((row) =>
+      row.label.startsWith("Te Reduc. Central "),
+    );
+  }
+
   const exactRow = ACCESSORIES_BY_CODE.get(catalogCode);
 
   if (exactRow) {
@@ -549,6 +573,83 @@ function createAccessoryData(
     sourceTable: SIGAS_TABLES_SOURCE.accessoryEquivalentLengthTable,
     tableLabel: row.label,
   };
+}
+
+function filterDiameterTransitionRowsByTraversal(params: {
+  catalogFamilyId: string;
+  rows: SigasAccessoryEquivalentLengthRow[];
+  transitionKind: string;
+  traversalKind: "through" | "turn_90" | undefined;
+}):
+  | { rows: SigasAccessoryEquivalentLengthRow[]; status: "resolved" }
+  | { reason: string; status: "unresolved" | "unsupported" } {
+  if (params.transitionKind !== "branch_transition") {
+    return { rows: params.rows, status: "resolved" };
+  }
+
+  if (!params.traversalKind) {
+    return {
+      reason:
+        "Falta tipo de recorrido through/90 para resolver la tee reductora.",
+      status: "unresolved",
+    };
+  }
+
+  if (
+    params.catalogFamilyId !== "te-reduc-central" &&
+    params.catalogFamilyId !== "te-reduc-central-flujo-a-90" &&
+    params.catalogFamilyId !== "te-reduc-central-flujo-a-traves"
+  ) {
+    return {
+      reason:
+        "La familia confirmada no corresponde a una tee reductora central SIGAS.",
+      status: "unsupported",
+    };
+  }
+
+  if (
+    params.catalogFamilyId === "te-reduc-central-flujo-a-90" &&
+    params.traversalKind !== "turn_90"
+  ) {
+    return {
+      reason:
+        "La familia confirmada corresponde a flujo a 90, pero el recorrido atraviesa la tee.",
+      status: "unsupported",
+    };
+  }
+
+  if (
+    params.catalogFamilyId === "te-reduc-central-flujo-a-traves" &&
+    params.traversalKind !== "through"
+  ) {
+    return {
+      reason:
+        "La familia confirmada corresponde a flujo a traves, pero el recorrido gira a 90.",
+      status: "unsupported",
+    };
+  }
+
+  const traversalKind = params.traversalKind;
+
+  return {
+    rows: params.rows.filter((row) =>
+      branchTransitionRowMatchesTraversal(row, traversalKind),
+    ),
+    status: "resolved",
+  };
+}
+
+function branchTransitionRowMatchesTraversal(
+  row: SigasAccessoryEquivalentLengthRow,
+  traversalKind: "through" | "turn_90",
+) {
+  if (!row.label.startsWith("Te Reduc. Central ")) {
+    return false;
+  }
+
+  return traversalKind === "turn_90"
+    ? row.label.includes("flujo a 90")
+    : row.label.includes("flujo a traves");
 }
 
 function createResolvedDiameterTransition(params: {

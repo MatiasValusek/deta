@@ -1,6 +1,7 @@
 import type {
   PipeDiameterReference,
   PipeDiameterTransitionEquivalentLengthResult,
+  PipeDiameterTransitionTraversalKind,
   PipeSystem,
   PipeSystemResolution,
   PipeSystemResolutionStatus,
@@ -11,6 +12,12 @@ import {
   type DiameterTransitionKind,
   type DiameterTransitionProposal,
 } from "@/lib/calculation/diameterTransitionProposals";
+import type { WorkbenchEquipment } from "@/lib/equipment/types";
+import {
+  buildEquipmentIndex,
+  resolveRouteNodePosition,
+} from "@/lib/routing/network";
+import type { ManualRouteNetwork } from "@/lib/routing/types";
 
 export type TechnicalRouteTransitionRoute = {
   id: string;
@@ -49,6 +56,7 @@ export type TechnicalRouteTransitionContribution = {
   status: TechnicalRouteTransitionContributionStatus;
   transitionId: string;
   transitionKind: DiameterTransitionKind;
+  traversalKind: PipeDiameterTransitionTraversalKind | null;
   upstreamDiameter: PipeDiameterReference | null;
   upstreamSegmentId: string | null;
   variant: PipeDiameterTransitionEquivalentLengthResult["variant"] | null;
@@ -71,7 +79,10 @@ export type DiameterBySegmentId =
 export function resolveTechnicalRouteTransitions(params: {
   decisions?: DiameterTransitionDecision[];
   diameterBySegmentId?: DiameterBySegmentId;
+  enableBranchTransitionPreview?: boolean;
+  equipment?: WorkbenchEquipment[];
   governingRouteAccessoryEquivalentLengthMeters?: number | null;
+  network?: ManualRouteNetwork;
   pipeSystem: PipeSystem;
   route: TechnicalRouteTransitionRoute;
   transitions: DiameterTransitionProposal[];
@@ -90,6 +101,7 @@ export function resolveTechnicalRouteTransitions(params: {
 
   for (const crossing of findRouteTransitionCrossings({
     diameterBySegmentId: params.diameterBySegmentId,
+    enableBranchTransitionPreview: params.enableBranchTransitionPreview ?? false,
     route: params.route,
     transitions,
   })) {
@@ -112,6 +124,9 @@ export function resolveTechnicalRouteTransitions(params: {
     const contribution = createTransitionContribution({
       crossing,
       diameterBySegmentId: params.diameterBySegmentId,
+      enableBranchTransitionPreview: params.enableBranchTransitionPreview ?? false,
+      equipment: params.equipment,
+      network: params.network,
       pipeSystem: params.pipeSystem,
       routeId: params.route.id,
     });
@@ -186,6 +201,7 @@ export function calculateProjectedSizingLengthWithTransitions(params: {
 
 function findRouteTransitionCrossings(params: {
   diameterBySegmentId: DiameterBySegmentId | undefined;
+  enableBranchTransitionPreview: boolean;
   route: TechnicalRouteTransitionRoute;
   transitions: DiameterTransitionProposal[];
 }) {
@@ -221,6 +237,7 @@ function findRouteTransitionCrossings(params: {
         routeUsesRequiredDiameterChange({
           diameterBySegmentId: params.diameterBySegmentId,
           downstreamSegmentId,
+          enableBranchTransitionPreview: params.enableBranchTransitionPreview,
           transition,
           upstreamSegmentId,
         }),
@@ -247,10 +264,18 @@ function findRouteTransitionCrossings(params: {
 function routeUsesRequiredDiameterChange(params: {
   diameterBySegmentId: DiameterBySegmentId | undefined;
   downstreamSegmentId: string;
+  enableBranchTransitionPreview: boolean;
   transition: DiameterTransitionProposal;
   upstreamSegmentId: string;
 }) {
   if (params.transition.state === "not_required") {
+    return true;
+  }
+
+  if (
+    params.enableBranchTransitionPreview &&
+    params.transition.kind === "branch_transition"
+  ) {
     return true;
   }
 
@@ -276,6 +301,9 @@ function createTransitionContribution(params: {
     upstreamSegmentId: string;
   };
   diameterBySegmentId: DiameterBySegmentId | undefined;
+  enableBranchTransitionPreview: boolean;
+  equipment: WorkbenchEquipment[] | undefined;
+  network: ManualRouteNetwork | undefined;
   pipeSystem: PipeSystem;
   routeId: string;
 }): TechnicalRouteTransitionContribution {
@@ -337,17 +365,27 @@ function createTransitionContribution(params: {
     });
   }
 
-  if (
-    transition.kind === "compound_turn_transition" ||
-    transition.kind === "branch_transition"
-  ) {
+  if (transition.kind === "compound_turn_transition") {
     return unresolvedContribution({
       ...base,
       reason:
-        transition.kind === "compound_turn_transition"
-          ? "Codo con cambio de diametro pendiente de modelado tecnico compuesto."
-          : "Tee multidiametro pendiente de modelar por variante de recorrido.",
+        "Codo con cambio de diametro pendiente de modelado tecnico compuesto.",
       source: "unconfirmed",
+    });
+  }
+
+  if (transition.kind === "branch_transition") {
+    return createBranchTransitionContribution({
+      base,
+      diameterBySegmentId: params.diameterBySegmentId,
+      downstreamSegmentId,
+      enableBranchTransitionPreview: params.enableBranchTransitionPreview,
+      equipment: params.equipment,
+      network: params.network,
+      pipeSystem: params.pipeSystem,
+      transition,
+      upstreamDiameter,
+      upstreamSegmentId,
     });
   }
 
@@ -450,9 +488,134 @@ function createBaseContribution(params: {
     status: "unresolved",
     transitionId: params.transition.id,
     transitionKind: params.transition.kind,
+    traversalKind: null,
     upstreamDiameter: params.upstreamDiameter,
     upstreamSegmentId: params.upstreamSegmentId,
     variant: null,
+  };
+}
+
+function createBranchTransitionContribution(params: {
+  base: TechnicalRouteTransitionContribution;
+  diameterBySegmentId: DiameterBySegmentId | undefined;
+  downstreamSegmentId: string;
+  enableBranchTransitionPreview: boolean;
+  equipment: WorkbenchEquipment[] | undefined;
+  network: ManualRouteNetwork | undefined;
+  pipeSystem: PipeSystem;
+  transition: DiameterTransitionProposal;
+  upstreamDiameter: PipeDiameterReference | null;
+  upstreamSegmentId: string | null;
+}): TechnicalRouteTransitionContribution {
+  if (!params.enableBranchTransitionPreview) {
+    return unresolvedContribution({
+      ...params.base,
+      reason: "Tee multidiametro pendiente de modelar por variante de recorrido.",
+      source: "unconfirmed",
+    });
+  }
+
+  if (params.transition.decision?.status !== "confirmed") {
+    return unresolvedContribution({
+      ...params.base,
+      reason:
+        "Tee reductora activa sin familia profesional confirmada; no se asume perdida cero.",
+      source: "unconfirmed",
+    });
+  }
+
+  if (!params.transition.decision.catalogFamilyId) {
+    return unresolvedContribution({
+      ...params.base,
+      reason: "La decision confirmada no contiene familia SIGAS.",
+      source: "unconfirmed",
+    });
+  }
+
+  if (!params.upstreamDiameter || !params.base.downstreamDiameter) {
+    return unresolvedContribution({
+      ...params.base,
+      catalogFamilyId: params.transition.decision.catalogFamilyId,
+      reason:
+        "Faltan diametros actuales para resolver la tee reductora confirmada.",
+      source: "pipe_system",
+    });
+  }
+
+  const pairResolution = resolveBranchTransitionRepresentablePair({
+    diameterBySegmentId: params.diameterBySegmentId,
+    transition: params.transition,
+  });
+
+  if (pairResolution.status !== "resolved") {
+    return {
+      ...params.base,
+      catalogFamilyId: params.transition.decision.catalogFamilyId,
+      reason: pairResolution.reason,
+      source: "pipe_system",
+      status: pairResolution.status,
+    };
+  }
+
+  const traversalKind = classifyBranchTraversalKind({
+    downstreamSegmentId: params.downstreamSegmentId,
+    equipment: params.equipment,
+    network: params.network,
+    transition: params.transition,
+    upstreamSegmentId: params.upstreamSegmentId,
+  });
+
+  if (!traversalKind) {
+    return unsupportedContribution({
+      ...params.base,
+      catalogFamilyId: params.transition.decision.catalogFamilyId,
+      reason:
+        "No se pudo distinguir si el recorrido atraviesa la tee o gira a 90.",
+      source: "pipe_system",
+    });
+  }
+
+  const equivalentLengthResolution =
+    params.pipeSystem.resolveDiameterTransitionEquivalentLength({
+      downstreamDiameter: pairResolution.smallerDiameter,
+      junction: {
+        downstreamSegmentId: params.downstreamSegmentId,
+        geometryKey: params.transition.geometryKey,
+        upstreamSegmentId: params.upstreamSegmentId,
+      },
+      transition: {
+        catalogFamilyId: params.transition.decision.catalogFamilyId,
+        id: params.transition.id,
+        kind: params.transition.kind,
+        nodeId: params.transition.nodeId,
+        traversalKind,
+      },
+      upstreamDiameter: pairResolution.largerDiameter,
+    });
+
+  if (equivalentLengthResolution.status !== "resolved") {
+    return {
+      ...params.base,
+      catalogFamilyId: params.transition.decision.catalogFamilyId,
+      equivalentLengthResolution,
+      reason: equivalentLengthResolution.reason,
+      source: "pipe_system",
+      status: equivalentLengthResolution.status,
+      traversalKind,
+    };
+  }
+
+  return {
+    ...params.base,
+    catalogCode: equivalentLengthResolution.value.catalogCode,
+    catalogFamilyId: equivalentLengthResolution.value.catalogFamilyId,
+    equivalentLengthMeters:
+      equivalentLengthResolution.value.equivalentLengthMeters,
+    equivalentLengthResolution,
+    source: "pipe_system",
+    status: "resolved",
+    traversalKind,
+    variant: equivalentLengthResolution.value.variant,
   };
 }
 
@@ -485,6 +648,7 @@ function createDuplicateContribution(params: {
     status: "unresolved" as const,
     transitionId: transition.id,
     transitionKind: transition.kind,
+    traversalKind: null,
     upstreamDiameter: segmentDiameter(
       transition,
       transition.upstreamSegmentId ?? params.crossing.upstreamSegmentId,
@@ -519,6 +683,176 @@ function unsupportedContribution(
     source: contribution.source,
     status: "unsupported" as const,
   };
+}
+
+function resolveBranchTransitionRepresentablePair(params: {
+  diameterBySegmentId: DiameterBySegmentId | undefined;
+  transition: DiameterTransitionProposal;
+}):
+  | {
+      largerDiameter: PipeDiameterReference;
+      smallerDiameter: PipeDiameterReference;
+      status: "resolved";
+    }
+  | {
+      reason: string;
+      status: "unresolved" | "unsupported";
+    } {
+  const diameters = params.transition.incidentSegments.map((segment) =>
+    resolveDiameter(params.diameterBySegmentId, segment.segmentId) ??
+    segment.diameter,
+  );
+
+  if (diameters.some((diameter) => !diameter)) {
+    return {
+      reason:
+        "Faltan diametros actuales para representar la tee reductora.",
+      status: "unresolved",
+    };
+  }
+
+  const byExternalMillimeters = new Map<number, PipeDiameterReference>();
+
+  for (const diameter of diameters as PipeDiameterReference[]) {
+    const value = diameter.externalDiameterMillimeters;
+
+    if (value === undefined || !Number.isFinite(value)) {
+      return {
+        reason:
+          "La tee reductora requiere diametros con diametro exterior reconocible.",
+        status: "unsupported",
+      };
+    }
+
+    byExternalMillimeters.set(value, diameter);
+  }
+
+  const values = [...byExternalMillimeters.keys()].sort(
+    (first, second) => first - second,
+  );
+
+  if (values.length !== 2) {
+    return {
+      reason:
+        values.length < 2
+          ? "La tee no requiere reduccion con los diametros actuales."
+          : "La tee tiene tres diametros distintos y no es representable por Te Reduc. Central.",
+      status: values.length < 2 ? "unresolved" : "unsupported",
+    };
+  }
+
+  const smallerDiameter = byExternalMillimeters.get(values[0] as number);
+  const largerDiameter = byExternalMillimeters.get(values[1] as number);
+
+  if (!smallerDiameter || !largerDiameter) {
+    return {
+      reason: "No se pudo reconstruir el par de diametros de la tee reductora.",
+      status: "unresolved",
+    };
+  }
+
+  return {
+    largerDiameter,
+    smallerDiameter,
+    status: "resolved",
+  };
+}
+
+function classifyBranchTraversalKind(params: {
+  downstreamSegmentId: string;
+  equipment: WorkbenchEquipment[] | undefined;
+  network: ManualRouteNetwork | undefined;
+  transition: DiameterTransitionProposal;
+  upstreamSegmentId: string | null;
+}): PipeDiameterTransitionTraversalKind | null {
+  if (!params.network || !params.equipment || !params.upstreamSegmentId) {
+    return null;
+  }
+
+  const upstreamVector = incidentVectorAtTransitionNode({
+    equipment: params.equipment,
+    network: params.network,
+    segmentId: params.upstreamSegmentId,
+    transition: params.transition,
+  });
+  const downstreamVector = incidentVectorAtTransitionNode({
+    equipment: params.equipment,
+    network: params.network,
+    segmentId: params.downstreamSegmentId,
+    transition: params.transition,
+  });
+
+  if (!upstreamVector || !downstreamVector) {
+    return null;
+  }
+
+  const angle = angleBetweenVectors(upstreamVector, downstreamVector);
+  const straightDistance = Math.min(angle, Math.abs(180 - angle));
+  const turnDistance = Math.abs(90 - angle);
+
+  if (straightDistance <= 5) {
+    return "through";
+  }
+
+  if (turnDistance <= 15) {
+    return "turn_90";
+  }
+
+  return null;
+}
+
+function incidentVectorAtTransitionNode(params: {
+  equipment: WorkbenchEquipment[];
+  network: ManualRouteNetwork;
+  segmentId: string;
+  transition: DiameterTransitionProposal;
+}) {
+  const incident = params.transition.incidentSegments.find(
+    (segment) => segment.segmentId === params.segmentId,
+  );
+
+  if (!incident) {
+    return null;
+  }
+
+  const nodeById = new Map(params.network.nodes.map((node) => [node.id, node]));
+  const neighborNode = nodeById.get(incident.neighborNodeId);
+  const equipmentById = buildEquipmentIndex(params.equipment);
+  const neighborPosition = neighborNode
+    ? resolveRouteNodePosition(neighborNode, equipmentById)
+    : null;
+
+  if (!neighborPosition) {
+    return null;
+  }
+
+  return {
+    x: neighborPosition.x - params.transition.position.x,
+    y: neighborPosition.y - params.transition.position.y,
+  };
+}
+
+function angleBetweenVectors(
+  first: { x: number; y: number },
+  second: { x: number; y: number },
+) {
+  const firstLength = Math.hypot(first.x, first.y);
+  const secondLength = Math.hypot(second.x, second.y);
+
+  if (firstLength === 0 || secondLength === 0) {
+    return 0;
+  }
+
+  const cosine = Math.max(
+    -1,
+    Math.min(
+      1,
+      (first.x * second.x + first.y * second.y) /
+        (firstLength * secondLength),
+    ),
+  );
+
+  return (Math.acos(cosine) * 180) / Math.PI;
 }
 
 function resolveOverallStatus(

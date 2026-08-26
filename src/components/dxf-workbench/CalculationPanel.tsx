@@ -286,8 +286,8 @@ function DiameterTransitionProposalList({
         Transiciones de diametro
       </h3>
       <div className="mb-2 rounded border border-[#dbeafe] bg-[#eff6ff] px-3 py-2 text-xs text-[#1d4ed8]">
-        Las transiciones todavia no participan de la longitud equivalente ni del
-        dimensionado global.
+        Preview: incluye fisica, accesorios, transiciones simples y tees
+        reductoras por recorrido; las tees todavia no modifican sizeSegment.
       </div>
       {visibleProposals.length === 0 ? (
         <div className="rounded border border-[var(--line)] px-3 py-2 text-xs text-[var(--muted)]">
@@ -345,7 +345,7 @@ function DiameterTransitionProposalList({
                       </div>
                     ) : null}
                     <DiameterTransitionPreview
-                      contribution={previewContributionForTransition(
+                      contributions={previewContributionsForTransition(
                         proposal.id,
                         routeTransitionResolutions,
                       )}
@@ -452,14 +452,15 @@ function DiameterTransitionCandidateSelector({
 }
 
 function DiameterTransitionPreview({
-  contribution,
+  contributions,
   proposal,
   review,
 }: {
-  contribution: TechnicalRouteTransitionContribution | null;
+  contributions: TechnicalRouteTransitionContribution[];
   proposal: DiameterTransitionProposal;
   review: DiameterTransitionTechnicalReview | null;
 }) {
+  const contribution = contributions[0] ?? null;
   const familyLabel =
     review?.selectedCandidate?.label ??
     review?.candidates.find(
@@ -468,8 +469,33 @@ function DiameterTransitionPreview({
     proposal.selectedCatalogFamilyId ??
     null;
 
-  if (!familyLabel && !contribution) {
+  if (!familyLabel && contributions.length === 0) {
     return null;
+  }
+
+  if (proposal.kind === "branch_transition") {
+    return (
+      <div className="mt-1 text-[10px] text-[var(--muted)]">
+        <div>Preview tee reductora por recorrido</div>
+        {familyLabel ? <div>Familia: {familyLabel}</div> : null}
+        {contributions.length > 0 ? (
+          <ul className="mt-0.5 space-y-0.5">
+            {contributions.map((item, index) => (
+              <li key={`${item.routeId}:${item.transitionId}:${index}`}>
+                {item.routeId} - {transitionTraversalKindLabel(item.traversalKind)} -{" "}
+                {item.variant?.label ?? item.reason ?? "Pendiente"} -{" "}
+                {formatCalculationMeters(
+                  item.equivalentLengthMeters,
+                  "Pendiente",
+                )}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div>Pendiente por recorrido</div>
+        )}
+      </div>
+    );
   }
 
   return (
@@ -587,20 +613,18 @@ function candidateOptionLabel(candidate: AccessoryCatalogCandidate) {
   return `${candidate.label}${suffix}`;
 }
 
-function previewContributionForTransition(
+function previewContributionsForTransition(
   transitionId: string,
   routeTransitionResolutions: Record<string, TechnicalRouteTransitionResolution>,
 ) {
-  return (
-    Object.values(routeTransitionResolutions)
-      .flatMap((resolution) => resolution.contributions)
-      .filter((contribution) => contribution.transitionId === transitionId)
-      .sort(
-        (first, second) =>
-          first.order - second.order ||
-          first.routeId.localeCompare(second.routeId),
-      )[0] ?? null
-  );
+  return Object.values(routeTransitionResolutions)
+    .flatMap((resolution) => resolution.contributions)
+    .filter((contribution) => contribution.transitionId === transitionId)
+    .sort(
+      (first, second) =>
+        first.order - second.order ||
+        first.routeId.localeCompare(second.routeId),
+    );
 }
 
 function diameterTransitionMainLabel(proposal: DiameterTransitionProposal) {
@@ -1767,12 +1791,30 @@ function formatTransitionContribution(
     contribution.variant?.label ??
     contribution.catalogFamilyId ??
     diameterTransitionKindLabel(contribution.transitionKind);
+  const traversal =
+    contribution.transitionKind === "branch_transition"
+      ? `${transitionTraversalKindLabel(contribution.traversalKind)} - `
+      : "";
 
   return `${formatCompactDiameterReference(
     contribution.upstreamDiameter,
   )} -> ${formatCompactDiameterReference(
     contribution.downstreamDiameter,
-  )} - ${variant} - ${length}`;
+  )} - ${traversal}${variant} - ${length}`;
+}
+
+function transitionTraversalKindLabel(
+  traversalKind: TechnicalRouteTransitionContribution["traversalKind"],
+) {
+  if (traversalKind === "through") {
+    return "through";
+  }
+
+  if (traversalKind === "turn_90") {
+    return "90°";
+  }
+
+  return "recorrido pendiente";
 }
 
 function formatSegmentDiameter(

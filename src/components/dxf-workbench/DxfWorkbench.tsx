@@ -985,22 +985,24 @@ export function DxfWorkbench() {
       return {};
     }
 
-    if (
+    const routeAccessoryResolutions =
       technicalCalculationResult.transitionAwareNetworkSizing?.status ===
       "resolved"
-    ) {
-      return technicalCalculationResult.transitionAwareNetworkSizing
-        .routeTransitionResolutions;
-    }
+        ? technicalCalculationResult.transitionAwareNetworkSizing
+            .routeAccessoryResolutions
+        : technicalCalculationResult.routeAccessoryResolutions;
 
     return Object.fromEntries(
       technicalCalculationResult.technicalRoutes.map((route) => [
         route.id,
         resolveTechnicalRouteTransitions({
           diameterBySegmentId: finalDiameterBySegmentId,
+          enableBranchTransitionPreview: true,
+          equipment: planBase?.equipment ?? [],
           governingRouteAccessoryEquivalentLengthMeters:
-            technicalCalculationResult.routeAccessoryResolutions[route.id]
+            routeAccessoryResolutions[route.id]
               ?.governingRouteAccessoryEquivalentLengthMeters ?? null,
+          network: planBase?.routeNetwork,
           pipeSystem: SIGAS_PIPE_SYSTEM,
           route,
           transitions: diameterTransitionProposals,
@@ -1010,6 +1012,7 @@ export function DxfWorkbench() {
   }, [
     diameterTransitionProposals,
     finalDiameterBySegmentId,
+    planBase,
     technicalCalculationResult,
   ]);
 

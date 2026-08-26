@@ -33,6 +33,8 @@ export type PipeDiameterReference = {
   nominalDiameter?: string;
 };
 
+export type PipeDiameterTransitionTraversalKind = "through" | "turn_90";
+
 export type PipeSegmentPipeContext = {
   conditions?: Record<string, unknown>;
   diameter?: PipeDiameterReference;
@@ -64,6 +66,7 @@ export type PipeDiameterTransitionEquivalentLengthContext = {
     id: string;
     kind: string;
     nodeId: string;
+    traversalKind?: PipeDiameterTransitionTraversalKind;
   };
   upstreamDiameter: PipeDiameterReference;
   junction?: Record<string, unknown>;
