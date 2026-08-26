@@ -81,8 +81,10 @@ export type TechnicalTransitionAwareNetworkSizingSegmentResult = {
   explanation: string | null;
   finalDiameter: PipeDiameterReference | null;
   governingRouteAccessoryEquivalentLengthMeters: number | null;
+  governingRouteBranchTransitionEquivalentLengthMeters: number | null;
   governingRouteId: string | null;
   governingRoutePhysicalLengthMeters: number | null;
+  governingRouteSimpleTransitionEquivalentLengthMeters: number | null;
   governingRouteTransitionEquivalentLengthMeters: number | null;
   governingTerminalEquipmentId: string | null;
   internalDiameterMillimeters: number | null;
@@ -647,6 +649,8 @@ function evaluateAssignmentWithCatalog(params: {
   });
   const routeTransitionResolutions = createRouteTransitionResolutions({
     assignment: params.assignment,
+    equipment: params.equipment,
+    network: params.network,
     params: params.params,
     routeAccessoryResolutions,
     transitions,
@@ -710,6 +714,8 @@ function createRouteAccessoryResolutions(params: {
 
 function createRouteTransitionResolutions(params: {
   assignment: Assignment;
+  equipment: WorkbenchEquipment[];
+  network: ManualRouteNetwork;
   params: {
     pipeSystem: PipeSystem;
     routes: TechnicalRoute[];
@@ -722,9 +728,12 @@ function createRouteTransitionResolutions(params: {
       route.id,
       resolveTechnicalRouteTransitions({
         diameterBySegmentId: params.assignment,
+        equipment: params.equipment,
         governingRouteAccessoryEquivalentLengthMeters:
           params.routeAccessoryResolutions[route.id]
             ?.governingRouteAccessoryEquivalentLengthMeters ?? null,
+        includeBranchTransitions: true,
+        network: params.network,
         pipeSystem: params.params.pipeSystem,
         route,
         transitions: params.transitions,
@@ -1078,9 +1087,15 @@ function createBaseSegmentSizingResult(params: {
     governingRouteAccessoryEquivalentLengthMeters:
       params.routeAccessoryResolution
         ?.governingRouteAccessoryEquivalentLengthMeters ?? null,
+    governingRouteBranchTransitionEquivalentLengthMeters:
+      params.routeTransitionResolution?.branchTransitionEquivalentLengthMeters ??
+      null,
     governingRouteId: params.governingRoute?.routeId ?? null,
     governingRoutePhysicalLengthMeters:
       params.governingRoute?.physicalLengthMeters ?? null,
+    governingRouteSimpleTransitionEquivalentLengthMeters:
+      params.routeTransitionResolution?.simpleTransitionEquivalentLengthMeters ??
+      null,
     governingRouteTransitionEquivalentLengthMeters:
       params.routeTransitionResolution?.equivalentLengthMeters ?? null,
     governingTerminalEquipmentId:
@@ -1160,6 +1175,10 @@ function transitionContributionIssueCode(
     return "route_transitions_unresolved";
   }
 
+  if (contribution.status === "unsupported") {
+    return "transition_family_incompatible";
+  }
+
   if (contribution.transitionKind === "branch_transition") {
     return "branch_transition_required";
   }
@@ -1170,10 +1189,6 @@ function transitionContributionIssueCode(
 
   if (contribution.source === "unconfirmed" || contribution.source === "rejected") {
     return "unconfirmed_required_transition";
-  }
-
-  if (contribution.status === "unsupported") {
-    return "transition_family_incompatible";
   }
 
   return "route_transitions_unresolved";

@@ -123,6 +123,9 @@ export function CalculationPanel({
             onReject={onRejectAccessoryProposal}
           />
           <DiameterTransitionProposalList
+            isTransitionAwareResolved={
+              result.transitionAwareNetworkSizing?.status === "resolved"
+            }
             nodeLabels={result.nodeLabels}
             proposals={diameterTransitionProposals}
             routeTransitionResolutions={routeTransitionResolutions}
@@ -260,6 +263,7 @@ function AccessoryProposalList({
 }
 
 function DiameterTransitionProposalList({
+  isTransitionAwareResolved,
   nodeLabels,
   proposals,
   routeTransitionResolutions,
@@ -267,6 +271,7 @@ function DiameterTransitionProposalList({
   onConfirm,
   onReject,
 }: {
+  isTransitionAwareResolved: boolean;
   nodeLabels: Record<string, string>;
   proposals: DiameterTransitionProposal[];
   routeTransitionResolutions: Record<string, TechnicalRouteTransitionResolution>;
@@ -286,8 +291,9 @@ function DiameterTransitionProposalList({
         Transiciones de diametro
       </h3>
       <div className="mb-2 rounded border border-[#dbeafe] bg-[#eff6ff] px-3 py-2 text-xs text-[#1d4ed8]">
-        Preview: incluye fisica, accesorios, transiciones simples y tees
-        reductoras por recorrido; las tees todavia no modifican sizeSegment.
+        {isTransitionAwareResolved
+          ? "Las transiciones confirmadas participan del dimensionado completo; tees reductoras por recorrido."
+          : "Preview: incluye fisica, accesorios, transiciones simples y tees reductoras por recorrido."}
       </div>
       {visibleProposals.length === 0 ? (
         <div className="rounded border border-[var(--line)] px-3 py-2 text-xs text-[var(--muted)]">
@@ -349,6 +355,7 @@ function DiameterTransitionProposalList({
                         proposal.id,
                         routeTransitionResolutions,
                       )}
+                      isTransitionAwareResolved={isTransitionAwareResolved}
                       proposal={proposal}
                       review={review}
                     />
@@ -453,10 +460,12 @@ function DiameterTransitionCandidateSelector({
 
 function DiameterTransitionPreview({
   contributions,
+  isTransitionAwareResolved,
   proposal,
   review,
 }: {
   contributions: TechnicalRouteTransitionContribution[];
+  isTransitionAwareResolved: boolean;
   proposal: DiameterTransitionProposal;
   review: DiameterTransitionTechnicalReview | null;
 }) {
@@ -476,7 +485,11 @@ function DiameterTransitionPreview({
   if (proposal.kind === "branch_transition") {
     return (
       <div className="mt-1 text-[10px] text-[var(--muted)]">
-        <div>Preview tee reductora por recorrido</div>
+        <div>
+          {isTransitionAwareResolved
+            ? "Tee reductora por recorrido"
+            : "Preview tee reductora por recorrido"}
+        </div>
         {familyLabel ? <div>Familia: {familyLabel}</div> : null}
         {contributions.length > 0 ? (
           <ul className="mt-0.5 space-y-0.5">
@@ -1154,7 +1167,7 @@ function NetworkSegmentSizing({
       <>
         <div className="mt-2 rounded border border-[#f1d28a] bg-[#fffaf0] px-2 py-2">
           <div className="font-semibold text-[var(--muted)]">
-            Dimensionado completo
+            Dimensionado completo pendiente
           </div>
           <div className="mt-1 text-[var(--warning)]">
             {transitionAwareSegment?.issues[0]?.message ??
@@ -1371,10 +1384,17 @@ function TransitionAwareNetworkSegmentSizing({
             "Pendiente",
           )}
         </dd>
-        <dt>Transiciones</dt>
+        <dt>Reducciones</dt>
         <dd className="text-right">
           {formatCalculationMeters(
-            sizing.governingRouteTransitionEquivalentLengthMeters,
+            sizing.governingRouteSimpleTransitionEquivalentLengthMeters,
+            "Pendiente",
+          )}
+        </dd>
+        <dt>Tees reductoras</dt>
+        <dd className="text-right">
+          {formatCalculationMeters(
+            sizing.governingRouteBranchTransitionEquivalentLengthMeters,
             "Pendiente",
           )}
         </dd>
@@ -1440,14 +1460,21 @@ function RouteTransitionPreviewDetail({
         <dd className="text-right">
           {formatCalculationMeters(solverSizingLength, "Pendiente")}
         </dd>
+        <dt>{isTransitionAwareResolved ? "Reducciones" : "Reducciones preview"}</dt>
+        <dd className="text-right">
+          {formatCalculationMeters(
+            resolution?.simpleTransitionEquivalentLengthMeters ?? null,
+            "Pendiente",
+          )}
+        </dd>
         <dt>
           {isTransitionAwareResolved
-            ? "Equiv. transiciones"
-            : "Equiv. transiciones preview"}
+            ? "Tees reductoras"
+            : "Tees reductoras preview"}
         </dt>
         <dd className="text-right">
           {formatCalculationMeters(
-            resolution?.equivalentLengthMeters ?? null,
+            resolution?.branchTransitionEquivalentLengthMeters ?? null,
             "Pendiente",
           )}
         </dd>
@@ -1686,7 +1713,7 @@ function formatTransitionAwareSizingStatus(result: TechnicalCalculationResult) {
   }
 
   if (result.networkSizing?.status === "resolved") {
-    return "Pendiente";
+    return "Dimensionado completo pendiente";
   }
 
   return "Base pendiente";

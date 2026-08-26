@@ -63,12 +63,14 @@ export type TechnicalRouteTransitionContribution = {
 };
 
 export type TechnicalRouteTransitionResolution = {
+  branchTransitionEquivalentLengthMeters: number | null;
   contributions: TechnicalRouteTransitionContribution[];
   duplicateTransitionIds: string[];
   equivalentLengthMeters: number | null;
   projectedSizingLengthMeters: number | null;
   reasons: string[];
   routeId: string;
+  simpleTransitionEquivalentLengthMeters: number | null;
   status: PipeSystemResolutionStatus;
 };
 
@@ -82,11 +84,16 @@ export function resolveTechnicalRouteTransitions(params: {
   enableBranchTransitionPreview?: boolean;
   equipment?: WorkbenchEquipment[];
   governingRouteAccessoryEquivalentLengthMeters?: number | null;
+  includeBranchTransitions?: boolean;
   network?: ManualRouteNetwork;
   pipeSystem: PipeSystem;
   route: TechnicalRouteTransitionRoute;
   transitions: DiameterTransitionProposal[];
 }): TechnicalRouteTransitionResolution {
+  const includeBranchTransitions =
+    params.includeBranchTransitions ??
+    params.enableBranchTransitionPreview ??
+    false;
   const transitions =
     params.decisions === undefined
       ? params.transitions
@@ -101,7 +108,7 @@ export function resolveTechnicalRouteTransitions(params: {
 
   for (const crossing of findRouteTransitionCrossings({
     diameterBySegmentId: params.diameterBySegmentId,
-    enableBranchTransitionPreview: params.enableBranchTransitionPreview ?? false,
+    includeBranchTransitions,
     route: params.route,
     transitions,
   })) {
@@ -124,8 +131,8 @@ export function resolveTechnicalRouteTransitions(params: {
     const contribution = createTransitionContribution({
       crossing,
       diameterBySegmentId: params.diameterBySegmentId,
-      enableBranchTransitionPreview: params.enableBranchTransitionPreview ?? false,
       equipment: params.equipment,
+      includeBranchTransitions,
       network: params.network,
       pipeSystem: params.pipeSystem,
       routeId: params.route.id,
@@ -158,6 +165,14 @@ export function resolveTechnicalRouteTransitions(params: {
           0,
         )
       : null;
+  const simpleTransitionEquivalentLengthMeters =
+    status === "resolved"
+      ? sumTransitionContributions(contributions, ["simple_reduction"])
+      : null;
+  const branchTransitionEquivalentLengthMeters =
+    status === "resolved"
+      ? sumTransitionContributions(contributions, ["branch_transition"])
+      : null;
   const projectedSizingLengthMeters =
     status === "resolved"
       ? calculateProjectedSizingLengthWithTransitions({
@@ -169,12 +184,14 @@ export function resolveTechnicalRouteTransitions(params: {
       : null;
 
   return {
+    branchTransitionEquivalentLengthMeters,
     contributions,
     duplicateTransitionIds: [...new Set(duplicateTransitionIds)].sort(),
     equivalentLengthMeters,
     projectedSizingLengthMeters,
     reasons,
     routeId: params.route.id,
+    simpleTransitionEquivalentLengthMeters,
     status,
   };
 }
@@ -201,7 +218,7 @@ export function calculateProjectedSizingLengthWithTransitions(params: {
 
 function findRouteTransitionCrossings(params: {
   diameterBySegmentId: DiameterBySegmentId | undefined;
-  enableBranchTransitionPreview: boolean;
+  includeBranchTransitions: boolean;
   route: TechnicalRouteTransitionRoute;
   transitions: DiameterTransitionProposal[];
 }) {
@@ -237,7 +254,7 @@ function findRouteTransitionCrossings(params: {
         routeUsesRequiredDiameterChange({
           diameterBySegmentId: params.diameterBySegmentId,
           downstreamSegmentId,
-          enableBranchTransitionPreview: params.enableBranchTransitionPreview,
+          includeBranchTransitions: params.includeBranchTransitions,
           transition,
           upstreamSegmentId,
         }),
@@ -264,7 +281,7 @@ function findRouteTransitionCrossings(params: {
 function routeUsesRequiredDiameterChange(params: {
   diameterBySegmentId: DiameterBySegmentId | undefined;
   downstreamSegmentId: string;
-  enableBranchTransitionPreview: boolean;
+  includeBranchTransitions: boolean;
   transition: DiameterTransitionProposal;
   upstreamSegmentId: string;
 }) {
@@ -273,7 +290,7 @@ function routeUsesRequiredDiameterChange(params: {
   }
 
   if (
-    params.enableBranchTransitionPreview &&
+    params.includeBranchTransitions &&
     params.transition.kind === "branch_transition"
   ) {
     return true;
@@ -301,8 +318,8 @@ function createTransitionContribution(params: {
     upstreamSegmentId: string;
   };
   diameterBySegmentId: DiameterBySegmentId | undefined;
-  enableBranchTransitionPreview: boolean;
   equipment: WorkbenchEquipment[] | undefined;
+  includeBranchTransitions: boolean;
   network: ManualRouteNetwork | undefined;
   pipeSystem: PipeSystem;
   routeId: string;
@@ -379,8 +396,8 @@ function createTransitionContribution(params: {
       base,
       diameterBySegmentId: params.diameterBySegmentId,
       downstreamSegmentId,
-      enableBranchTransitionPreview: params.enableBranchTransitionPreview,
       equipment: params.equipment,
+      includeBranchTransitions: params.includeBranchTransitions,
       network: params.network,
       pipeSystem: params.pipeSystem,
       transition,
@@ -499,15 +516,15 @@ function createBranchTransitionContribution(params: {
   base: TechnicalRouteTransitionContribution;
   diameterBySegmentId: DiameterBySegmentId | undefined;
   downstreamSegmentId: string;
-  enableBranchTransitionPreview: boolean;
   equipment: WorkbenchEquipment[] | undefined;
+  includeBranchTransitions: boolean;
   network: ManualRouteNetwork | undefined;
   pipeSystem: PipeSystem;
   transition: DiameterTransitionProposal;
   upstreamDiameter: PipeDiameterReference | null;
   upstreamSegmentId: string | null;
 }): TechnicalRouteTransitionContribution {
-  if (!params.enableBranchTransitionPreview) {
+  if (!params.includeBranchTransitions) {
     return unresolvedContribution({
       ...params.base,
       reason: "Tee multidiametro pendiente de modelar por variante de recorrido.",
@@ -873,6 +890,18 @@ function resolveOverallStatus(
   }
 
   return "resolved";
+}
+
+function sumTransitionContributions(
+  contributions: TechnicalRouteTransitionContribution[],
+  kinds: DiameterTransitionKind[],
+) {
+  return contributions
+    .filter((contribution) => kinds.includes(contribution.transitionKind))
+    .reduce(
+      (sum, contribution) => sum + (contribution.equivalentLengthMeters ?? 0),
+      0,
+    );
 }
 
 function segmentDiameter(

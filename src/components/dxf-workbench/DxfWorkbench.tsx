@@ -985,23 +985,27 @@ export function DxfWorkbench() {
       return {};
     }
 
-    const routeAccessoryResolutions =
+    if (
       technicalCalculationResult.transitionAwareNetworkSizing?.status ===
       "resolved"
-        ? technicalCalculationResult.transitionAwareNetworkSizing
-            .routeAccessoryResolutions
-        : technicalCalculationResult.routeAccessoryResolutions;
+    ) {
+      return technicalCalculationResult.transitionAwareNetworkSizing
+        .routeTransitionResolutions;
+    }
+
+    const routeAccessoryResolutions =
+      technicalCalculationResult.routeAccessoryResolutions;
 
     return Object.fromEntries(
       technicalCalculationResult.technicalRoutes.map((route) => [
         route.id,
         resolveTechnicalRouteTransitions({
           diameterBySegmentId: finalDiameterBySegmentId,
-          enableBranchTransitionPreview: true,
           equipment: planBase?.equipment ?? [],
           governingRouteAccessoryEquivalentLengthMeters:
             routeAccessoryResolutions[route.id]
               ?.governingRouteAccessoryEquivalentLengthMeters ?? null,
+          includeBranchTransitions: true,
           network: planBase?.routeNetwork,
           pipeSystem: SIGAS_PIPE_SYSTEM,
           route,

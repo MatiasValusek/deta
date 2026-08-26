@@ -307,7 +307,7 @@ export function runTechnicalRouteBranchTransitionVerifications() {
     },
   );
 
-  verify(results, "Caso N - 09C2B no cuenta branch por default", () => {
+  verify(results, "Caso N - resolver default no cuenta branch", () => {
     const fixture = teeFixture({
       diameters: { s1: 32, s2: 32, s3: 25 },
     });
@@ -347,10 +347,10 @@ function resolvePreview(params: {
 }) {
   return resolveTechnicalRouteTransitions({
     diameterBySegmentId: params.fixture.diameterBySegmentId,
-    enableBranchTransitionPreview: true,
     equipment: params.fixture.equipment,
     governingRouteAccessoryEquivalentLengthMeters:
       params.accessoryEquivalentLengthMeters ?? 0,
+    includeBranchTransitions: true,
     network: params.fixture.network,
     pipeSystem: SIGAS_PIPE_SYSTEM,
     route: params.route,

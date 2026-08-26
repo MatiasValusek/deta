@@ -60,6 +60,7 @@ const TEST_DIAMETERS: PipeDiameterReference[] = [
   testDiameter("test-40", 40, 33),
 ];
 const DEFAULT_TRANSITION_FAMILY = "test-reduction";
+const BRANCH_TRANSITION_FAMILY = "test-reduced-tee";
 const EPSILON = 0.000001;
 
 export function runTechnicalTransitionAwareNetworkSizingVerifications() {
@@ -437,6 +438,339 @@ export function runTechnicalTransitionAwareNetworkSizingVerifications() {
     assertEqual(result.additionalDiameterStepCost, null);
   });
 
+  verify(results, "Caso U - branch through participa del solver", () => {
+    const solved = solveBranchWithConfirmedTransitions({
+      pipeSystem: createTestPipeSystem({
+        requiredBySegmentId: {
+          branchA: "test-32",
+          branchB: "test-25",
+          common: "test-32",
+        },
+        transitionEquivalentByFamily: branchPairs({
+          "32-25:through": 2,
+          "32-25:turn_90": 5,
+        }),
+      }),
+    });
+    const sizing = assertTransitionAwareSizing(solved.result);
+    const transition = routeTransition(sizing, "technical-route:a");
+    const contribution = transition.contributions.find(
+      (item) => item.transitionKind === "branch_transition",
+    );
+
+    assertEqual(sizing.status, "resolved");
+    assertEqual(contribution?.traversalKind, "through");
+    assertClose(contribution?.equivalentLengthMeters, 2);
+    assertClose(segmentSizing(sizing, "branchA").transitionAwareSizingLengthMeters, 22);
+  });
+
+  verify(results, "Caso V - branch turn 90 participa del solver", () => {
+    const solved = solveBranchWithConfirmedTransitions({
+      pipeSystem: createTestPipeSystem({
+        requiredBySegmentId: {
+          branchA: "test-32",
+          branchB: "test-25",
+          common: "test-32",
+        },
+        transitionEquivalentByFamily: branchPairs({
+          "32-25:through": 2,
+          "32-25:turn_90": 5,
+        }),
+      }),
+    });
+    const sizing = assertTransitionAwareSizing(solved.result);
+    const transition = routeTransition(sizing, "technical-route:b");
+    const contribution = transition.contributions.find(
+      (item) => item.transitionKind === "branch_transition",
+    );
+
+    assertEqual(sizing.status, "resolved");
+    assertEqual(contribution?.traversalKind, "turn_90");
+    assertClose(contribution?.equivalentLengthMeters, 5);
+    assertClose(segmentSizing(sizing, "branchB").transitionAwareSizingLengthMeters, 25);
+  });
+
+  verify(results, "Caso W - misma tee usa equivalencias distintas por route", () => {
+    const solved = solveBranchWithConfirmedTransitions({
+      pipeSystem: createTestPipeSystem({
+        requiredBySegmentId: {
+          branchA: "test-32",
+          branchB: "test-25",
+          common: "test-32",
+        },
+        transitionEquivalentByFamily: branchPairs({
+          "32-25:through": 2,
+          "32-25:turn_90": 5,
+        }),
+      }),
+    });
+    const sizing = assertTransitionAwareSizing(solved.result);
+    const through = routeTransition(sizing, "technical-route:a");
+    const turn = routeTransition(sizing, "technical-route:b");
+
+    assertClose(through.branchTransitionEquivalentLengthMeters, 2);
+    assertClose(turn.branchTransitionEquivalentLengthMeters, 5);
+    assert(
+      through.contributions[0]?.transitionId ===
+        turn.contributions[0]?.transitionId,
+      "Ambas rutas deben referir a la misma tee fisica.",
+    );
+  });
+
+  verify(results, "Caso X - perdida de tee obliga aumento de diametro", () => {
+    const solved = solveBranchWithConfirmedTransitions({
+      pipeSystem: branchIncreasePipeSystem(),
+    });
+    const sizing = assertTransitionAwareSizing(solved.result);
+    const baselineEvaluation = evaluateFixtureAssignment(
+      solved.fixture,
+      { branchA: "test-32", branchB: "test-25", common: "test-32" },
+      solved.decisions,
+    );
+
+    assertEqual(baselineEvaluation.status, "incomplete");
+    assertClose(
+      evaluationRouteTransition(baselineEvaluation, "technical-route:a")
+        .branchTransitionEquivalentLengthMeters,
+      3,
+    );
+    assertIssue(baselineEvaluation, "candidate_diameter_below_required");
+    assertEqual(sizing.status, "resolved");
+    assertEqual(sizing.additionalDiameterStepCost, 1);
+    assertSegmentDiameter(sizing, "common", "test-32");
+    assertSegmentDiameter(sizing, "branchA", "test-32");
+    assertSegmentDiameter(sizing, "branchB", "test-32");
+    assertClose(
+      routeTransition(sizing, "technical-route:a")
+        .branchTransitionEquivalentLengthMeters,
+      0,
+    );
+  });
+
+  verify(results, "Caso Y - cambio de diametro recalcula variante branch", () => {
+    const fixture = createBranchFixture({
+      pipeSystem: createTestPipeSystem({
+        requiredBySegmentId: {
+          branchA: "test-32",
+          branchB: "test-25",
+          common: "test-32",
+        },
+        transitionEquivalentByFamily: branchPairs({
+          "32-25:through": 2,
+          "32-25:turn_90": 5,
+          "40-25:through": 7,
+          "40-25:turn_90": 11,
+        }),
+      }),
+    });
+    const decisions = confirmedDecisionsForFixture(
+      fixture,
+      BRANCH_TRANSITION_FAMILY,
+    );
+    const evaluation = evaluateFixtureAssignment(
+      fixture,
+      { branchA: "test-40", branchB: "test-25", common: "test-40" },
+      decisions,
+    );
+    const contribution = evaluationRouteTransition(evaluation, "technical-route:a")
+      .contributions[0];
+
+    assertEqual(evaluation.status, "resolved");
+    assertEqual(contribution?.variant?.label, "test-reduced-tee 40 a 25 through");
+    assertClose(contribution?.equivalentLengthMeters, 7);
+  });
+
+  verify(results, "Caso Z - branch desaparece al igualarse diametros", () => {
+    const fixture = createBranchFixture({
+      pipeSystem: createTestPipeSystem({
+        requiredBySegmentId: {
+          branchA: "test-32",
+          branchB: "test-25",
+          common: "test-32",
+        },
+        transitionEquivalentByFamily: branchPairs({
+          "32-25:through": 2,
+          "32-25:turn_90": 5,
+        }),
+      }),
+    });
+    const decisions = confirmedDecisionsForFixture(
+      fixture,
+      BRANCH_TRANSITION_FAMILY,
+    );
+    const evaluation = evaluateFixtureAssignment(
+      fixture,
+      { branchA: "test-32", branchB: "test-32", common: "test-32" },
+      decisions,
+    );
+
+    assertEqual(evaluation.status, "resolved");
+    assertClose(
+      evaluationRouteTransition(evaluation, "technical-route:a")
+        .equivalentLengthMeters,
+      0,
+    );
+    assertClose(
+      evaluationRouteTransition(evaluation, "technical-route:b")
+        .branchTransitionEquivalentLengthMeters,
+      0,
+    );
+  });
+
+  verify(results, "Caso AA - branch nueva sin confirmar no es factible", () => {
+    const fixture = createBranchFixture({
+      pipeSystem: createTestPipeSystem({
+        requiredBySegmentId: {
+          branchA: "test-32",
+          branchB: "test-32",
+          common: "test-32",
+        },
+        transitionEquivalentByFamily: branchPairs({
+          "40-32:turn_90": 9,
+        }),
+      }),
+    });
+    const evaluation = evaluateFixtureAssignment(fixture, {
+      branchA: "test-32",
+      branchB: "test-40",
+      common: "test-32",
+    });
+
+    assertEqual(evaluation.status, "incomplete");
+    assertIssue(evaluation, "branch_transition_required");
+  });
+
+  verify(results, "Caso AB - variante branch incompatible conserva familia", () => {
+    const fixture = createBranchFixture({
+      pipeSystem: createTestPipeSystem({
+        requiredBySegmentId: {
+          branchA: "test-32",
+          branchB: "test-25",
+          common: "test-32",
+        },
+        transitionEquivalentByFamily: branchPairs({
+          "32-25:through": 2,
+          "32-25:turn_90": 5,
+        }),
+      }),
+    });
+    const decisions = confirmedDecisionsForFixture(
+      fixture,
+      BRANCH_TRANSITION_FAMILY,
+    );
+    const evaluation = evaluateFixtureAssignment(
+      fixture,
+      { branchA: "test-40", branchB: "test-25", common: "test-40" },
+      decisions,
+    );
+    const contribution = evaluationRouteTransition(evaluation, "technical-route:a")
+      .contributions[0];
+
+    assertEqual(evaluation.status, "unsupported");
+    assertIssue(evaluation, "transition_family_incompatible");
+    assertEqual(contribution?.catalogFamilyId, BRANCH_TRANSITION_FAMILY);
+  });
+
+  verify(results, "Caso AC - route ajena no suma tee branch", () => {
+    const fixture = createBranchFixtureWithForeignRoute({
+      pipeSystem: createTestPipeSystem({
+        requiredBySegmentId: {
+          branchA: "test-32",
+          branchB: "test-25",
+          common: "test-32",
+          directC: "test-32",
+        },
+        transitionEquivalentByFamily: branchPairs({
+          "32-25:through": 2,
+          "32-25:turn_90": 5,
+        }),
+      }),
+    });
+    const decisions = confirmedDecisionsForFixture(
+      fixture,
+      BRANCH_TRANSITION_FAMILY,
+    );
+    const result = calculateTechnicalTree({
+      diameterTransitionDecisions: decisions,
+      equipment: fixture.equipment,
+      minSegmentLengthSource: 0.000001,
+      network: fixture.network,
+      pipeSystem: fixture.pipeSystem,
+      scaleMetersPerSourceUnit: 1,
+    });
+    const sizing = assertTransitionAwareSizing(result);
+    const foreign = routeTransition(sizing, "technical-route:c");
+
+    assertEqual(sizing.status, "resolved");
+    assertEqual(foreign.contributions.length, 0);
+    assertClose(foreign.equivalentLengthMeters, 0);
+  });
+
+  verify(results, "Caso AD - branch no se cuenta doble", () => {
+    const solved = solveBranchWithConfirmedTransitions({
+      pipeSystem: createTestPipeSystem({
+        requiredBySegmentId: {
+          branchA: "test-32",
+          branchB: "test-25",
+          common: "test-32",
+        },
+        transitionEquivalentByFamily: branchPairs({
+          "32-25:through": 2,
+          "32-25:turn_90": 5,
+        }),
+      }),
+    });
+    const sizing = assertTransitionAwareSizing(solved.result);
+    const transition = routeTransition(sizing, "technical-route:b");
+
+    assertEqual(
+      transition.contributions.filter(
+        (item) => item.transitionKind === "branch_transition",
+      ).length,
+      1,
+    );
+    assertClose(transition.equivalentLengthMeters, 5);
+  });
+
+  verify(results, "Caso AE - validacion final con branch", () => {
+    const sizing = assertTransitionAwareSizing(
+      solveBranchWithConfirmedTransitions({
+        pipeSystem: branchIncreasePipeSystem(),
+      }).result,
+    );
+
+    for (const segment of sizing.segments) {
+      assert(
+        diameterRank(segment.finalDiameter) >= diameterRank(segment.requiredDiameter),
+        `El tramo ${segment.segmentId} no cubre su diametro requerido.`,
+      );
+    }
+  });
+
+  verify(results, "Caso AF - brute force parity con branch", () => {
+    const { decisions, fixture, result } = solveBranchWithConfirmedTransitions({
+      pipeSystem: branchIncreasePipeSystem(),
+    });
+    const sizing = assertTransitionAwareSizing(result);
+    const baseline = assertBaselineSizing(fixture.result);
+    const bruteForce = enumerateTransitionAwareSizingAssignmentsForVerification({
+      baselineSizing: baseline,
+      decisions,
+      equipment: fixture.equipment,
+      network: fixture.network,
+      pipeSystem: fixture.pipeSystem,
+      routeSegments: fixture.network.segments,
+      routes: fixture.result.technicalRoutes,
+      segments: fixture.result.segments,
+    });
+
+    assertEqual(bruteForce.minimalCost, sizing.additionalDiameterStepCost);
+    assertEqual(
+      JSON.stringify(bruteForce.minimalAssignment),
+      JSON.stringify(sizing.finalDiameterBySegmentId),
+    );
+  });
+
   return results;
 }
 
@@ -458,6 +792,25 @@ function disappearingReductionFixture() {
   });
 }
 
+function branchIncreasePipeSystem() {
+  return createTestPipeSystem({
+    requiredBySegmentId: {
+      branchA: "test-32",
+      branchB: "test-25",
+      common: (context) =>
+        (context.calculationLengthMeters ?? 0) > 22
+          ? "test-40"
+          : "test-32",
+    },
+    transitionEquivalentByFamily: branchPairs({
+      "32-25:through": 3,
+      "32-25:turn_90": 4,
+      "40-25:through": 3,
+      "40-25:turn_90": 4,
+    }),
+  });
+}
+
 function solveLineWithConfirmedTransitions(params: {
   familyId?: string;
   pipeSystem: PipeSystem;
@@ -470,6 +823,29 @@ function solveLineWithConfirmedTransitions(params: {
   const decisions = confirmedDecisionsForFixture(
     fixture,
     params.familyId ?? DEFAULT_TRANSITION_FAMILY,
+  );
+  const result = calculateTechnicalTree({
+    diameterTransitionDecisions: decisions,
+    equipment: fixture.equipment,
+    minSegmentLengthSource: 0.000001,
+    network: fixture.network,
+    pipeSystem: params.pipeSystem,
+    scaleMetersPerSourceUnit: 1,
+  });
+
+  return { decisions, fixture, result };
+}
+
+function solveBranchWithConfirmedTransitions(params: {
+  familyId?: string;
+  pipeSystem: PipeSystem;
+}) {
+  const fixture = createBranchFixture({
+    pipeSystem: params.pipeSystem,
+  });
+  const decisions = confirmedDecisionsForFixture(
+    fixture,
+    params.familyId ?? BRANCH_TRANSITION_FAMILY,
   );
   const result = calculateTechnicalTree({
     diameterTransitionDecisions: decisions,
@@ -585,6 +961,50 @@ function createBranchFixture(params: { pipeSystem: PipeSystem }) {
         { fromNodeId: "node-meter", id: "common", toNodeId: "j" },
         { fromNodeId: "j", id: "branchA", toNodeId: "node-a" },
         { fromNodeId: "j", id: "branchB", toNodeId: "node-b" },
+      ],
+    },
+    pipeSystem: params.pipeSystem,
+  });
+}
+
+function createBranchFixtureWithForeignRoute(params: { pipeSystem: PipeSystem }) {
+  return createFixture({
+    equipment: fixtureEquipment([
+      {
+        demandValue: 1,
+        id: "a",
+        name: "A",
+        x: 20,
+        y: 0,
+      },
+      {
+        demandValue: 1,
+        id: "b",
+        name: "B",
+        x: 10,
+        y: 10,
+      },
+      {
+        demandValue: 1,
+        id: "c",
+        name: "C",
+        x: -10,
+        y: 0,
+      },
+    ]),
+    network: {
+      nodes: [
+        supplyNode(),
+        routeNode("j", 10, 0),
+        { equipmentId: "a", id: "node-a", kind: "appliance" },
+        { equipmentId: "b", id: "node-b", kind: "appliance" },
+        { equipmentId: "c", id: "node-c", kind: "appliance" },
+      ],
+      segments: [
+        { fromNodeId: "node-meter", id: "common", toNodeId: "j" },
+        { fromNodeId: "j", id: "branchA", toNodeId: "node-a" },
+        { fromNodeId: "j", id: "branchB", toNodeId: "node-b" },
+        { fromNodeId: "node-meter", id: "directC", toNodeId: "node-c" },
       ],
     },
     pipeSystem: params.pipeSystem,
@@ -751,10 +1171,24 @@ function resolveTestTransitionEquivalentLength(
   context: PipeDiameterTransitionEquivalentLengthContext,
   options: TestPipeSystemOptions,
 ): PipeSystemResolution<PipeDiameterTransitionEquivalentLengthResult> {
-  if (context.transition.kind !== "simple_reduction") {
+  if (
+    context.transition.kind !== "simple_reduction" &&
+    context.transition.kind !== "branch_transition"
+  ) {
     return {
-      reason: "El PipeSystem sintetico solo resuelve reducciones simples.",
+      reason:
+        "El PipeSystem sintetico solo resuelve reducciones simples y tees reductoras.",
       status: "unsupported",
+    };
+  }
+
+  if (
+    context.transition.kind === "branch_transition" &&
+    !context.transition.traversalKind
+  ) {
+    return {
+      reason: "Falta traversalKind sintetico para resolver la tee reductora.",
+      status: "unresolved",
     };
   }
 
@@ -771,29 +1205,38 @@ function resolveTestTransitionEquivalentLength(
     context.upstreamDiameter,
     context.downstreamDiameter,
   );
+  const traversalKey = context.transition.traversalKind
+    ? `${pair}:${context.transition.traversalKind}`
+    : pair;
+  const equivalentsByPair =
+    options.transitionEquivalentByFamily?.[familyId] ?? {};
   const equivalentLength =
-    options.transitionEquivalentByFamily?.[familyId]?.[pair] ?? null;
+    equivalentsByPair[traversalKey] ?? equivalentsByPair[pair] ?? null;
 
   if (equivalentLength === null) {
     return {
-      data: { familyId, pair },
+      data: { familyId, pair, traversalKey },
       reason: "La familia sintetica no posee variante para el par actual.",
       status: "unsupported",
     };
   }
 
   const [larger, smaller] = pair.split("-").map(Number) as [number, number];
+  const traversalSuffix = context.transition.traversalKind
+    ? ` ${context.transition.traversalKind}`
+    : "";
+  const label = `${familyId} ${larger} a ${smaller}${traversalSuffix}`;
 
   return {
     data: {
-      catalogCode: `${familyId}-${pair}`,
+      catalogCode: `${familyId}-${traversalKey}`,
       catalogFamilyId: familyId,
-      tableLabel: `${familyId} ${larger} a ${smaller}`,
+      tableLabel: label,
     },
-    explanation: `Reduccion sintetica ${familyId} ${pair}.`,
+    explanation: `Transicion sintetica ${familyId} ${traversalKey}.`,
     status: "resolved",
     value: {
-      catalogCode: `${familyId}-${pair}`,
+      catalogCode: `${familyId}-${traversalKey}`,
       catalogFamilyId: familyId,
       downstreamDiameter: context.downstreamDiameter,
       equivalentLengthMeters: equivalentLength,
@@ -801,7 +1244,7 @@ function resolveTestTransitionEquivalentLength(
       upstreamDiameter: context.upstreamDiameter,
       variant: {
         largerExternalDiameterMillimeters: larger,
-        label: `${familyId} ${larger} a ${smaller}`,
+        label,
         smallerExternalDiameterMillimeters: smaller,
       },
     },
@@ -882,11 +1325,27 @@ function familyPairs(pairs: Record<string, number>) {
   };
 }
 
+function branchPairs(pairs: Record<string, number>) {
+  return {
+    [BRANCH_TRANSITION_FAMILY]: pairs,
+  };
+}
+
 function routeTransition(
   sizing: TechnicalTransitionAwareNetworkSizingResult,
   routeId: string,
 ) {
   const resolution = sizing.routeTransitionResolutions[routeId];
+
+  assert(resolution, `Falta resolucion de transiciones para ${routeId}.`);
+  return resolution;
+}
+
+function evaluationRouteTransition(
+  evaluation: ReturnType<typeof evaluateFixtureAssignment>,
+  routeId: string,
+) {
+  const resolution = evaluation.routeTransitionResolutions[routeId];
 
   assert(resolution, `Falta resolucion de transiciones para ${routeId}.`);
   return resolution;
