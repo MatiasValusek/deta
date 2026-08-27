@@ -52,6 +52,9 @@ import {
   type TechnicalCalculationSheet,
   type TechnicalCalculationSheetRow,
 } from "@/lib/calculation/technicalCalculationSheet";
+import {
+  downloadTechnicalWorkbook,
+} from "@/lib/calculation/technicalExcelDownload";
 
 type CalculationPanelProps = {
   accessoryProposals: AccessoryProposal[];
@@ -91,6 +94,8 @@ export function CalculationPanel({
   onRejectDiameterTransition,
 }: CalculationPanelProps) {
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null);
+  const [isExportingExcel, setIsExportingExcel] = useState(false);
+  const [excelExportError, setExcelExportError] = useState<string | null>(null);
   const calculationSheet = useMemo(
     () =>
       createTechnicalCalculationSheet({
@@ -119,6 +124,31 @@ export function CalculationPanel({
     result?.segments.find((segment) => segment.segmentId === selectedSegmentId) ??
     result?.segments[0] ??
     null;
+  const canExportExcel = result !== null && calculationSheet.rows.length > 0;
+
+  const handleExportExcel = async () => {
+    if (!canExportExcel || isExportingExcel) {
+      return;
+    }
+
+    setExcelExportError(null);
+    setIsExportingExcel(true);
+
+    try {
+      await downloadTechnicalWorkbook({
+        calculationSheet,
+        materialTakeoff,
+      });
+    } catch (error) {
+      setExcelExportError(
+        error instanceof Error
+          ? error.message
+          : "No se pudo generar el Excel.",
+      );
+    } finally {
+      setIsExportingExcel(false);
+    }
+  };
 
   useEffect(() => {
     if (!result?.segments.some((segment) => segment.segmentId === selectedSegmentId)) {
@@ -135,15 +165,27 @@ export function CalculationPanel({
             {result ? technicalCalculationStatusLabel(result.status) : "Sin Planta"}
           </p>
         </div>
-        {!isPlanActive && planReady ? (
-          <button
-            className="rounded border border-[var(--line)] bg-white px-2 py-1 text-xs hover:border-[var(--accent)]"
-            type="button"
-            onClick={onGoToPlan}
-          >
-            Ir a Planta
-          </button>
-        ) : null}
+        <div className="flex items-center gap-2">
+          {result ? (
+            <button
+              className="rounded border border-[var(--line)] bg-white px-2 py-1 text-xs hover:border-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={!canExportExcel || isExportingExcel}
+              type="button"
+              onClick={handleExportExcel}
+            >
+              {isExportingExcel ? "Exportando..." : "Exportar Excel"}
+            </button>
+          ) : null}
+          {!isPlanActive && planReady ? (
+            <button
+              className="rounded border border-[var(--line)] bg-white px-2 py-1 text-xs hover:border-[var(--accent)]"
+              type="button"
+              onClick={onGoToPlan}
+            >
+              Ir a Planta
+            </button>
+          ) : null}
+        </div>
       </div>
 
       {!planReady ? (
@@ -155,6 +197,12 @@ export function CalculationPanel({
       {hasPendingProposal ? (
         <div className="mt-3 rounded border border-[#dbeafe] bg-[#eff6ff] px-3 py-2 text-xs text-[#1d4ed8]">
           Hay una propuesta pendiente. El cálculo usa solo la red confirmada.
+        </div>
+      ) : null}
+
+      {excelExportError ? (
+        <div className="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+          {excelExportError}
         </div>
       ) : null}
 
