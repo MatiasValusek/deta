@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
+import { type WorkbenchEquipment } from "@/lib/equipment/types";
 import {
-  demandUnitLabel,
-  hasPendingDemand,
-  type WorkbenchEquipment,
-} from "@/lib/equipment/types";
+  createDemandNormalizationIndex,
+  formatEquipmentDemandWithNormalization,
+  type EquipmentDemandNormalization,
+} from "@/lib/calculation/demandNormalization";
 import {
   equivalentLengthSourceLabel,
   formatCalculationMeters,
@@ -992,7 +993,7 @@ function CalculationSummary({ result }: { result: TechnicalCalculationResult }) 
       </dd>
       <dt>Artefactos</dt>
       <dd className="text-right font-mono">{result.totals.applianceCount}</dd>
-      <dt>Consumo total</dt>
+      <dt>Caudal normalizado total</dt>
       <dd className="text-right">{totalFlow}</dd>
       <dt>Sistema canerias</dt>
       <dd className="text-right">{formatPipeSystemLabel(result)}</dd>
@@ -1114,6 +1115,9 @@ function SegmentDetail({
   segment: TechnicalSegmentResult;
 }) {
   const equipmentById = new Map(equipment.map((item) => [item.id, item]));
+  const demandNormalizationByEquipmentId = createDemandNormalizationIndex(
+    result.demandNormalizations,
+  );
 
   return (
     <section className="mt-3 rounded border border-[var(--line)] px-3 py-2 text-xs">
@@ -1131,7 +1135,7 @@ function SegmentDetail({
         </dd>
         <dt>Long. prov. 08B2</dt>
         <dd className="text-right">{formatSegmentCalculationLength(segment)}</dd>
-        <dt>Consumo acumulado</dt>
+        <dt>Caudal normalizado</dt>
         <dd className="text-right">
           {formatTechnicalFlow(segment.accumulatedFlow, segment.accumulatedFlowUnit)}
         </dd>
@@ -1157,7 +1161,8 @@ function SegmentDetail({
 
               return (
                 <li key={equipmentId}>
-                  {item?.name ?? equipmentId} - {equipmentDemandLabel(item)}
+                  {item?.name ?? equipmentId} -{" "}
+                  {equipmentDemandLabel(item, demandNormalizationByEquipmentId)}
                 </li>
               );
             })}
@@ -1362,7 +1367,7 @@ function BaselineNetworkSegmentSizing({
         {title}
       </div>
       <dl className="mt-1 grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 gap-y-1">
-        <dt>Caudal</dt>
+        <dt>Caudal normalizado</dt>
         <dd className="text-right">
           {formatTechnicalFlow(sizing.accumulatedFlow, sizing.accumulatedFlowUnit)}
         </dd>
@@ -1485,7 +1490,7 @@ function TransitionAwareNetworkSegmentSizing({
         Dimensionado con transiciones
       </div>
       <dl className="mt-1 grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 gap-y-1">
-        <dt>Caudal</dt>
+        <dt>Caudal normalizado</dt>
         <dd className="text-right">
           {formatTechnicalFlow(sizing.accumulatedFlow, sizing.accumulatedFlowUnit)}
         </dd>
@@ -2156,13 +2161,15 @@ function formatPipeSystemLabel(result: TechnicalCalculationResult) {
     : result.pipeSystem.name;
 }
 
-function equipmentDemandLabel(equipment: WorkbenchEquipment | undefined) {
-  if (!equipment || hasPendingDemand(equipment)) {
+function equipmentDemandLabel(
+  equipment: WorkbenchEquipment | undefined,
+  demandNormalizationByEquipmentId: Map<string, EquipmentDemandNormalization>,
+) {
+  if (!equipment) {
     return "Pendiente";
   }
 
-  return `${equipment.demandValue?.toLocaleString("es-AR", {
-    maximumFractionDigits: 2,
-    minimumFractionDigits: 2,
-  })} ${demandUnitLabel(equipment.demandUnit as NonNullable<typeof equipment.demandUnit>)}`;
+  return formatEquipmentDemandWithNormalization(
+    demandNormalizationByEquipmentId.get(equipment.id),
+  );
 }

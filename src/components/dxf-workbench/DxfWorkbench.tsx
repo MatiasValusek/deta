@@ -48,6 +48,7 @@ import {
 import {
   resolveCompoundTurnTransitionPreview,
 } from "@/lib/calculation/compoundTurnTransitionResolution";
+import { DEFAULT_PROJECT_GAS_CONFIG } from "@/lib/calculation/projectGas";
 import { SIGAS_PIPE_SYSTEM } from "@/lib/calculation/pipeSystems/sigas";
 import {
   getSigasAccessoryCatalogCandidates,
@@ -811,6 +812,7 @@ export function DxfWorkbench() {
             minSegmentLengthSource: MIN_SECTION_LINK_LENGTH,
             network: planBase.routeNetwork,
             pipeSystem: SIGAS_PIPE_SYSTEM,
+            projectGas: DEFAULT_PROJECT_GAS_CONFIG,
             scaleMetersPerSourceUnit: calibrationScaleMetersPerSourceUnit(planBase),
           })
         : null,
@@ -4597,6 +4599,7 @@ export function DxfWorkbench() {
           isTraceReady={isEquipmentTraceReady}
           pendingDemandCount={pendingDemandCount}
           planReady={Boolean(planBase)}
+          projectGas={DEFAULT_PROJECT_GAS_CONFIG}
           selectedEquipment={selectedEquipment}
           showEquipment={planBase?.showEquipment ?? true}
           supplyCount={supplyCount}

@@ -12,6 +12,7 @@ import {
   SIGAS_NATURAL_GAS_CAPACITY_TABLE,
 } from "@/lib/calculation/pipeSystems/sigas/sigasData";
 import { SIGAS_PIPE_SYSTEM } from "@/lib/calculation/pipeSystems/sigas";
+import { DEFAULT_NATURAL_GAS_HEATING_VALUE_KCAL_PER_M3 } from "@/lib/calculation/projectGas";
 import type { DemandUnit, WorkbenchEquipment } from "@/lib/equipment/types";
 import type {
   ManualRouteNetwork,
@@ -243,17 +244,18 @@ export function runTechnicalNetworkSizingVerifications() {
     assertSegmentIssue(sizing, "segment", "route_accessories_unresolved");
   });
 
-  verify(results, "Caso I - unidad incompatible", () => {
+  verify(results, "Caso I - kcal/h normaliza y dimensiona", () => {
     const result = calculateSingleSegmentFixture({
       demandUnit: "kcal_h",
       flow: 9000,
       lengthMeters: 10,
       pipeSystem: createTestPipeSystem(),
     });
-    const sizing = assertNetwork(result);
+    const sizing = assertResolvedNetwork(result);
 
-    assertEqual(sizing.status, "unsupported");
-    assertSegmentIssue(sizing, "segment", "sizing_unresolved");
+    assertEqual(sizing.status, "resolved");
+    assertSegmentFlow(sizing, "segment", 9000 / DEFAULT_NATURAL_GAS_HEATING_VALUE_KCAL_PER_M3);
+    assertSegmentFlowUnit(sizing, "segment", "m3_h");
   });
 
   verify(results, "Caso J - fuera de tabla", () => {
@@ -971,6 +973,22 @@ function assertSegmentSizingLength(
   expectedMeters: number,
 ) {
   assertClose(segmentSizing(sizing, segmentId).sizingLengthMeters, expectedMeters);
+}
+
+function assertSegmentFlow(
+  sizing: TechnicalNetworkSizingResult,
+  segmentId: string,
+  expectedFlow: number,
+) {
+  assertClose(segmentSizing(sizing, segmentId).accumulatedFlow, expectedFlow);
+}
+
+function assertSegmentFlowUnit(
+  sizing: TechnicalNetworkSizingResult,
+  segmentId: string,
+  expectedUnit: DemandUnit,
+) {
+  assertEqual(segmentSizing(sizing, segmentId).accumulatedFlowUnit, expectedUnit);
 }
 
 function assertSegmentIssue(

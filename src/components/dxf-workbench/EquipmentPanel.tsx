@@ -3,13 +3,17 @@ import {
   DEMAND_UNITS,
   equipmentCode,
   equipmentTypeLabel,
-  formatEquipmentDemand,
-  hasPendingDemand,
   type DemandUnit,
   type EquipmentDraft,
   type EquipmentType,
   type WorkbenchEquipment,
 } from "@/lib/equipment/types";
+import {
+  createDemandNormalizationIndex,
+  formatEquipmentDemandWithNormalization,
+  normalizeEquipmentDemands,
+} from "@/lib/calculation/demandNormalization";
+import type { ProjectGasConfig } from "@/lib/calculation/projectGas";
 
 type EquipmentPanelProps = {
   canSaveDraft: boolean;
@@ -21,6 +25,7 @@ type EquipmentPanelProps = {
   isTraceReady: boolean;
   pendingDemandCount: number;
   planReady: boolean;
+  projectGas: ProjectGasConfig | null;
   selectedEquipment: WorkbenchEquipment | null;
   showEquipment: boolean;
   supplyCount: number;
@@ -52,6 +57,7 @@ export function EquipmentPanel({
   isTraceReady,
   pendingDemandCount,
   planReady,
+  projectGas,
   selectedEquipment,
   showEquipment,
   supplyCount,
@@ -75,6 +81,13 @@ export function EquipmentPanel({
   const applianceCount = equipment.filter(
     (item) => item.role === "appliance",
   ).length;
+  const demandNormalizationByEquipmentId = createDemandNormalizationIndex(
+    normalizeEquipmentDemands(equipment, projectGas),
+  );
+  const equipmentDemandLabel = (item: WorkbenchEquipment) =>
+    formatEquipmentDemandWithNormalization(
+      demandNormalizationByEquipmentId.get(item.id),
+    );
 
   return (
     <section
@@ -195,7 +208,7 @@ export function EquipmentPanel({
                   <span className="min-w-0 truncate font-medium">{item.name}</span>
                 </span>
                 <span className="mt-0.5 block text-[10px] text-[var(--muted)]">
-                  {equipmentTypeLabel(item.type)} - {formatEquipmentDemand(item)}
+                  {equipmentTypeLabel(item.type)} - {equipmentDemandLabel(item)}
                 </span>
               </button>
             ))}
@@ -208,7 +221,7 @@ export function EquipmentPanel({
           <div className="font-semibold">{selectedEquipment.name}</div>
           <div className="mt-1 text-[var(--muted)]">
             {equipmentTypeLabel(selectedEquipment.type)} -{" "}
-            {formatEquipmentDemand(selectedEquipment)}
+            {equipmentDemandLabel(selectedEquipment)}
           </div>
           <div className="mt-2 grid grid-cols-3 gap-1">
             <button

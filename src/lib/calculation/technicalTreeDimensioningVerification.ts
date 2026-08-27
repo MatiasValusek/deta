@@ -1,4 +1,5 @@
 import { SIGAS_PIPE_SYSTEM } from "@/lib/calculation/pipeSystems/sigas";
+import { DEFAULT_NATURAL_GAS_HEATING_VALUE_KCAL_PER_M3 } from "@/lib/calculation/projectGas";
 import type { PipeSegmentSizingResult } from "@/lib/calculation/pipeSystem";
 import type { DemandUnit, WorkbenchEquipment } from "@/lib/equipment/types";
 import type {
@@ -141,16 +142,20 @@ export function runTechnicalTreeDimensioningVerifications() {
     assertEqual(segment.calculatedDiameter, null);
   });
 
-  verify(results, "Caso H - unidad incompatible", () => {
+  verify(results, "Caso H - kcal/h normaliza y dimensiona", () => {
     const { result, segment } = singleSegment({
       demandUnit: "kcal_h",
       flow: 9000,
       lengthMeters: 10,
     });
 
-    assertEqual(result.status, "incomplete");
-    assertEqual(segment.dimensioningResolution.status, "unsupported");
-    assertEqual(segment.calculatedDiameter, null);
+    assertEqual(result.status, "valid");
+    assertEqual(segment.accumulatedFlowUnit, "m3_h");
+    assertClose(
+      segment.accumulatedFlow,
+      9000 / DEFAULT_NATURAL_GAS_HEATING_VALUE_KCAL_PER_M3,
+    );
+    assertResolvedDiameter(segment, "sigas-20");
   });
 
   verify(results, "Caso I - fuera de tabla", () => {
@@ -366,6 +371,15 @@ function assertEqual(actual: unknown, expected: unknown) {
   assert(
     actual === expected,
     `Expected ${String(expected)}, got ${String(actual)}`,
+  );
+}
+
+function assertClose(actual: number | null | undefined, expected: number) {
+  assert(
+    actual !== null &&
+      actual !== undefined &&
+      Math.abs(actual - expected) <= 0.000001,
+    `Expected ${expected}, got ${String(actual)}`,
   );
 }
 

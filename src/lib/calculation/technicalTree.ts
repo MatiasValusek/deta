@@ -1,9 +1,17 @@
 import {
   demandUnitLabel,
-  hasPendingDemand,
   type DemandUnit,
   type WorkbenchEquipment,
 } from "@/lib/equipment/types";
+import {
+  createDemandNormalizationIndex,
+  normalizeEquipmentDemands,
+  type EquipmentDemandNormalization,
+} from "@/lib/calculation/demandNormalization";
+import {
+  projectGasConfigOrDefault,
+  type ProjectGasConfig,
+} from "@/lib/calculation/projectGas";
 import {
   UNCONFIGURED_PIPE_SYSTEM,
   type PipeDiameterReference,
@@ -84,6 +92,7 @@ export type TechnicalCalculationIssue = {
     | "appliance_unreachable"
     | "appliance_not_connected"
     | "missing_demand"
+    | "unresolved_demand_normalization"
     | "mixed_demand_units"
     | "pending_equivalent_length"
     | "pending_diameter_sizing"
@@ -170,14 +179,17 @@ export type TechnicalSegmentResult = {
   segmentPhysicalLengthMeters: number | null;
   terminalRouteIds: string[];
   toNodeId: string;
+  unresolvedDemandEquipmentIds: string[];
 };
 
 export type TechnicalCalculationResult = {
   connectedApplianceIds: string[];
+  demandNormalizations: EquipmentDemandNormalization[];
   issues: TechnicalCalculationIssue[];
   networkSizing: TechnicalNetworkSizingResult | null;
   nodeLabels: Record<string, string>;
   pipeSystem: PipeSystemIdentity;
+  projectGas: ProjectGasConfig | null;
   rootNodeId: string | null;
   routeAccessoryResolutions: Record<string, TechnicalRouteAccessoryResolution>;
   segments: TechnicalSegmentResult[];
@@ -214,18 +226,29 @@ export function calculateTechnicalTree(params: {
   network: ManualRouteNetwork;
   pipeContextBySegmentId?: Record<string, PipeSegmentPipeContext | undefined>;
   pipeSystem?: PipeSystem;
+  projectGas?: ProjectGasConfig | null;
   scaleMetersPerSourceUnit: number | null;
 }): TechnicalCalculationResult {
   const pipeSystem = params.pipeSystem ?? UNCONFIGURED_PIPE_SYSTEM;
+  const projectGas = projectGasConfigOrDefault(params.projectGas);
+  const demandNormalizations = normalizeEquipmentDemands(
+    params.equipment,
+    projectGas,
+  );
+  const demandNormalizationByEquipmentId = createDemandNormalizationIndex(
+    demandNormalizations,
+  );
   const invalidIssues = validateNetworkStructure(params);
 
   if (invalidIssues.length > 0) {
     return createResult({
       connectedApplianceIds: [],
+      demandNormalizations,
       issues: invalidIssues,
       networkSizing: null,
       nodeLabels: createNodeLabels(params.network, params.equipment, []),
       pipeSystem: pipeSystem.identity,
+      projectGas,
       rootNodeId: null,
       routeAccessoryResolutions: {},
       segments: [],
@@ -244,6 +267,7 @@ export function calculateTechnicalTree(params: {
   if (!supplyNode) {
     return createResult({
       connectedApplianceIds: [],
+      demandNormalizations,
       issues: [
         {
           code: "missing_supply_node",
@@ -254,6 +278,7 @@ export function calculateTechnicalTree(params: {
       networkSizing: null,
       nodeLabels: createNodeLabels(params.network, params.equipment, []),
       pipeSystem: pipeSystem.identity,
+      projectGas,
       rootNodeId: null,
       routeAccessoryResolutions: {},
       segments: [],
@@ -269,6 +294,7 @@ export function calculateTechnicalTree(params: {
   if (orientation.unvisitedNodeIds.length > 0) {
     return createResult({
       connectedApplianceIds: [],
+      demandNormalizations,
       issues: orientation.unvisitedNodeIds.map((nodeId) => ({
         code: "disconnected_component" as const,
         message: "Existe un componente desconectado de la alimentacion.",
@@ -277,6 +303,7 @@ export function calculateTechnicalTree(params: {
       networkSizing: null,
       nodeLabels: createNodeLabels(params.network, params.equipment, []),
       pipeSystem: pipeSystem.identity,
+      projectGas,
       rootNodeId: supplyNode.id,
       routeAccessoryResolutions: {},
       segments: [],
@@ -322,6 +349,7 @@ export function calculateTechnicalTree(params: {
   const technicalSegments = orientation.segments.map((oriented) =>
     createTechnicalSegmentResult({
       childSegmentsByNodeId,
+      demandNormalizationByEquipmentId,
       equipmentById,
       governingRouteResolution:
         governingRouteBySegmentId.get(oriented.segment.id) ??
@@ -377,9 +405,25 @@ export function calculateTechnicalTree(params: {
       });
     }
 
+    for (const equipmentId of segment.unresolvedDemandEquipmentIds) {
+      const normalization = demandNormalizationByEquipmentId.get(equipmentId);
+      const equipment = equipmentById.get(equipmentId);
+
+      incompleteIssues.push({
+        code: "unresolved_demand_normalization",
+        equipmentId,
+        message:
+          `${equipment?.name ?? equipmentId}: ` +
+          (normalization?.reason ??
+            "No se pudo normalizar el consumo del artefacto a m3/h."),
+        segmentId: segment.segmentId,
+      });
+    }
+
     if (
       segment.accumulatedFlow === null &&
       segment.missingDemandEquipmentIds.length === 0 &&
+      segment.unresolvedDemandEquipmentIds.length === 0 &&
       segment.downstreamApplianceIds.length > 0
     ) {
       incompleteIssues.push({
@@ -410,15 +454,21 @@ export function calculateTechnicalTree(params: {
     });
   }
 
-  const totals = createTotals(technicalSegmentsWithRouteSizing, params.equipment);
+  const totals = createTotals({
+    demandNormalizationByEquipmentId,
+    equipment: params.equipment,
+    segments: technicalSegmentsWithRouteSizing,
+  });
   const status: TechnicalCalculationStatus =
     incompleteIssues.length > 0 ? "incomplete" : "valid";
 
   return createResult({
     connectedApplianceIds,
+    demandNormalizations,
     issues: dedupeIssues(incompleteIssues),
     nodeLabels,
     pipeSystem: pipeSystem.identity,
+    projectGas,
     rootNodeId: supplyNode.id,
     routeAccessoryResolutions,
     networkSizing,
@@ -452,7 +502,7 @@ export function formatTechnicalFlow(
     return "Pendiente";
   }
 
-  return `${formatCalculationNumber(value)} ${demandUnitLabel(unit)}`;
+  return `${formatFlowNumber(value)} ${demandUnitLabel(unit)}`;
 }
 
 export function formatCalculationMeters(
@@ -992,6 +1042,7 @@ function createRouteSizingBasisFromNetworkSizing(params: {
 
 function createTechnicalSegmentResult(params: {
   childSegmentsByNodeId: Map<string, OrientedSegment[]>;
+  demandNormalizationByEquipmentId: Map<string, EquipmentDemandNormalization>;
   equipmentById: Map<string, WorkbenchEquipment>;
   governingRouteResolution: PipeSystemResolution<TechnicalSegmentGoverningRoute>;
   nodeById: Map<string, RouteNode>;
@@ -1008,7 +1059,7 @@ function createTechnicalSegmentResult(params: {
   );
   const flow = calculateAccumulatedFlow(
     downstreamApplianceIds,
-    params.equipmentById,
+    params.demandNormalizationByEquipmentId,
   );
   const from = params.nodeById.get(params.oriented.fromNodeId);
   const to = params.nodeById.get(params.oriented.toNodeId);
@@ -1093,6 +1144,7 @@ function createTechnicalSegmentResult(params: {
     segmentPhysicalLengthMeters: physicalLengthMeters,
     terminalRouteIds: params.terminalRouteIds,
     toNodeId: params.oriented.toNodeId,
+    unresolvedDemandEquipmentIds: flow.unresolvedEquipmentIds,
   };
 }
 
@@ -1106,6 +1158,7 @@ function resolveSegmentDimensioning(params: {
   drawingLength: number;
   flow: {
     missingEquipmentIds: string[];
+    unresolvedEquipmentIds: string[];
     unit: DemandUnit | null;
     value: number | null;
   };
@@ -1126,6 +1179,8 @@ function resolveSegmentDimensioning(params: {
       reason:
         params.flow.missingEquipmentIds.length > 0
           ? "Falta consumo aguas abajo para dimensionar el tramo."
+          : params.flow.unresolvedEquipmentIds.length > 0
+            ? "El consumo aguas abajo no pudo normalizarse a m3/h."
           : "El caudal acumulado del tramo no esta disponible en una unidad unica.",
       status: "unresolved",
     };
@@ -1602,27 +1657,48 @@ function collectDownstreamApplianceIds(
 
 function calculateAccumulatedFlow(
   downstreamApplianceIds: string[],
-  equipmentById: Map<string, WorkbenchEquipment>,
+  demandNormalizationByEquipmentId: Map<string, EquipmentDemandNormalization>,
 ) {
   const missingEquipmentIds: string[] = [];
-  const units = new Set<DemandUnit>();
+  const unresolvedEquipmentIds: string[] = [];
   let value = 0;
 
   for (const equipmentId of downstreamApplianceIds) {
-    const equipment = equipmentById.get(equipmentId);
+    const normalization = demandNormalizationByEquipmentId.get(equipmentId);
 
-    if (!equipment || hasPendingDemand(equipment)) {
+    if (!normalization) {
       missingEquipmentIds.push(equipmentId);
       continue;
     }
 
-    value += equipment.demandValue as number;
-    units.add(equipment.demandUnit as DemandUnit);
+    if (
+      normalization.status !== "resolved" ||
+      normalization.normalizedFlowM3h === null
+    ) {
+      if (
+        normalization.source === "missing_declared_demand" ||
+        normalization.originalValue === null ||
+        !normalization.originalUnit
+      ) {
+        missingEquipmentIds.push(equipmentId);
+      } else {
+        unresolvedEquipmentIds.push(equipmentId);
+      }
+
+      continue;
+    }
+
+    value += normalization.normalizedFlowM3h;
   }
 
-  if (missingEquipmentIds.length > 0 || units.size !== 1) {
+  if (
+    downstreamApplianceIds.length === 0 ||
+    missingEquipmentIds.length > 0 ||
+    unresolvedEquipmentIds.length > 0
+  ) {
     return {
       missingEquipmentIds,
+      unresolvedEquipmentIds,
       unit: null,
       value: null,
     };
@@ -1630,7 +1706,8 @@ function calculateAccumulatedFlow(
 
   return {
     missingEquipmentIds,
-    unit: [...units][0] ?? null,
+    unresolvedEquipmentIds,
+    unit: "m3_h" as const,
     value,
   };
 }
@@ -1807,32 +1884,33 @@ function createNodeLabels(
   return labels;
 }
 
-function createTotals(
-  segments: TechnicalSegmentResult[],
-  equipment: WorkbenchEquipment[],
-) {
+function createTotals(params: {
+  demandNormalizationByEquipmentId: Map<string, EquipmentDemandNormalization>;
+  equipment: WorkbenchEquipment[];
+  segments: TechnicalSegmentResult[];
+}) {
   const connectedApplianceIds = new Set(
-    segments.flatMap((segment) => segment.downstreamApplianceIds),
+    params.segments.flatMap((segment) => segment.downstreamApplianceIds),
   );
-  const appliances = equipment.filter(
+  const appliances = params.equipment.filter(
     (item) => item.role === "appliance" && connectedApplianceIds.has(item.id),
   );
   const totalFlow = calculateAccumulatedFlow(
     appliances.map((item) => item.id).sort(),
-    buildEquipmentIndex(equipment),
+    params.demandNormalizationByEquipmentId,
   );
-  const physicalLengthMeters = segments.every(
+  const physicalLengthMeters = params.segments.every(
     (segment) => segment.physicalLengthMeters !== null,
   )
-    ? segments.reduce(
+    ? params.segments.reduce(
         (sum, segment) => sum + (segment.physicalLengthMeters ?? 0),
         0,
       )
     : null;
-  const accessoryEquivalentLengthMeters = segments.every(
+  const accessoryEquivalentLengthMeters = params.segments.every(
     (segment) => segment.accessoryEquivalentLengthMeters !== null,
   )
-    ? segments.reduce(
+    ? params.segments.reduce(
         (sum, segment) => sum + (segment.accessoryEquivalentLengthMeters ?? 0),
         0,
       )
@@ -1841,7 +1919,7 @@ function createTotals(
     physicalLengthMeters !== null && accessoryEquivalentLengthMeters !== null
       ? physicalLengthMeters + accessoryEquivalentLengthMeters
       : null;
-  const dimensionedSegmentCount = segments.filter(
+  const dimensionedSegmentCount = params.segments.filter(
     (segment) => segment.dimensioningResolution.status === "resolved",
   ).length;
 
@@ -1853,9 +1931,9 @@ function createTotals(
     calculationLengthMeters,
     dimensionedSegmentCount,
     pendingDimensioningSegmentCount:
-      segments.length - dimensionedSegmentCount,
+      params.segments.length - dimensionedSegmentCount,
     physicalLengthMeters,
-    segmentCount: segments.length,
+    segmentCount: params.segments.length,
   };
 }
 
@@ -1923,5 +2001,12 @@ function formatCalculationNumber(value: number) {
   return value.toLocaleString("es-AR", {
     maximumFractionDigits: 2,
     minimumFractionDigits: 2,
+  });
+}
+
+function formatFlowNumber(value: number) {
+  return value.toLocaleString("es-AR", {
+    maximumFractionDigits: 3,
+    minimumFractionDigits: 0,
   });
 }
