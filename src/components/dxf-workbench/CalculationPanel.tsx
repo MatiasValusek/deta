@@ -29,6 +29,12 @@ import type {
   DiameterTransitionTechnicalReview,
 } from "@/lib/calculation/diameterTransitionProposals";
 import type {
+  CompoundTurnTransitionPreview as CompoundTurnTransitionPreviewModel,
+} from "@/lib/calculation/compoundTurnTransitionResolution";
+import {
+  formatCompoundTurnTransitionLabel,
+} from "@/lib/calculation/compoundTurnTransitionResolution";
+import type {
   TechnicalRouteTransitionContribution,
   TechnicalRouteTransitionResolution,
 } from "@/lib/calculation/technicalRouteTransitions";
@@ -311,11 +317,18 @@ function DiameterTransitionProposalList({
             const selectedCandidate =
               review?.candidates.find((item) => item.id === selectedCandidateId) ??
               null;
+            const selectedCandidateAlreadyConfirmed =
+              proposal.decision?.status === "confirmed" &&
+              selectedCandidate !== null &&
+              proposal.decision.catalogFamilyId === selectedCandidate.familyId &&
+              (!proposal.decision.pipeSystemId ||
+                proposal.decision.pipeSystemId === selectedCandidate.pipeSystem.id);
             const canConfirm =
               proposal.state !== "confirmed" &&
               proposal.state !== "rejected" &&
               proposal.state !== "not_required" &&
-              selectedCandidate?.status === "compatible";
+              selectedCandidate?.status === "compatible" &&
+              !selectedCandidateAlreadyConfirmed;
             const canReject =
               proposal.state !== "confirmed" &&
               proposal.state !== "rejected" &&
@@ -364,6 +377,7 @@ function DiameterTransitionProposalList({
                     proposal.state !== "rejected" &&
                     proposal.state !== "not_required" ? (
                       <DiameterTransitionCandidateSelector
+                        proposal={proposal}
                         review={review}
                         selectedCandidateId={selectedCandidateId}
                         onSelect={(candidateId) =>
@@ -408,10 +422,12 @@ function DiameterTransitionProposalList({
 }
 
 function DiameterTransitionCandidateSelector({
+  proposal,
   review,
   selectedCandidateId,
   onSelect,
 }: {
+  proposal: DiameterTransitionProposal;
   review: DiameterTransitionTechnicalReview;
   selectedCandidateId: string;
   onSelect: (candidateId: string) => void;
@@ -431,7 +447,9 @@ function DiameterTransitionCandidateSelector({
   return (
     <div className="mt-2 space-y-1">
       <label className="block text-[10px] font-semibold uppercase text-[var(--muted)]">
-        Familia de transicion
+        {proposal.kind === "compound_turn_transition"
+          ? "Familia de reduccion"
+          : "Familia de transicion"}
       </label>
       <select
         className="w-full rounded border border-[var(--line)] bg-white px-2 py-1 text-xs"
@@ -479,7 +497,15 @@ function DiameterTransitionPreview({
     null;
 
   if (!familyLabel && contributions.length === 0) {
-    return null;
+    if (proposal.kind !== "compound_turn_transition" || !review?.compoundPreview) {
+      return null;
+    }
+  }
+
+  if (proposal.kind === "compound_turn_transition" && review?.compoundPreview) {
+    return (
+      <CompoundTurnTransitionPreview preview={review.compoundPreview} />
+    );
   }
 
   if (proposal.kind === "branch_transition") {
@@ -531,6 +557,43 @@ function DiameterTransitionPreview({
           </div>
         </>
       ) : null}
+    </div>
+  );
+}
+
+function CompoundTurnTransitionPreview({
+  preview,
+}: {
+  preview: CompoundTurnTransitionPreviewModel;
+}) {
+  return (
+    <div className="mt-1 space-y-0.5 text-[10px] text-[var(--muted)]">
+      <div className="font-medium text-[#1d4ed8]">
+        Preview: todavia no participa del solver global.
+      </div>
+      <div>Solucion tecnica: {preview.solutionLabel}</div>
+      <div>{compoundDirectCandidateLabel(preview)}</div>
+      {preview.contributions.length > 0 ? (
+        <ul className="mt-0.5 space-y-0.5">
+          {preview.contributions.map((contribution) => (
+            <li key={`${contribution.role}:${contribution.segmentId ?? ""}`}>
+              {compoundContributionRoleLabel(contribution.role)} -{" "}
+              {contribution.variantLabel ?? contribution.reason ?? "Pendiente"} -{" "}
+              Familia: {contribution.catalogFamilyId ?? "pendiente"} - Equiv.:{" "}
+              {formatCalculationMeters(
+                contribution.equivalentLengthMeters,
+                "Pendiente",
+              )}{" "}
+              - {compoundContributionStatusLabel(contribution.status)}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <div>
+        Total preview:{" "}
+        {formatCalculationMeters(preview.totalEquivalentLengthMeters, "Pendiente")}
+      </div>
+      <div>Estado: {compoundConfirmationStateLabel(preview.confirmationState)}</div>
     </div>
   );
 }
@@ -641,6 +704,10 @@ function previewContributionsForTransition(
 }
 
 function diameterTransitionMainLabel(proposal: DiameterTransitionProposal) {
+  if (proposal.kind === "compound_turn_transition") {
+    return formatCompoundTurnTransitionLabel(proposal);
+  }
+
   const upstream = proposal.upstreamDiameter?.diameter ?? null;
   const downstream = proposal.downstreamDiameters.map((item) => item.diameter);
 
@@ -651,6 +718,61 @@ function diameterTransitionMainLabel(proposal: DiameterTransitionProposal) {
   return `${formatCompactDiameterReference(upstream)} -> ${downstream
     .map(formatCompactDiameterReference)
     .join(" / ")}`;
+}
+
+function compoundDirectCandidateLabel(preview: CompoundTurnTransitionPreviewModel) {
+  if (preview.directCandidates.length === 0) {
+    return "Pieza unica SIGAS: no encontrada en Tabla No 3 cargada.";
+  }
+
+  if (preview.directCandidates.length === 1) {
+    return `Pieza unica SIGAS: ${preview.directCandidates[0]?.label ?? "pendiente"}.`;
+  }
+
+  return `Pieza unica SIGAS: ${preview.directCandidates.length} alternativas requieren decision.`;
+}
+
+function compoundContributionRoleLabel(
+  role: CompoundTurnTransitionPreviewModel["contributions"][number]["role"],
+) {
+  switch (role) {
+    case "turn":
+      return "Giro";
+    case "diameter_change":
+      return "Cambio de diametro";
+  }
+}
+
+function compoundContributionStatusLabel(
+  status: CompoundTurnTransitionPreviewModel["contributions"][number]["status"],
+) {
+  switch (status) {
+    case "resolved":
+      return "resuelta";
+    case "needs_review":
+      return "requiere confirmacion";
+    case "unsupported":
+      return "no soportada";
+    case "unresolved":
+      return "pendiente";
+  }
+}
+
+function compoundConfirmationStateLabel(
+  state: CompoundTurnTransitionPreviewModel["confirmationState"],
+) {
+  switch (state) {
+    case "confirmed":
+      return "codo y reduccion confirmados";
+    case "needs_elbow_confirmation":
+      return "falta confirmar el codo";
+    case "needs_reduction_confirmation":
+      return "falta confirmar la reduccion";
+    case "needs_compatible_decisions":
+      return "requiere decisiones compatibles";
+    case "unsupported":
+      return "no soportado";
+  }
 }
 
 function diameterTransitionOrientationLabel(

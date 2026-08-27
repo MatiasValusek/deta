@@ -32,8 +32,11 @@ type SigasTransitionFamily = {
   familyId: string;
   label: string;
   rows: SigasAccessoryEquivalentLengthRow[];
-  transitionKind: "inline_reduction" | "reduced_tee";
-  type: "other" | "tee";
+  transitionKind:
+    | "compound_elbow_reduction"
+    | "inline_reduction"
+    | "reduced_tee";
+  type: "elbow" | "other" | "tee";
 };
 
 type TransitionDiameterPair = {
@@ -123,6 +126,24 @@ export function getSigasDiameterTransitionCatalogCandidates(
   }
 
   return sigasTransitionFamiliesForProposal(proposal).map((family) =>
+    createSigasDiameterTransitionCandidate({
+      family,
+      pair,
+      proposal,
+    }),
+  );
+}
+
+export function getSigasCompoundTurnTransitionDirectCatalogCandidates(
+  proposal: DiameterTransitionProposal,
+): AccessoryCatalogCandidate[] {
+  const pair = transitionDiameterPairForProposal(proposal);
+
+  if (proposal.kind !== "compound_turn_transition" || !pair) {
+    return [];
+  }
+
+  return createSigasCompoundTurnTransitionDirectFamilies().map((family) =>
     createSigasDiameterTransitionCandidate({
       family,
       pair,
@@ -434,7 +455,8 @@ function sigasTransitionFamiliesForProposal(
 
   if (
     proposal.kind === "simple_reduction" ||
-    proposal.kind === "simple_transition"
+    proposal.kind === "simple_transition" ||
+    proposal.kind === "compound_turn_transition"
   ) {
     return families.filter(
       (family) => family.transitionKind === "inline_reduction",
@@ -446,6 +468,26 @@ function sigasTransitionFamiliesForProposal(
   }
 
   return [];
+}
+
+function createSigasCompoundTurnTransitionDirectFamilies() {
+  return SIGAS_ACCESSORY_EQUIVALENT_LENGTHS.filter((row) => {
+    const label = normalizeLabel(row.label);
+
+    return (
+      row.genericType === "elbow" &&
+      label.includes("reduc") &&
+      transitionPairForRow(row) !== null
+    );
+  }).map((row) =>
+    transitionFamily(
+      row.code,
+      row.label,
+      "compound_elbow_reduction" as const,
+      "elbow",
+      row,
+    ),
+  );
 }
 
 function createSigasReducedTeeTransitionFamilies() {

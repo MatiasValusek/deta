@@ -45,9 +45,13 @@ import {
   resolveTechnicalRouteTransitions,
   type TechnicalRouteTransitionResolution,
 } from "@/lib/calculation/technicalRouteTransitions";
+import {
+  resolveCompoundTurnTransitionPreview,
+} from "@/lib/calculation/compoundTurnTransitionResolution";
 import { SIGAS_PIPE_SYSTEM } from "@/lib/calculation/pipeSystems/sigas";
 import {
   getSigasAccessoryCatalogCandidates,
+  getSigasCompoundTurnTransitionDirectCatalogCandidates,
   getSigasDiameterTransitionCatalogCandidates,
   matchSigasAccessoryProposal,
 } from "@/lib/calculation/pipeSystems/sigas/sigasAccessoryProposal";
@@ -923,6 +927,18 @@ export function DxfWorkbench() {
         (proposal): DiameterTransitionTechnicalReview => {
           const candidates =
             getSigasDiameterTransitionCatalogCandidates(proposal);
+          const directCompoundCandidates =
+            getSigasCompoundTurnTransitionDirectCatalogCandidates(proposal);
+          const compoundPreview =
+            proposal.kind === "compound_turn_transition" && planBase
+              ? resolveCompoundTurnTransitionPreview({
+                  diameterBySegmentId: finalDiameterBySegmentId,
+                  directCandidates: directCompoundCandidates,
+                  network: planBase.routeNetwork,
+                  pipeSystem: SIGAS_PIPE_SYSTEM,
+                  proposal,
+                })
+              : null;
           const selectedCandidate = proposal.selectedCatalogFamilyId
             ? candidates.find(
                 (candidate) =>
@@ -943,6 +959,7 @@ export function DxfWorkbench() {
             })),
             reason: diameterTransitionReviewReason({
               candidates,
+              compoundPreview,
               compatibleCandidates,
               proposal,
               selectedCandidate,
@@ -962,7 +979,7 @@ export function DxfWorkbench() {
           };
         },
       ),
-    [rawDiameterTransitionProposals],
+    [finalDiameterBySegmentId, planBase, rawDiameterTransitionProposals],
   );
   const diameterTransitionProposals = useMemo(() => {
     const reviewById = new Map(
@@ -7104,6 +7121,7 @@ function accessoryProposalDecisionsEqual(
 
 function diameterTransitionReviewReason(params: {
   candidates: DiameterTransitionTechnicalReview["candidates"];
+  compoundPreview?: DiameterTransitionTechnicalReview["compoundPreview"];
   compatibleCandidates: DiameterTransitionTechnicalReview["candidates"];
   proposal: DiameterTransitionProposal;
   selectedCandidate: DiameterTransitionTechnicalReview["selectedCandidate"];
@@ -7127,6 +7145,13 @@ function diameterTransitionReviewReason(params: {
 
   if (params.proposal.decision?.catalogFamilyId) {
     return "La familia confirmada no existe entre las familias SIGAS aplicables a la geometria actual.";
+  }
+
+  if (params.proposal.kind === "compound_turn_transition") {
+    return (
+      params.compoundPreview?.reason ??
+      "No hay pieza unica SIGAS; requiere confirmar codo y reduccion compatibles."
+    );
   }
 
   if (params.candidates.length === 0) {

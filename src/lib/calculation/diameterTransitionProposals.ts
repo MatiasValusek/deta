@@ -1,5 +1,8 @@
 import type { AccessoryCatalogCandidateStatus } from "@/lib/calculation/accessoryCatalogCandidates";
 import type { PipeDiameterReference } from "@/lib/calculation/pipeSystem";
+import type {
+  CompoundTurnTransitionPreview,
+} from "@/lib/calculation/compoundTurnTransitionResolution";
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
 import type { Point2D } from "@/lib/geometry/types";
 import {
@@ -116,6 +119,7 @@ export type DiameterTransitionProposal = {
 
 export type DiameterTransitionTechnicalReview = {
   candidates: AccessoryCatalogCandidate[];
+  compoundPreview?: CompoundTurnTransitionPreview | null;
   downstreamDiameters: Array<{
     diameter: PipeDiameterReference | null;
     segmentId: string;
@@ -252,6 +256,20 @@ export function withDiameterTransitionTechnicalReview(
     return {
       ...proposal,
       reason: review.selectedCandidate.reason,
+      state: "needs_review",
+    };
+  }
+
+  if (
+    proposal.kind === "compound_turn_transition" &&
+    review.compoundPreview &&
+    review.compoundPreview.status !== "resolved"
+  ) {
+    return {
+      ...proposal,
+      reason:
+        review.compoundPreview.reason ??
+        "El giro con cambio de diametro requiere confirmar codo y reduccion compatibles.",
       state: "needs_review",
     };
   }
