@@ -39,6 +39,7 @@ export type EquipmentDraft = {
   type: EquipmentType;
   name: string;
   connectionPoint: Point2D | null;
+  connectionHeightInput: string;
   previewPoint: Point2D | null;
   demandValueInput: string;
   demandUnit: DemandUnit;

@@ -39,10 +39,13 @@ import {
 import type { TechnicalRouteAccessoryResolution } from "@/lib/calculation/technicalRouteAccessories";
 import type { DiameterTransitionDecision } from "@/lib/calculation/diameterTransitionProposals";
 import {
+  horizontalDistanceSource,
+  physicalLengthMetersWithVertical,
+} from "@/lib/geometry/height";
+import {
   applianceNodesAreTerminal,
   buildEquipmentIndex,
   detectRouteCycle,
-  distanceBetween,
   findRouteNodeByEquipment,
   getConnectedApplianceEquipmentIds,
   getRouteNeighbors,
@@ -171,6 +174,7 @@ export type TechnicalSegmentResult = {
   accumulatedFlowUnit: DemandUnit | null;
   calculatedDiameter: PipeDiameterReference | null;
   calculationLengthMeters: number | null;
+  consumptionM3h?: number | null;
   depth: number;
   dimensioningResolution: PipeSystemResolution<TechnicalSegmentDimensioningResult>;
   downstreamApplianceIds: string[];
@@ -182,6 +186,8 @@ export type TechnicalSegmentResult = {
   missingDemandEquipmentIds: string[];
   parentSegmentId: string | null;
   physicalLengthMeters: number | null;
+  provisionalDiameter?: PipeDiameterReference | null;
+  provisionalDiameterExplanation?: string | null;
   routeSizingBasis: TechnicalSegmentSizingBasis;
   segmentId: string;
   segmentPhysicalLengthMeters: number | null;
@@ -411,14 +417,33 @@ export function calculateTechnicalTree(params: {
     networkSizing.segments.map((segment) => [segment.segmentId, segment]),
   );
   const routeAccessoryResolutions = networkSizing.routeAccessoryResolutions;
-  const technicalSegmentsWithRouteSizing = technicalSegments.map((segment) => ({
-    ...segment,
-    routeSizingBasis: createRouteSizingBasisFromNetworkSizing({
+  const technicalSegmentsWithRouteSizing = technicalSegments.map((segment) => {
+    const networkSizingSegment =
+      networkSizingSegmentById.get(segment.segmentId) ?? null;
+    const routeSizingBasis = createRouteSizingBasisFromNetworkSizing({
       governingRouteResolution: segment.governingRouteResolution,
-      networkSizingSegment:
-        networkSizingSegmentById.get(segment.segmentId) ?? null,
-    }),
-  }));
+      networkSizingSegment,
+    });
+    const consumptionM3h = resolveSegmentConsumptionM3h({
+      networkSizingSegment,
+      segment,
+    });
+
+    return {
+      ...segment,
+      calculationLengthMeters: routeSizingBasis.sizingLengthMeters,
+      consumptionM3h,
+      provisionalDiameter:
+        networkSizingSegment?.status === "resolved"
+          ? networkSizingSegment.calculatedDiameter
+          : null,
+      provisionalDiameterExplanation:
+        networkSizingSegment?.status === "resolved"
+          ? networkSizingSegment.explanation
+          : networkSizingSegment?.issues[0]?.message ?? null,
+      routeSizingBasis,
+    };
+  });
 
   for (const segment of technicalSegmentsWithRouteSizing) {
     for (const equipmentId of segment.missingDemandEquipmentIds) {
@@ -789,7 +814,11 @@ function calculateSegmentPhysicalLengthMeters(params: {
     return null;
   }
 
-  return distanceBetween(fromPoint, toPoint) * params.scaleMetersPerSourceUnit;
+  return physicalLengthMetersWithVertical({
+    first: fromPoint,
+    scaleMetersPerSourceUnit: params.scaleMetersPerSourceUnit,
+    second: toPoint,
+  });
 }
 
 function resolveTechnicalRouteNodePosition(
@@ -1072,6 +1101,22 @@ function createRouteSizingBasisFromNetworkSizing(params: {
   };
 }
 
+function resolveSegmentConsumptionM3h(params: {
+  networkSizingSegment: TechnicalNetworkSizingSegmentResult | null;
+  segment: TechnicalSegmentResult;
+}) {
+  if (
+    params.networkSizingSegment?.accumulatedFlowUnit === "m3_h" &&
+    params.networkSizingSegment.accumulatedFlow !== null
+  ) {
+    return params.networkSizingSegment.accumulatedFlow;
+  }
+
+  return params.segment.accumulatedFlowUnit === "m3_h"
+    ? params.segment.accumulatedFlow
+    : null;
+}
+
 function createTechnicalSegmentResult(params: {
   childSegmentsByNodeId: Map<string, OrientedSegment[]>;
   demandNormalizationByEquipmentId: Map<string, EquipmentDemandNormalization>;
@@ -1100,11 +1145,15 @@ function createTechnicalSegmentResult(params: {
     : null;
   const toPoint = to ? resolveRouteNodePosition(to, params.equipmentById) : null;
   const drawingLength =
-    fromPoint && toPoint ? distanceBetween(fromPoint, toPoint) : 0;
+    fromPoint && toPoint ? horizontalDistanceSource(fromPoint, toPoint) : 0;
   const physicalLengthMeters =
-    params.scaleMetersPerSourceUnit === null
+    params.scaleMetersPerSourceUnit === null || !fromPoint || !toPoint
       ? null
-      : drawingLength * params.scaleMetersPerSourceUnit;
+      : physicalLengthMetersWithVertical({
+          first: fromPoint,
+          scaleMetersPerSourceUnit: params.scaleMetersPerSourceUnit,
+          second: toPoint,
+        });
   const accessoryContext = {
     accumulatedFlow: flow.value,
     accumulatedFlowUnit: flow.unit,
@@ -1157,6 +1206,7 @@ function createTechnicalSegmentResult(params: {
     accumulatedFlowUnit: flow.unit,
     calculatedDiameter: resolvedDimensioning?.calculatedDiameter ?? null,
     calculationLengthMeters,
+    consumptionM3h: flow.unit === "m3_h" ? flow.value : null,
     depth: params.oriented.depth,
     dimensioningResolution,
     downstreamApplianceIds,
@@ -1169,6 +1219,8 @@ function createTechnicalSegmentResult(params: {
     missingDemandEquipmentIds: flow.missingEquipmentIds,
     parentSegmentId: params.oriented.parentSegmentId,
     physicalLengthMeters,
+    provisionalDiameter: null,
+    provisionalDiameterExplanation: null,
     routeSizingBasis: createPendingRouteSizingBasis(
       params.governingRouteResolution,
     ),

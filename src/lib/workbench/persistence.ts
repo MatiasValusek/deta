@@ -541,7 +541,12 @@ function isOptionalFiniteNumber(value: unknown): value is number | undefined {
 }
 
 function isPoint(value: unknown): value is Point2D {
-  return isRecord(value) && isFiniteNumber(value.x) && isFiniteNumber(value.y);
+  return (
+    isRecord(value) &&
+    isFiniteNumber(value.x) &&
+    isFiniteNumber(value.y) &&
+    isOptionalFiniteNumber(value.z)
+  );
 }
 
 function isPointArray(value: unknown): value is Point2D[] {

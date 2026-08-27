@@ -164,11 +164,12 @@ function createSheetRow(params: {
     segment: params.segment,
   });
   const flowM3h =
-    params.segment.accumulatedFlowUnit === "m3_h"
+    params.segment.consumptionM3h ??
+    (params.segment.accumulatedFlowUnit === "m3_h"
       ? params.segment.accumulatedFlow
       : effectiveSegment?.accumulatedFlowUnit === "m3_h"
         ? effectiveSegment.accumulatedFlow
-        : null;
+        : null);
   const status = resolveRowStatus({
     accessoryEquivalentLengthMeters,
     calculatedDiameter,
@@ -270,6 +271,7 @@ function resolveCalculatedDiameter(params: {
   segment: TechnicalSegmentResult;
 }) {
   return (
+    params.segment.provisionalDiameter ??
     params.selectedSizing.adoptionSegment?.calculatedDiameter ??
     params.selectedSizing.transitionAwareSegment?.calculatedDiameter ??
     params.selectedSizing.baselineSegment?.calculatedDiameter ??

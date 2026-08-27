@@ -1,5 +1,6 @@
 import type { Point2D } from "@/lib/geometry/types";
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
+import { pointZMeters } from "@/lib/geometry/height";
 import {
   projectPointToSegment,
   segmentsIntersect,
@@ -413,7 +414,10 @@ export function hasZeroLengthSegments(
   tolerance: number,
 ) {
   return resolveRouteSegments(network, equipment).some(
-    (segment) => distanceBetween(segment.from, segment.to) <= tolerance,
+    (segment) =>
+      distanceBetween(segment.from, segment.to) <= tolerance &&
+      Math.abs(pointZMeters(segment.from) - pointZMeters(segment.to)) <=
+        Number.EPSILON,
   );
 }
 

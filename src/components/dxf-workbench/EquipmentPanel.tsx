@@ -14,6 +14,7 @@ import {
   normalizeEquipmentDemands,
 } from "@/lib/calculation/demandNormalization";
 import type { ProjectGasConfig } from "@/lib/calculation/projectGas";
+import { pointZMeters } from "@/lib/geometry/height";
 
 type EquipmentPanelProps = {
   canSaveDraft: boolean;
@@ -33,6 +34,7 @@ type EquipmentPanelProps = {
   onAddSupply: () => void;
   onBeginPlacement: () => void;
   onCancelDraft: () => void;
+  onDraftConnectionHeightChange: (value: string) => void;
   onDeleteSelected: () => void;
   onDraftDemandUnitChange: (unit: DemandUnit) => void;
   onDraftDemandValueChange: (value: string) => void;
@@ -65,6 +67,7 @@ export function EquipmentPanel({
   onAddSupply,
   onBeginPlacement,
   onCancelDraft,
+  onDraftConnectionHeightChange,
   onDeleteSelected,
   onDraftDemandUnitChange,
   onDraftDemandValueChange,
@@ -177,6 +180,7 @@ export function EquipmentPanel({
           draft={draft}
           onBeginPlacement={onBeginPlacement}
           onCancelDraft={onCancelDraft}
+          onDraftConnectionHeightChange={onDraftConnectionHeightChange}
           onDraftDemandUnitChange={onDraftDemandUnitChange}
           onDraftDemandValueChange={onDraftDemandValueChange}
           onDraftNameChange={onDraftNameChange}
@@ -209,6 +213,9 @@ export function EquipmentPanel({
                 </span>
                 <span className="mt-0.5 block text-[10px] text-[var(--muted)]">
                   {equipmentTypeLabel(item.type)} - {equipmentDemandLabel(item)}
+                  {item.role === "appliance"
+                    ? ` - Altura ${formatEquipmentHeight(item)}`
+                    : ""}
                 </span>
               </button>
             ))}
@@ -222,6 +229,9 @@ export function EquipmentPanel({
           <div className="mt-1 text-[var(--muted)]">
             {equipmentTypeLabel(selectedEquipment.type)} -{" "}
             {equipmentDemandLabel(selectedEquipment)}
+            {selectedEquipment.role === "appliance"
+              ? ` - Altura ${formatEquipmentHeight(selectedEquipment)}`
+              : ""}
           </div>
           <div className="mt-2 grid grid-cols-3 gap-1">
             <button
@@ -257,6 +267,7 @@ function DraftEditor({
   draft,
   onBeginPlacement,
   onCancelDraft,
+  onDraftConnectionHeightChange,
   onDraftDemandUnitChange,
   onDraftDemandValueChange,
   onDraftNameChange,
@@ -268,6 +279,7 @@ function DraftEditor({
   draft: EquipmentDraft;
   onBeginPlacement: () => void;
   onCancelDraft: () => void;
+  onDraftConnectionHeightChange: (value: string) => void;
   onDraftDemandUnitChange: (unit: DemandUnit) => void;
   onDraftDemandValueChange: (value: string) => void;
   onDraftNameChange: (value: string) => void;
@@ -348,6 +360,23 @@ function DraftEditor({
         </div>
       ) : null}
 
+      {!isSupply ? (
+        <label className="mt-2 block text-[var(--muted)]">
+          <span className="mb-1 block">Altura conexion (m)</span>
+          <input
+            className="w-full rounded border border-[var(--line)] px-2 py-1 text-[var(--foreground)]"
+            inputMode="decimal"
+            name="equipment-connection-height"
+            placeholder="0"
+            type="text"
+            value={draft.connectionHeightInput}
+            onChange={(event) =>
+              onDraftConnectionHeightChange(event.target.value)
+            }
+          />
+        </label>
+      ) : null}
+
       <label className="mt-2 block text-[var(--muted)]">
         <span className="mb-1 block">Notas</span>
         <textarea
@@ -400,4 +429,10 @@ function DraftEditor({
       </div>
     </section>
   );
+}
+
+function formatEquipmentHeight(equipment: WorkbenchEquipment) {
+  return `${new Intl.NumberFormat("es-AR", {
+    maximumFractionDigits: 3,
+  }).format(pointZMeters(equipment.connectionPoint))} m`;
 }

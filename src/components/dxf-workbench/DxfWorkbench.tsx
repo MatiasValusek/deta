@@ -72,6 +72,7 @@ import {
   type WorkbenchEquipment,
 } from "@/lib/equipment/types";
 import type { Bounds, DrawingPrimitive, NormalizedDrawing, Point2D } from "@/lib/geometry/types";
+import { pointZMeters, withPointZ } from "@/lib/geometry/height";
 import { worldToScreen, type ViewTransform } from "@/lib/geometry/viewport";
 import { importPdfDocument, type ImportedPdfDocument } from "@/lib/pdf/importPdf";
 import type { PdfDocumentModel } from "@/lib/pdf/types";
@@ -602,7 +603,9 @@ export function DxfWorkbench() {
   const equipmentPlacementMode: EquipmentPlacementMode =
     activeEquipmentDraftOverlay?.step === "placing" ? "placing" : "inactive";
   const canSaveEquipmentDraft = Boolean(
-    equipmentDraft?.name.trim() && equipmentDraft.connectionPoint,
+    equipmentDraft?.name.trim() &&
+      equipmentDraft.connectionPoint &&
+      parseConnectionHeightInput(equipmentDraft.connectionHeightInput).ok,
   );
   const applianceEquipment = planEquipment.filter(
     (item) => item.role === "appliance",
@@ -2203,6 +2206,7 @@ export function DxfWorkbench() {
       type: "meter_regulator",
       name: "Medidor/regulador",
       connectionPoint: null,
+      connectionHeightInput: "0",
       previewPoint: null,
       demandValueInput: "",
       demandUnit: DEFAULT_DEMAND_UNIT,
@@ -2237,6 +2241,7 @@ export function DxfWorkbench() {
       type,
       name: suggestEquipmentName(type, planBase.equipment),
       connectionPoint: null,
+      connectionHeightInput: "0",
       previewPoint: null,
       demandValueInput: "",
       demandUnit: DEFAULT_DEMAND_UNIT,
@@ -2290,6 +2295,38 @@ export function DxfWorkbench() {
 
   function handleEquipmentDraftDemandUnitChange(unit: DemandUnit) {
     updateEquipmentDraft({ demandUnit: unit, error: null });
+  }
+
+  function handleEquipmentDraftConnectionHeightChange(value: string) {
+    setEquipmentDraft((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const parsedHeight = parseConnectionHeightInput(value);
+      const patch = {
+        connectionHeightInput: value,
+        error: null,
+      };
+
+      if (!parsedHeight.ok) {
+        return {
+          ...current,
+          ...patch,
+        };
+      }
+
+      return {
+        ...current,
+        ...patch,
+        connectionPoint: current.connectionPoint
+          ? withPointZ(current.connectionPoint, parsedHeight.heightMeters)
+          : null,
+        previewPoint: current.previewPoint
+          ? withPointZ(current.previewPoint, parsedHeight.heightMeters)
+          : null,
+      };
+    });
   }
 
   function handleEquipmentDraftNotesChange(value: string) {
@@ -2388,7 +2425,9 @@ export function DxfWorkbench() {
       current?.step === "placing"
         ? {
             ...current,
-            previewPoint: point,
+            previewPoint: point
+              ? withPointZ(point, draftConnectionHeightMeters(current))
+              : null,
           }
         : current,
     );
@@ -2399,8 +2438,11 @@ export function DxfWorkbench() {
       current?.step === "placing"
         ? {
             ...current,
-            connectionPoint: point,
-            previewPoint: point,
+            connectionPoint: withPointZ(
+              point,
+              draftConnectionHeightMeters(current),
+            ),
+            previewPoint: withPointZ(point, draftConnectionHeightMeters(current)),
             step: "review",
             error: null,
           }
@@ -4685,6 +4727,7 @@ export function DxfWorkbench() {
           onBeginPlacement={handleBeginEquipmentPlacement}
           onCancelDraft={handleCancelEquipmentDraft}
           onDeleteSelected={handleDeleteSelectedEquipment}
+          onDraftConnectionHeightChange={handleEquipmentDraftConnectionHeightChange}
           onDraftDemandUnitChange={handleEquipmentDraftDemandUnitChange}
           onDraftDemandValueChange={handleEquipmentDraftDemandValueChange}
           onDraftNameChange={handleEquipmentDraftNameChange}
@@ -5638,6 +5681,12 @@ function validateEquipmentDraft(
     };
   }
 
+  const height = parseConnectionHeightInput(draft.connectionHeightInput);
+
+  if (!height.ok) {
+    return height;
+  }
+
   const demand = parseDemandInput(draft);
 
   if (!demand.ok) {
@@ -5646,10 +5695,45 @@ function validateEquipmentDraft(
 
   return {
     ok: true,
-    connectionPoint: draft.connectionPoint,
+    connectionPoint: withPointZ(draft.connectionPoint, height.heightMeters),
     demandUnit: demand.demandUnit,
     demandValue: demand.demandValue,
   };
+}
+
+function parseConnectionHeightInput(
+  value: string,
+):
+  | { ok: true; heightMeters: number }
+  | { ok: false; message: string } {
+  const normalized = value.trim().replace(",", ".");
+
+  if (normalized.length === 0) {
+    return { ok: true, heightMeters: 0 };
+  }
+
+  const heightMeters = Number(normalized);
+
+  if (!Number.isFinite(heightMeters) || heightMeters < 0) {
+    return {
+      ok: false,
+      message: "La altura de conexion debe ser un numero finito mayor o igual a cero.",
+    };
+  }
+
+  return { ok: true, heightMeters };
+}
+
+function draftConnectionHeightMeters(draft: EquipmentDraft) {
+  const parsedHeight = parseConnectionHeightInput(draft.connectionHeightInput);
+
+  return parsedHeight.ok
+    ? parsedHeight.heightMeters
+    : pointZMeters(draft.connectionPoint ?? draft.previewPoint);
+}
+
+function formatHeightInput(heightMeters: number) {
+  return Number.isFinite(heightMeters) ? String(heightMeters) : "0";
 }
 
 function parseDemandInput(
@@ -5713,6 +5797,7 @@ function createDraftFromEquipment(
     type: equipment.type,
     name: equipment.name,
     connectionPoint: equipment.connectionPoint,
+    connectionHeightInput: formatHeightInput(pointZMeters(equipment.connectionPoint)),
     previewPoint: equipment.connectionPoint,
     demandValueInput:
       equipment.demandValue === undefined ? "" : String(equipment.demandValue),
@@ -7081,6 +7166,7 @@ function createRouteProposalFingerprint(
           equipment.pdfPageNumber ?? "",
           formatFingerprintNumber(equipment.connectionPoint.x),
           formatFingerprintNumber(equipment.connectionPoint.y),
+          formatFingerprintNumber(pointZMeters(equipment.connectionPoint)),
         ].join(":"),
     )
     .sort()
@@ -7161,6 +7247,7 @@ function routeNetworkSignature(network: ManualRouteNetwork) {
         node.pdfPageNumber ?? "",
         node.position ? formatFingerprintNumber(node.position.x) : "",
         node.position ? formatFingerprintNumber(node.position.y) : "",
+        node.position ? formatFingerprintNumber(pointZMeters(node.position)) : "",
       ].join(":"),
     )
     .sort()

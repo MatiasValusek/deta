@@ -46,6 +46,64 @@ export function runTechnicalRouteVerifications() {
     assertEqual(segmentById(result, "long-branch").segmentPhysicalLengthMeters, 6);
   });
 
+  verify(
+    results,
+    "Caso C2 - tramos comparten recorrido desfavorable con Z",
+    () => {
+      const result = calculateFixture({
+        appliances: [
+          { id: "appliance-short-z", name: "Corto", x: 4, y: 0 },
+          { id: "appliance-long-z", name: "Largo", x: 8, y: 0, z: 2 },
+        ],
+        routeNodes: [
+          { id: "node-a-z", x: 2, y: 0 },
+          { id: "node-b-z", x: 5, y: 0 },
+        ],
+        segments: [
+          { fromNodeId: "node-meter", id: "common-z", toNodeId: "node-a-z" },
+          { fromNodeId: "node-a-z", id: "shared-z", toNodeId: "node-b-z" },
+          {
+            fromNodeId: "node-b-z",
+            id: "long-terminal-z",
+            toNodeId: "node-appliance-long-z",
+          },
+          {
+            fromNodeId: "node-a-z",
+            id: "short-terminal-z",
+            toNodeId: "node-appliance-short-z",
+          },
+        ],
+      });
+
+      assertEqual(result.status, "valid");
+      assertRoute(
+        result,
+        "appliance-long-z",
+        ["common-z", "shared-z", "long-terminal-z"],
+        10,
+      );
+      assertGoverningRoute(result, "common-z", "appliance-long-z", 10);
+      assertGoverningRoute(result, "shared-z", "appliance-long-z", 10);
+      assertGoverningRoute(result, "long-terminal-z", "appliance-long-z", 10);
+      assertClose(segmentById(result, "common-z").segmentPhysicalLengthMeters, 2);
+      assertClose(segmentById(result, "shared-z").segmentPhysicalLengthMeters, 3);
+      assertClose(
+        segmentById(result, "long-terminal-z").segmentPhysicalLengthMeters,
+        5,
+      );
+      assertClose(segmentById(result, "common-z").calculationLengthMeters, 10);
+      assertClose(segmentById(result, "shared-z").calculationLengthMeters, 10);
+      assertClose(
+        segmentById(result, "long-terminal-z").calculationLengthMeters,
+        10,
+      );
+      assertClose(
+        segmentById(result, "short-terminal-z").calculationLengthMeters,
+        4,
+      );
+    },
+  );
+
   verify(results, "Caso D - empate deterministico", () => {
     const result = calculateTieFixture();
     const route = assertGoverningRoute(result, "common", "appliance-a", 5);
@@ -234,8 +292,9 @@ function calculateFixture(params: {
     name: string;
     x: number;
     y: number;
+    z?: number;
   }>;
-  routeNodes: Array<{ id: string; x: number; y: number }>;
+  routeNodes: Array<{ id: string; x: number; y: number; z?: number }>;
   scaleMetersPerSourceUnit?: number | null;
   segments: Array<{ fromNodeId: string; id: string; toNodeId: string }>;
 }) {
@@ -250,7 +309,7 @@ function calculateFixture(params: {
       type: "meter_regulator",
     },
     ...params.appliances.map((appliance) => ({
-      connectionPoint: { x: appliance.x, y: appliance.y },
+      connectionPoint: pointFromFixture(appliance),
       demandUnit: "m3_h" as const,
       demandValue: appliance.demandValue ?? 1,
       id: appliance.id,
@@ -274,7 +333,7 @@ function calculateFixture(params: {
       ...params.routeNodes.map((node) => ({
         id: node.id,
         kind: "route" as const,
-        position: { x: node.x, y: node.y },
+        position: pointFromFixture(node),
       })),
       ...applianceNodes,
     ],
@@ -291,6 +350,12 @@ function calculateFixture(params: {
         ? 1
         : params.scaleMetersPerSourceUnit,
   });
+}
+
+function pointFromFixture(point: { x: number; y: number; z?: number }) {
+  return point.z === undefined
+    ? { x: point.x, y: point.y }
+    : { x: point.x, y: point.y, z: point.z };
 }
 
 function assertRoute(

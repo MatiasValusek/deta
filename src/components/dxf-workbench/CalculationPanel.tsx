@@ -48,6 +48,13 @@ import {
   type TechnicalMaterialTakeoff,
 } from "@/lib/calculation/technicalMaterialTakeoff";
 import {
+  createTechnicalPhysicalAccessoryInventory,
+  technicalPhysicalAccessoryKindLabel,
+  type TechnicalPhysicalAccessory,
+  type TechnicalPhysicalAccessoryInventory,
+  type TechnicalPhysicalAccessoryRouteUse,
+} from "@/lib/calculation/technicalPhysicalAccessories";
+import {
   createTechnicalCalculationSheet,
   type TechnicalCalculationSheet,
   type TechnicalCalculationSheetRow,
@@ -55,6 +62,9 @@ import {
 import {
   downloadTechnicalWorkbook,
 } from "@/lib/calculation/technicalExcelDownload";
+import {
+  downloadTechnicalPdf,
+} from "@/lib/calculation/technicalPdfDownload";
 
 type CalculationPanelProps = {
   accessoryProposals: AccessoryProposal[];
@@ -96,6 +106,8 @@ export function CalculationPanel({
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null);
   const [isExportingExcel, setIsExportingExcel] = useState(false);
   const [excelExportError, setExcelExportError] = useState<string | null>(null);
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [pdfExportError, setPdfExportError] = useState<string | null>(null);
   const calculationSheet = useMemo(
     () =>
       createTechnicalCalculationSheet({
@@ -108,6 +120,21 @@ export function CalculationPanel({
   const materialTakeoff = useMemo(
     () =>
       createTechnicalMaterialTakeoff({
+        accessoryProposals,
+        diameterTransitionProposals,
+        result,
+        routeTransitionResolutions,
+      }),
+    [
+      accessoryProposals,
+      diameterTransitionProposals,
+      result,
+      routeTransitionResolutions,
+    ],
+  );
+  const physicalAccessoryInventory = useMemo(
+    () =>
+      createTechnicalPhysicalAccessoryInventory({
         accessoryProposals,
         diameterTransitionProposals,
         result,
@@ -150,6 +177,31 @@ export function CalculationPanel({
     }
   };
 
+  const handleExportPdf = async () => {
+    if (!canExportExcel || isExportingPdf) {
+      return;
+    }
+
+    setPdfExportError(null);
+    setIsExportingPdf(true);
+
+    try {
+      await downloadTechnicalPdf({
+        calculationSheet,
+        materialTakeoff,
+        result,
+      });
+    } catch (error) {
+      setPdfExportError(
+        error instanceof Error
+          ? error.message
+          : "No se pudo generar el PDF.",
+      );
+    } finally {
+      setIsExportingPdf(false);
+    }
+  };
+
   useEffect(() => {
     if (!result?.segments.some((segment) => segment.segmentId === selectedSegmentId)) {
       setSelectedSegmentId(result?.segments[0]?.segmentId ?? null);
@@ -174,6 +226,16 @@ export function CalculationPanel({
               onClick={handleExportExcel}
             >
               {isExportingExcel ? "Exportando..." : "Exportar Excel"}
+            </button>
+          ) : null}
+          {result ? (
+            <button
+              className="rounded border border-[var(--line)] bg-white px-2 py-1 text-xs hover:border-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={!canExportExcel || isExportingPdf}
+              type="button"
+              onClick={handleExportPdf}
+            >
+              {isExportingPdf ? "Exportando..." : "Exportar PDF"}
             </button>
           ) : null}
           {!isPlanActive && planReady ? (
@@ -206,6 +268,12 @@ export function CalculationPanel({
         </div>
       ) : null}
 
+      {pdfExportError ? (
+        <div className="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+          {pdfExportError}
+        </div>
+      ) : null}
+
       {result ? (
         <>
           <CalculationSummary result={result} />
@@ -228,6 +296,10 @@ export function CalculationPanel({
             onReject={onRejectDiameterTransition}
           />
           <MaterialTakeoffSection takeoff={materialTakeoff} />
+          <PhysicalAccessoryInventorySection
+            inventory={physicalAccessoryInventory}
+            result={result}
+          />
           <CalculationSheetSection sheet={calculationSheet} />
           <SegmentList
             result={result}
@@ -237,6 +309,7 @@ export function CalculationPanel({
           {selectedSegment ? (
             <SegmentDetail
               equipment={equipment}
+              physicalAccessoryInventory={physicalAccessoryInventory}
               result={result}
               routeTransitionResolutions={routeTransitionResolutions}
               segment={selectedSegment}
@@ -1088,11 +1161,11 @@ function CalculationSummary({ result }: { result: TechnicalCalculationResult }) 
       <dd className="text-right">{totalFlow}</dd>
       <dt>Sistema canerias</dt>
       <dd className="text-right">{formatPipeSystemLabel(result)}</dd>
-      <dt>Longitud fisica</dt>
+      <dt>Longitud fisica caños</dt>
       <dd className="text-right">{physicalLength}</dd>
       <dt>Equiv. accesorios tramo</dt>
       <dd className="text-right">{equivalentLength}</dd>
-      <dt>Long. calculo local</dt>
+      <dt>Long. fisica + equiv. locales</dt>
       <dd className="text-right">{calculationLength}</dd>
       <dt>Dimensionado completo</dt>
       <dd className="text-right">
@@ -1209,6 +1282,59 @@ function MaterialTakeoffSection({
   );
 }
 
+function PhysicalAccessoryInventorySection({
+  inventory,
+  result,
+}: {
+  inventory: TechnicalPhysicalAccessoryInventory;
+  result: TechnicalCalculationResult;
+}) {
+  const hasItems = inventory.items.length > 0;
+
+  return (
+    <section className="mt-3 rounded border border-[var(--line)] px-3 py-2 text-xs">
+      <div className="mb-2 flex items-baseline justify-between gap-2">
+        <h3 className="text-xs font-semibold uppercase text-[var(--muted)]">
+          Accesorios fisicos
+        </h3>
+        <div className="text-[10px] text-[var(--muted)]">
+          {inventoryStatusLabel(inventory)}
+        </div>
+      </div>
+      {hasItems ? (
+        <ul className="space-y-1">
+          {inventory.items.map((item) => (
+            <li key={item.id}>
+              <div className="flex items-baseline justify-between gap-2">
+                <span>{formatPhysicalAccessorySummary(item, result)}</span>
+                <span className="shrink-0 text-right font-mono">
+                  {item.routeUses.length}{" "}
+                  {item.routeUses.length === 1 ? "recorrido" : "recorridos"}
+                </span>
+              </div>
+              <div className="mt-0.5 text-[10px] text-[var(--muted)]">
+                {formatPhysicalAccessorySegments(item, result)}
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <div className="text-[var(--muted)]">
+          Sin accesorios fisicos resueltos.
+        </div>
+      )}
+      {inventory.pendingItems.length > 0 ? (
+        <div className="mt-2 rounded border border-[#f1d28a] bg-[#fffaf0] px-2 py-1 text-[var(--warning)]">
+          {inventory.pendingItems.length}{" "}
+          {inventory.pendingItems.length === 1
+            ? "accesorio fisico pendiente"
+            : "accesorios fisicos pendientes"}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
 function CalculationSheetSection({
   sheet,
 }: {
@@ -1246,10 +1372,10 @@ function CalculationSheetSection({
                 Caudal
               </th>
               <th className="w-20 border-b border-[var(--line)] px-2 py-1 text-right font-semibold">
-                Long. fisica
+                Long. fisica tramo
               </th>
               <th className="w-20 border-b border-[var(--line)] px-2 py-1 text-right font-semibold">
-                Long. inicial
+                Long. fisica recorrido
               </th>
               <th className="w-20 border-b border-[var(--line)] px-2 py-1 text-right font-semibold">
                 Accesorios
@@ -1258,10 +1384,10 @@ function CalculationSheetSection({
                 Transiciones
               </th>
               <th className="w-20 border-b border-[var(--line)] px-2 py-1 text-right font-semibold">
-                Long. final
+                Long. calculo
               </th>
               <th className="w-24 border-b border-[var(--line)] px-2 py-1 text-right font-semibold">
-                Diam. minimo
+                Diam. provisional
               </th>
               <th className="w-24 border-b border-[var(--line)] px-2 py-1 text-right font-semibold">
                 Diam. adoptado
@@ -1396,11 +1522,11 @@ function SegmentList({
               {segmentLabel(segment, result.nodeLabels)}
             </div>
             <div className="mt-0.5 text-[10px] text-[var(--muted)]">
-              {formatTechnicalFlow(segment.accumulatedFlow, segment.accumulatedFlowUnit)}
+              {formatSegmentConsumption(segment)}
               {" - "}
               {formatGoverningRouteLength(segment)}
               {" - "}
-              {formatSegmentDiameter(segment, result)}
+              {formatProvisionalSegmentDiameter(segment)}
               {" - "}
               {segment.downstreamApplianceIds.length}{" "}
               {segment.downstreamApplianceIds.length === 1 ? "artefacto" : "artefactos"}
@@ -1414,12 +1540,14 @@ function SegmentList({
 
 function SegmentDetail({
   equipment,
+  physicalAccessoryInventory,
   result,
   routeTransitionResolutions,
   segment,
   onAdoptSegmentDiameter,
 }: {
   equipment: WorkbenchEquipment[];
+  physicalAccessoryInventory: TechnicalPhysicalAccessoryInventory;
   result: TechnicalCalculationResult;
   routeTransitionResolutions: Record<string, TechnicalRouteTransitionResolution>;
   segment: TechnicalSegmentResult;
@@ -1436,7 +1564,7 @@ function SegmentDetail({
       <dl className="mt-2 grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 gap-y-1">
         <dt>Longitud dibujada</dt>
         <dd className="text-right">{formatDrawingLength(segment.drawingLength)}</dd>
-        <dt>Longitud del tramo</dt>
+        <dt>Longitud fisica tramo</dt>
         <dd className="text-right">
           {formatCalculationMeters(segment.segmentPhysicalLengthMeters)}
         </dd>
@@ -1444,18 +1572,32 @@ function SegmentDetail({
         <dd className="text-right">
           {formatCalculationMeters(segment.accessoryEquivalentLengthMeters, "Pendiente")}
         </dd>
-        <dt>Long. prov. 08B2</dt>
+        <dt>Longitud calculo recorrido</dt>
         <dd className="text-right">{formatSegmentCalculationLength(segment)}</dd>
-        <dt>Caudal normalizado</dt>
+        <dt>Consumo tecnico</dt>
         <dd className="text-right">
-          {formatTechnicalFlow(segment.accumulatedFlow, segment.accumulatedFlowUnit)}
+          {formatSegmentConsumption(segment)}
+        </dd>
+        <dt>Diametro provisional SIGAS</dt>
+        <dd className="text-right">
+          {formatProvisionalSegmentDiameter(segment)}
         </dd>
       </dl>
+      {segment.provisionalDiameterExplanation ? (
+        <div className="mt-1 text-[10px] text-[var(--muted)]">
+          {segment.provisionalDiameterExplanation}
+        </div>
+      ) : null}
 
       <RouteBasisDetail
         equipmentById={equipmentById}
         result={result}
         routeTransitionResolutions={routeTransitionResolutions}
+        segment={segment}
+      />
+      <SegmentPhysicalAccessoryInventory
+        inventory={physicalAccessoryInventory}
+        result={result}
         segment={segment}
       />
       <AccessoryList accessories={segment.accessories} />
@@ -1511,7 +1653,7 @@ function RouteBasisDetail({
         <dl className="mt-1 grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 gap-y-1">
           <dt>Extremo desfavorable</dt>
           <dd className="text-right">Pendiente</dd>
-          <dt>Longitud inicial de calculo</dt>
+          <dt>Longitud fisica recorrido</dt>
           <dd className="text-right">Pendiente</dd>
         </dl>
         <div className="mt-1 text-[var(--warning)]">
@@ -1544,7 +1686,7 @@ function RouteBasisDetail({
       <dl className="mt-1 grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 gap-y-1">
         <dt>Extremo desfavorable</dt>
         <dd className="text-right">{terminal?.name ?? route.terminalEquipmentId}</dd>
-        <dt>Longitud inicial de calculo</dt>
+        <dt>Longitud fisica recorrido</dt>
         <dd className="text-right">
           {formatCalculationMeters(route.physicalLengthMeters)}
         </dd>
@@ -1552,7 +1694,7 @@ function RouteBasisDetail({
         <dd className="text-right">
           {formatRouteAccessoryEquivalentLength(segment)}
         </dd>
-        <dt>Longitud dimensionado</dt>
+        <dt>Longitud calculo recorrido</dt>
         <dd className="text-right">
           {formatRouteSizingLength(segment)}
         </dd>
@@ -1795,11 +1937,11 @@ function BaselineNetworkSegmentSizing({
         {title}
       </div>
       <dl className="mt-1 grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 gap-y-1">
-        <dt>Caudal normalizado</dt>
+        <dt>Consumo tecnico</dt>
         <dd className="text-right">
-          {formatTechnicalFlow(sizing.accumulatedFlow, sizing.accumulatedFlowUnit)}
+          {formatSegmentConsumption(segment)}
         </dd>
-        <dt>Longitud tramo</dt>
+        <dt>Longitud fisica tramo</dt>
         <dd className="text-right">
           {formatCalculationMeters(segment.segmentPhysicalLengthMeters)}
         </dd>
@@ -1807,24 +1949,24 @@ function BaselineNetworkSegmentSizing({
         <dd className="text-right">
           {sizing.governingTerminalEquipmentId ?? sizing.governingRouteId ?? "Pendiente"}
         </dd>
-        <dt>Longitud inicial</dt>
+        <dt>Longitud fisica recorrido</dt>
         <dd className="text-right">
           {formatCalculationMeters(sizing.governingRoutePhysicalLengthMeters)}
         </dd>
-        <dt>Equiv. recorrido</dt>
+        <dt>Equiv. accesorios recorrido</dt>
         <dd className="text-right">
           {formatCalculationMeters(
             sizing.governingRouteAccessoryEquivalentLengthMeters,
             "Pendiente",
           )}
         </dd>
-        <dt>Longitud dimensionado</dt>
+        <dt>Longitud calculo recorrido</dt>
         <dd className="text-right">
           {formatCalculationMeters(sizing.sizingLengthMeters, "Pendiente")}
         </dd>
-        <dt>Diametro minimo calculado</dt>
+        <dt>Diametro provisional SIGAS</dt>
         <dd className="text-right">
-          {formatDiameterReference(sizing.calculatedDiameter)}
+          {formatProvisionalSegmentDiameter(segment)}
         </dd>
         {showRequiredDiameter ? (
           <>
@@ -1900,6 +2042,118 @@ function RouteAccessoryContributionList({
   );
 }
 
+function SegmentPhysicalAccessoryInventory({
+  inventory,
+  result,
+  segment,
+}: {
+  inventory: TechnicalPhysicalAccessoryInventory;
+  result: TechnicalCalculationResult;
+  segment: TechnicalSegmentResult;
+}) {
+  const routeId =
+    segment.governingRouteResolution.status === "resolved"
+      ? segment.governingRouteResolution.value.routeId
+      : null;
+  const segmentItems = physicalAccessoryItemsByIds(
+    inventory,
+    inventory.accessoryIdsBySegmentId[segment.segmentId] ?? [],
+  );
+  const routeItems = routeId
+    ? physicalAccessoryItemsByIds(
+        inventory,
+        inventory.accessoryIdsByRouteId[routeId] ?? [],
+      )
+    : [];
+  const pendingItems = inventory.pendingItems.filter(
+    (item) =>
+      item.segmentIds.includes(segment.segmentId) ||
+      (routeId !== null && item.routeId === routeId),
+  );
+
+  if (
+    segmentItems.length === 0 &&
+    routeItems.length === 0 &&
+    pendingItems.length === 0
+  ) {
+    return (
+      <div className="mt-2 text-[var(--muted)]">
+        Sin inventario fisico para este tramo.
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-2 rounded border border-[var(--line)] px-2 py-2">
+      <div className="font-semibold text-[var(--muted)]">
+        Inventario fisico
+      </div>
+      <PhysicalAccessoryMiniList
+        items={segmentItems}
+        label="Tramo"
+        result={result}
+      />
+      <PhysicalAccessoryMiniList
+        items={routeItems}
+        label="Recorrido"
+        result={result}
+        routeId={routeId}
+      />
+      {pendingItems.length > 0 ? (
+        <ul className="mt-1 space-y-1 text-[10px] text-[var(--warning)]">
+          {pendingItems.map((item) => (
+            <li key={item.id}>
+              Pendiente - {item.reason}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+function PhysicalAccessoryMiniList({
+  items,
+  label,
+  result,
+  routeId,
+}: {
+  items: TechnicalPhysicalAccessory[];
+  label: string;
+  result: TechnicalCalculationResult;
+  routeId?: string | null;
+}) {
+  if (items.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="mt-1">
+      <div className="text-[10px] font-semibold text-[var(--muted)]">
+        {label}
+      </div>
+      <ul className="mt-0.5 space-y-1">
+        {items.map((item) => (
+          <li key={`${label}:${item.id}`}>
+            <div>{formatPhysicalAccessorySummary(item, result)}</div>
+            {routeId ? (
+              <ul className="mt-0.5 space-y-0.5 text-[10px] text-[var(--muted)]">
+                {item.routeUses
+                  .filter((routeUse) => routeUse.routeId === routeId)
+                  .map((routeUse) => (
+                    <li key={physicalAccessoryRouteUseKey(routeUse)}>
+                      {formatPhysicalAccessoryRouteUse(routeUse, result)}
+                    </li>
+                  ))}
+              </ul>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function TransitionAwareNetworkSegmentSizing({
   result,
   sizing,
@@ -1918,7 +2172,7 @@ function TransitionAwareNetworkSegmentSizing({
         Dimensionado con transiciones
       </div>
       <dl className="mt-1 grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 gap-y-1">
-        <dt>Caudal normalizado</dt>
+        <dt>Consumo tecnico</dt>
         <dd className="text-right">
           {formatTechnicalFlow(sizing.accumulatedFlow, sizing.accumulatedFlowUnit)}
         </dd>
@@ -1970,7 +2224,7 @@ function TransitionAwareNetworkSegmentSizing({
             "Pendiente",
           )}
         </dd>
-        <dt>Longitud final dimensionado</dt>
+        <dt>Longitud calculo final</dt>
         <dd className="text-right">
           {formatCalculationMeters(
             sizing.transitionAwareSizingLengthMeters,
@@ -2204,6 +2458,106 @@ function segmentLabel(
   return `${labels[segment.fromNodeId] ?? segment.fromNodeId} -> ${labels[segment.toNodeId] ?? segment.toNodeId}`;
 }
 
+function inventoryStatusLabel(inventory: TechnicalPhysicalAccessoryInventory) {
+  if (inventory.status === "resolved") {
+    return "Validado";
+  }
+
+  if (inventory.status === "pending") {
+    return "Pendiente";
+  }
+
+  return "No disponible";
+}
+
+function formatPhysicalAccessorySummary(
+  item: TechnicalPhysicalAccessory,
+  result: TechnicalCalculationResult,
+) {
+  const nodeLabel = item.nodeId
+    ? result.nodeLabels[item.nodeId] ?? item.nodeId
+    : "nodo pendiente";
+
+  return `${technicalPhysicalAccessoryKindLabel(item.kind)} - ${nodeLabel} - ${formatPhysicalAccessoryDiameters(item)}`;
+}
+
+function formatPhysicalAccessoryDiameters(
+  item: TechnicalPhysicalAccessory,
+) {
+  const labels = [
+    ...new Set(
+      item.diameters.map((entry) =>
+        formatCompactDiameterReference(entry.diameter),
+      ),
+    ),
+  ].filter((label) => label !== "Diam. pendiente");
+
+  return labels.length > 0 ? labels.join(" / ") : "Diam. pendiente";
+}
+
+function formatPhysicalAccessorySegments(
+  item: TechnicalPhysicalAccessory,
+  result: TechnicalCalculationResult,
+) {
+  if (item.segmentIds.length === 0) {
+    return "Tramo pendiente";
+  }
+
+  return item.segmentIds
+    .map((segmentId) => formatSegmentReference(segmentId, result))
+    .join(", ");
+}
+
+function formatPhysicalAccessoryRouteUse(
+  routeUse: TechnicalPhysicalAccessoryRouteUse,
+  result: TechnicalCalculationResult,
+) {
+  const traversal = routeUse.traversalKind
+    ? ` - ${routeUse.traversalKind}`
+    : "";
+  const variant = routeUse.variantLabel ? ` - ${routeUse.variantLabel}` : "";
+  const segments =
+    routeUse.segmentIds.length > 0
+      ? routeUse.segmentIds
+          .map((segmentId) => formatSegmentReference(segmentId, result))
+          .join(", ")
+      : "tramos pendientes";
+
+  return `${routeUse.routeId}${traversal} - ${segments}${variant}`;
+}
+
+function physicalAccessoryRouteUseKey(
+  routeUse: TechnicalPhysicalAccessoryRouteUse,
+) {
+  return [
+    routeUse.routeId,
+    routeUse.segmentIds.join(","),
+    routeUse.traversalKind ?? "",
+    routeUse.variantLabel ?? "",
+  ].join("|");
+}
+
+function formatSegmentReference(
+  segmentId: string,
+  result: TechnicalCalculationResult,
+) {
+  const segment =
+    result.segments.find((item) => item.segmentId === segmentId) ?? null;
+
+  return segment ? segmentLabel(segment, result.nodeLabels) : segmentId;
+}
+
+function physicalAccessoryItemsByIds(
+  inventory: TechnicalPhysicalAccessoryInventory,
+  ids: string[],
+) {
+  const byId = new Map(inventory.items.map((item) => [item.id, item]));
+
+  return [...new Set(ids)]
+    .map((id) => byId.get(id) ?? null)
+    .filter((item): item is TechnicalPhysicalAccessory => item !== null);
+}
+
 type AccessoryTypeSummary = {
   quantity: number;
   reasonLabels: string[];
@@ -2315,12 +2669,15 @@ function formatSegmentCalculationLength(segment: TechnicalSegmentResult) {
     return formatCalculationMeters(segment.calculationLengthMeters);
   }
 
-  if (segment.physicalLengthMeters === null) {
-    return "Escala pendiente";
+  if (segment.routeSizingBasis.governingRoutePhysicalLengthMeters === null) {
+    return "Recorrido pendiente";
   }
 
-  if (segment.accessoryEquivalentLengthMeters === null) {
-    return "Equiv. pendiente";
+  if (
+    segment.routeSizingBasis.governingRouteAccessoryEquivalentLengthMeters ===
+    null
+  ) {
+    return "Equiv. recorrido pendiente";
   }
 
   return "Pendiente";
@@ -2352,6 +2709,18 @@ function formatRouteSizingLength(
     segment.routeSizingBasis.sizingLengthMeters,
     "Pendiente",
   );
+}
+
+function formatSegmentConsumption(segment: TechnicalSegmentResult) {
+  const consumptionM3h =
+    segment.consumptionM3h ??
+    (segment.accumulatedFlowUnit === "m3_h" ? segment.accumulatedFlow : null);
+
+  return formatTechnicalFlow(consumptionM3h, consumptionM3h === null ? null : "m3_h");
+}
+
+function formatProvisionalSegmentDiameter(segment: TechnicalSegmentResult) {
+  return formatDiameterReference(segment.provisionalDiameter ?? null);
 }
 
 function formatSheetAppliances(row: TechnicalCalculationSheetRow) {
