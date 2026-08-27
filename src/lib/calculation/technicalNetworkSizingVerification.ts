@@ -563,7 +563,7 @@ function calculateCrossDependencyFixture() {
   return { network, pipeSystem, result };
 }
 
-function calculatePartialFixture() {
+export function calculatePartialFixture() {
   return calculateFixture({
     appliances: [
       { demandValue: 0.968, id: "appliance-1", name: "1", x: 10.75, y: 0 },

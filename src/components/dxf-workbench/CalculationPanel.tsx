@@ -47,6 +47,11 @@ import {
   createTechnicalMaterialTakeoff,
   type TechnicalMaterialTakeoff,
 } from "@/lib/calculation/technicalMaterialTakeoff";
+import {
+  createTechnicalCalculationSheet,
+  type TechnicalCalculationSheet,
+  type TechnicalCalculationSheetRow,
+} from "@/lib/calculation/technicalCalculationSheet";
 
 type CalculationPanelProps = {
   accessoryProposals: AccessoryProposal[];
@@ -86,6 +91,15 @@ export function CalculationPanel({
   onRejectDiameterTransition,
 }: CalculationPanelProps) {
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null);
+  const calculationSheet = useMemo(
+    () =>
+      createTechnicalCalculationSheet({
+        equipment,
+        result,
+        routeTransitionResolutions,
+      }),
+    [equipment, result, routeTransitionResolutions],
+  );
   const materialTakeoff = useMemo(
     () =>
       createTechnicalMaterialTakeoff({
@@ -166,6 +180,7 @@ export function CalculationPanel({
             onReject={onRejectDiameterTransition}
           />
           <MaterialTakeoffSection takeoff={materialTakeoff} />
+          <CalculationSheetSection sheet={calculationSheet} />
           <SegmentList
             result={result}
             selectedSegmentId={selectedSegment?.segmentId ?? null}
@@ -1143,6 +1158,155 @@ function MaterialTakeoffSection({
         </ul>
       ) : null}
     </section>
+  );
+}
+
+function CalculationSheetSection({
+  sheet,
+}: {
+  sheet: TechnicalCalculationSheet;
+}) {
+  if (sheet.rows.length === 0) {
+    return (
+      <section className="mt-3 rounded border border-[var(--line)] px-3 py-2 text-xs text-[var(--muted)]">
+        Planilla de calculo pendiente.
+      </section>
+    );
+  }
+
+  return (
+    <section className="mt-3">
+      <div className="mb-2 flex items-baseline justify-between gap-2">
+        <h3 className="text-xs font-semibold uppercase text-[var(--muted)]">
+          Planilla de calculo
+        </h3>
+        <div className="text-[10px] text-[var(--muted)]">
+          {sheet.rows.length} {sheet.rows.length === 1 ? "tramo" : "tramos"}
+        </div>
+      </div>
+      <div className="overflow-x-auto rounded border border-[var(--line)]">
+        <table className="min-w-[1040px] table-fixed border-collapse text-[10px]">
+          <thead className="bg-[#f8fafc] text-[var(--muted)]">
+            <tr>
+              <th className="w-28 border-b border-[var(--line)] px-2 py-1 text-left font-semibold">
+                Tramo
+              </th>
+              <th className="w-36 border-b border-[var(--line)] px-2 py-1 text-left font-semibold">
+                Artefactos aguas abajo
+              </th>
+              <th className="w-20 border-b border-[var(--line)] px-2 py-1 text-right font-semibold">
+                Caudal
+              </th>
+              <th className="w-20 border-b border-[var(--line)] px-2 py-1 text-right font-semibold">
+                Long. fisica
+              </th>
+              <th className="w-20 border-b border-[var(--line)] px-2 py-1 text-right font-semibold">
+                Long. inicial
+              </th>
+              <th className="w-20 border-b border-[var(--line)] px-2 py-1 text-right font-semibold">
+                Accesorios
+              </th>
+              <th className="w-20 border-b border-[var(--line)] px-2 py-1 text-right font-semibold">
+                Transiciones
+              </th>
+              <th className="w-20 border-b border-[var(--line)] px-2 py-1 text-right font-semibold">
+                Long. final
+              </th>
+              <th className="w-24 border-b border-[var(--line)] px-2 py-1 text-right font-semibold">
+                Diam. minimo
+              </th>
+              <th className="w-24 border-b border-[var(--line)] px-2 py-1 text-right font-semibold">
+                Diam. adoptado
+              </th>
+              <th className="w-24 border-b border-[var(--line)] px-2 py-1 text-right font-semibold">
+                Diam. efectivo
+              </th>
+              <th className="w-20 border-b border-[var(--line)] px-2 py-1 text-right font-semibold">
+                SIGAS
+              </th>
+              <th className="w-20 border-b border-[var(--line)] px-2 py-1 text-right font-semibold">
+                Capacidad
+              </th>
+              <th className="w-32 border-b border-[var(--line)] px-2 py-1 text-left font-semibold">
+                Estado
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {sheet.rows.map((row) => (
+              <CalculationSheetRowView key={row.segmentId} row={row} />
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {sheet.pendingRowCount > 0 ? (
+        <div className="mt-1 text-[10px] text-[var(--warning)]">
+          {sheet.pendingRowCount}{" "}
+          {sheet.pendingRowCount === 1 ? "fila pendiente" : "filas pendientes"}
+          {sheet.unsupportedRowCount > 0
+            ? `, ${sheet.unsupportedRowCount} incompatibles`
+            : ""}
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function CalculationSheetRowView({
+  row,
+}: {
+  row: TechnicalCalculationSheetRow;
+}) {
+  const status = calculationSheetRowStatusLabel(row);
+
+  return (
+    <tr className="border-t border-[var(--line)] align-top first:border-t-0">
+      <td className="px-2 py-1 font-medium">{row.tramo}</td>
+      <td className="px-2 py-1">{formatSheetAppliances(row)}</td>
+      <td className="px-2 py-1 text-right font-mono">
+        {formatSheetFlow(row.flowM3h)}
+      </td>
+      <td className="px-2 py-1 text-right font-mono">
+        {formatCalculationMeters(row.physicalLengthMeters, "Pendiente")}
+      </td>
+      <td className="px-2 py-1 text-right font-mono">
+        {formatCalculationMeters(row.initialRouteLengthMeters, "Pendiente")}
+      </td>
+      <td className="px-2 py-1 text-right font-mono">
+        {formatCalculationMeters(row.accessoryEquivalentLengthMeters, "Pendiente")}
+      </td>
+      <td className="px-2 py-1 text-right font-mono">
+        {formatCalculationMeters(row.transitionEquivalentLengthMeters, "Pendiente")}
+      </td>
+      <td className="px-2 py-1 text-right font-mono">
+        {formatCalculationMeters(row.finalCalculationLengthMeters, "Pendiente")}
+      </td>
+      <td className="px-2 py-1 text-right">
+        {formatSheetDiameter(row.calculatedDiameter)}
+      </td>
+      <td className="px-2 py-1 text-right">
+        {row.adoptedDiameter
+          ? formatCompactDiameterReference(row.adoptedDiameter)
+          : "Sin adopcion"}
+      </td>
+      <td className="px-2 py-1 text-right">
+        {formatSheetDiameter(row.effectiveDiameter)}
+      </td>
+      <td className="px-2 py-1 text-right font-mono">
+        {formatCalculationMeters(row.tabulatedLengthMeters, "Pendiente")}
+      </td>
+      <td className="px-2 py-1 text-right font-mono">
+        {formatSheetFlow(row.capacityM3h)}
+      </td>
+      <td className="px-2 py-1">
+        <div className={calculationSheetStatusTone(row.status)}>{status}</div>
+        {row.observations[0] ? (
+          <div className="mt-0.5 line-clamp-2 text-[9px] text-[var(--muted)]">
+            {row.observations[0]}
+          </div>
+        ) : null}
+      </td>
+    </tr>
   );
 }
 
@@ -2140,6 +2304,52 @@ function formatRouteSizingLength(
     segment.routeSizingBasis.sizingLengthMeters,
     "Pendiente",
   );
+}
+
+function formatSheetAppliances(row: TechnicalCalculationSheetRow) {
+  if (row.downstreamAppliances.length === 0) {
+    return "Sin artefactos";
+  }
+
+  return row.downstreamAppliances.join(", ");
+}
+
+function formatSheetFlow(value: number | null) {
+  const formatted = formatOptionalNumber(value ?? undefined);
+
+  return formatted ? `${formatted} m3/h` : "Pendiente";
+}
+
+function formatSheetDiameter(
+  diameter: TechnicalCalculationSheetRow["calculatedDiameter"],
+) {
+  return diameter ? formatCompactDiameterReference(diameter) : "Pendiente";
+}
+
+function calculationSheetRowStatusLabel(row: TechnicalCalculationSheetRow) {
+  if (row.status === "resolved") {
+    return "Validado";
+  }
+
+  if (row.status === "unsupported") {
+    return "Incompatible";
+  }
+
+  return "Pendiente";
+}
+
+function calculationSheetStatusTone(
+  status: TechnicalCalculationSheetRow["status"],
+) {
+  if (status === "resolved") {
+    return "text-[#1f6b45]";
+  }
+
+  if (status === "unsupported") {
+    return "text-red-800";
+  }
+
+  return "text-[var(--warning)]";
 }
 
 function formatTechnicalRoutePath(
