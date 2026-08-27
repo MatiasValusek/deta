@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { type WorkbenchEquipment } from "@/lib/equipment/types";
 import {
   createDemandNormalizationIndex,
@@ -43,6 +43,10 @@ import type {
   TechnicalRouteTransitionContribution,
   TechnicalRouteTransitionResolution,
 } from "@/lib/calculation/technicalRouteTransitions";
+import {
+  createTechnicalMaterialTakeoff,
+  type TechnicalMaterialTakeoff,
+} from "@/lib/calculation/technicalMaterialTakeoff";
 
 type CalculationPanelProps = {
   accessoryProposals: AccessoryProposal[];
@@ -82,6 +86,21 @@ export function CalculationPanel({
   onRejectDiameterTransition,
 }: CalculationPanelProps) {
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null);
+  const materialTakeoff = useMemo(
+    () =>
+      createTechnicalMaterialTakeoff({
+        accessoryProposals,
+        diameterTransitionProposals,
+        result,
+        routeTransitionResolutions,
+      }),
+    [
+      accessoryProposals,
+      diameterTransitionProposals,
+      result,
+      routeTransitionResolutions,
+    ],
+  );
   const selectedSegment =
     result?.segments.find((segment) => segment.segmentId === selectedSegmentId) ??
     result?.segments[0] ??
@@ -146,6 +165,7 @@ export function CalculationPanel({
             onConfirm={onConfirmDiameterTransition}
             onReject={onRejectDiameterTransition}
           />
+          <MaterialTakeoffSection takeoff={materialTakeoff} />
           <SegmentList
             result={result}
             selectedSegmentId={selectedSegment?.segmentId ?? null}
@@ -1062,6 +1082,67 @@ function CalculationIssues({ result }: { result: TechnicalCalculationResult }) {
         <div className="mt-1">+ {result.issues.length - 5} observaciones</div>
       ) : null}
     </div>
+  );
+}
+
+function MaterialTakeoffSection({
+  takeoff,
+}: {
+  takeoff: TechnicalMaterialTakeoff;
+}) {
+  const hasMaterials =
+    takeoff.pipeItems.length > 0 || takeoff.accessoryItems.length > 0;
+
+  return (
+    <section className="mt-3 rounded border border-[var(--line)] px-3 py-2 text-xs">
+      <h3 className="mb-2 text-xs font-semibold uppercase text-[var(--muted)]">
+        Materiales
+      </h3>
+      {hasMaterials ? (
+        <ul className="space-y-1">
+          {takeoff.pipeItems.map((item) => (
+            <li
+              className="flex items-baseline justify-between gap-2"
+              key={item.diameterKey}
+            >
+              <span>{item.label}</span>
+              <span className="text-right font-mono">
+                {formatCalculationMeters(item.physicalLengthMeters)}
+              </span>
+            </li>
+          ))}
+          {takeoff.accessoryItems.map((item) => (
+            <li
+              className="flex items-baseline justify-between gap-2"
+              key={`${item.source}:${item.familyId}:${item.configurationKey}`}
+            >
+              <span>{item.label}</span>
+              <span className="text-right font-mono">
+                {formatMaterialQuantity(item.quantity)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <div className="text-[var(--muted)]">
+          Sin materiales computables.
+        </div>
+      )}
+      {takeoff.pendingSummary.total > 0 ? (
+        <div className="mt-2 rounded border border-[#f1d28a] bg-[#fffaf0] px-2 py-1 text-[var(--warning)]">
+          {formatMaterialPendingSummary(takeoff)}
+        </div>
+      ) : null}
+      {takeoff.pendingItems.length > 0 ? (
+        <ul className="mt-1 space-y-1 text-[10px] text-[var(--muted)]">
+          {takeoff.pendingItems.slice(0, 4).map((item) => (
+            <li key={`${item.code}:${item.sourceId ?? item.segmentId ?? ""}`}>
+              {item.label}: {item.reason}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
   );
 }
 
@@ -2357,6 +2438,54 @@ function formatOptionalNumber(value: number | undefined) {
     maximumFractionDigits: 2,
     minimumFractionDigits: 0,
   });
+}
+
+function formatMaterialQuantity(value: number) {
+  return value.toLocaleString("es-AR", {
+    maximumFractionDigits: 2,
+    minimumFractionDigits: Number.isInteger(value) ? 0 : 2,
+  });
+}
+
+function formatMaterialPendingSummary(takeoff: TechnicalMaterialTakeoff) {
+  const parts = [
+    formatMaterialPendingCount(
+      takeoff.pendingSummary.accessoryCount,
+      "accesorio",
+      "accesorios",
+    ),
+    formatMaterialPendingCount(
+      takeoff.pendingSummary.transitionCount,
+      "transición",
+      "transiciones",
+    ),
+    formatMaterialPendingCount(
+      takeoff.pendingSummary.adoptionCount,
+      "diámetro efectivo",
+      "diámetros efectivos",
+    ),
+    formatMaterialPendingCount(
+      takeoff.pendingSummary.pipeCount,
+      "longitud física",
+      "longitudes físicas",
+    ),
+  ].filter(Boolean);
+
+  return `Pendientes: ${parts.join(", ")} requieren confirmación`;
+}
+
+function formatMaterialPendingCount(
+  count: number,
+  singular: string,
+  plural: string,
+) {
+  if (count <= 0) {
+    return null;
+  }
+
+  return `${count.toLocaleString("es-AR")} ${
+    count === 1 ? singular : plural
+  }`;
 }
 
 function formatDrawingLength(value: number) {
