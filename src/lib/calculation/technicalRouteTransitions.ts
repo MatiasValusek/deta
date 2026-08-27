@@ -12,6 +12,10 @@ import {
   type DiameterTransitionKind,
   type DiameterTransitionProposal,
 } from "@/lib/calculation/diameterTransitionProposals";
+import {
+  resolveCompoundTurnTransitionPreview,
+  type CompoundTurnTransitionContribution,
+} from "@/lib/calculation/compoundTurnTransitionResolution";
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
 import {
   buildEquipmentIndex,
@@ -42,6 +46,7 @@ export type TechnicalRouteTransitionContributionSource =
 export type TechnicalRouteTransitionContribution = {
   catalogCode?: string;
   catalogFamilyId?: string;
+  compoundComponent?: "diameter_change" | "turn";
   downstreamDiameter: PipeDiameterReference | null;
   downstreamSegmentId: string | null;
   equivalentLengthMeters: number | null;
@@ -60,10 +65,12 @@ export type TechnicalRouteTransitionContribution = {
   upstreamDiameter: PipeDiameterReference | null;
   upstreamSegmentId: string | null;
   variant: PipeDiameterTransitionEquivalentLengthResult["variant"] | null;
+  variantLabel?: string;
 };
 
 export type TechnicalRouteTransitionResolution = {
   branchTransitionEquivalentLengthMeters: number | null;
+  compoundTransitionEquivalentLengthMeters: number | null;
   contributions: TechnicalRouteTransitionContribution[];
   duplicateTransitionIds: string[];
   equivalentLengthMeters: number | null;
@@ -85,6 +92,7 @@ export function resolveTechnicalRouteTransitions(params: {
   equipment?: WorkbenchEquipment[];
   governingRouteAccessoryEquivalentLengthMeters?: number | null;
   includeBranchTransitions?: boolean;
+  includeCompoundTurnTransitions?: boolean;
   network?: ManualRouteNetwork;
   pipeSystem: PipeSystem;
   route: TechnicalRouteTransitionRoute;
@@ -94,6 +102,8 @@ export function resolveTechnicalRouteTransitions(params: {
     params.includeBranchTransitions ??
     params.enableBranchTransitionPreview ??
     false;
+  const includeCompoundTurnTransitions =
+    params.includeCompoundTurnTransitions ?? false;
   const transitions =
     params.decisions === undefined
       ? params.transitions
@@ -128,25 +138,28 @@ export function resolveTechnicalRouteTransitions(params: {
 
     seenTransitionIds.add(crossing.transition.id);
 
-    const contribution = createTransitionContribution({
+    const nextContributions = createTransitionContributions({
       crossing,
       diameterBySegmentId: params.diameterBySegmentId,
       equipment: params.equipment,
       includeBranchTransitions,
+      includeCompoundTurnTransitions,
       network: params.network,
       pipeSystem: params.pipeSystem,
       routeId: params.route.id,
     });
 
-    if (
-      contribution.reason &&
-      (contribution.status === "unresolved" ||
-        contribution.status === "unsupported")
-    ) {
-      addUniqueReason(reasons, contribution.reason);
-    }
+    for (const contribution of nextContributions) {
+      if (
+        contribution.reason &&
+        (contribution.status === "unresolved" ||
+          contribution.status === "unsupported")
+      ) {
+        addUniqueReason(reasons, contribution.reason);
+      }
 
-    contributions.push(contribution);
+      contributions.push(contribution);
+    }
   }
 
   if (params.route.status !== "resolved" || params.route.physicalLengthMeters === null) {
@@ -173,6 +186,10 @@ export function resolveTechnicalRouteTransitions(params: {
     status === "resolved"
       ? sumTransitionContributions(contributions, ["branch_transition"])
       : null;
+  const compoundTransitionEquivalentLengthMeters =
+    status === "resolved"
+      ? sumTransitionContributions(contributions, ["compound_turn_transition"])
+      : null;
   const projectedSizingLengthMeters =
     status === "resolved"
       ? calculateProjectedSizingLengthWithTransitions({
@@ -185,6 +202,7 @@ export function resolveTechnicalRouteTransitions(params: {
 
   return {
     branchTransitionEquivalentLengthMeters,
+    compoundTransitionEquivalentLengthMeters,
     contributions,
     duplicateTransitionIds: [...new Set(duplicateTransitionIds)].sort(),
     equivalentLengthMeters,
@@ -310,7 +328,7 @@ function routeUsesRequiredDiameterChange(params: {
   return diameterKey(upstreamDiameter) !== diameterKey(downstreamDiameter);
 }
 
-function createTransitionContribution(params: {
+function createTransitionContributions(params: {
   crossing: {
     downstreamSegmentId: string;
     order: number;
@@ -320,10 +338,11 @@ function createTransitionContribution(params: {
   diameterBySegmentId: DiameterBySegmentId | undefined;
   equipment: WorkbenchEquipment[] | undefined;
   includeBranchTransitions: boolean;
+  includeCompoundTurnTransitions: boolean;
   network: ManualRouteNetwork | undefined;
   pipeSystem: PipeSystem;
   routeId: string;
-}): TechnicalRouteTransitionContribution {
+}): TechnicalRouteTransitionContribution[] {
   const transition = params.crossing.transition;
   const upstreamSegmentId =
     transition.upstreamSegmentId ?? params.crossing.upstreamSegmentId;
@@ -345,54 +364,56 @@ function createTransitionContribution(params: {
   });
 
   if (transition.state === "not_required") {
-    return {
+    return [{
       ...base,
       equivalentLengthMeters: 0,
       reason: "Transicion inactiva: los diametros actuales son iguales.",
       source: "not_required",
       status: "inactive",
-    };
+    }];
   }
 
   if (transition.state === "unresolved") {
-    return unresolvedContribution({
+    return [unresolvedContribution({
       ...base,
       reason: transition.reason,
       source: "unconfirmed",
-    });
+    })];
   }
 
   if (transition.state === "unsupported") {
-    return unsupportedContribution({
+    return [unsupportedContribution({
       ...base,
       reason: transition.reason,
       source: "unconfirmed",
-    });
+    })];
   }
 
   if (
     transition.state === "rejected" ||
     transition.decision?.status === "rejected"
   ) {
-    return unresolvedContribution({
+    return [unresolvedContribution({
       ...base,
       reason:
         "Transicion de diametro rechazada pero aun requerida por los diametros actuales.",
       source: "rejected",
-    });
+    })];
   }
 
   if (transition.kind === "compound_turn_transition") {
-    return unresolvedContribution({
-      ...base,
-      reason:
-        "Codo con cambio de diametro pendiente de modelado tecnico compuesto.",
-      source: "unconfirmed",
+    return createCompoundTurnTransitionContributions({
+      base,
+      diameterBySegmentId: params.diameterBySegmentId,
+      includeCompoundTurnTransitions: params.includeCompoundTurnTransitions,
+      network: params.network,
+      pipeSystem: params.pipeSystem,
+      transition,
     });
   }
 
   if (transition.kind === "branch_transition") {
-    return createBranchTransitionContribution({
+    return [createBranchTransitionContribution({
       base,
       diameterBySegmentId: params.diameterBySegmentId,
       downstreamSegmentId,
@@ -403,43 +424,43 @@ function createTransitionContribution(params: {
       transition,
       upstreamDiameter,
       upstreamSegmentId,
-    });
+    })];
   }
 
   if (transition.kind !== "simple_reduction") {
-    return unsupportedContribution({
+    return [unsupportedContribution({
       ...base,
       reason:
         "Solo las reducciones simples colineales se resuelven en 09C2A.",
       source: "unconfirmed",
-    });
+    })];
   }
 
   if (transition.decision?.status !== "confirmed") {
-    return unresolvedContribution({
+    return [unresolvedContribution({
       ...base,
       reason:
         "Transicion activa sin familia profesional confirmada; no se asume perdida cero.",
       source: "unconfirmed",
-    });
+    })];
   }
 
   if (!transition.decision.catalogFamilyId) {
-    return unresolvedContribution({
+    return [unresolvedContribution({
       ...base,
       reason: "La decision confirmada no contiene familia SIGAS.",
       source: "unconfirmed",
-    });
+    })];
   }
 
   if (!upstreamDiameter || !downstreamDiameter) {
-    return unresolvedContribution({
+    return [unresolvedContribution({
       ...base,
       catalogFamilyId: transition.decision.catalogFamilyId,
       reason:
         "Faltan diametros actuales para resolver la transicion confirmada.",
       source: "pipe_system",
-    });
+    })];
   }
 
   const equivalentLengthResolution =
@@ -460,17 +481,17 @@ function createTransitionContribution(params: {
     });
 
   if (equivalentLengthResolution.status !== "resolved") {
-    return {
+    return [{
       ...base,
       catalogFamilyId: transition.decision.catalogFamilyId,
       equivalentLengthResolution,
       reason: equivalentLengthResolution.reason,
       source: "pipe_system",
       status: equivalentLengthResolution.status,
-    };
+    }];
   }
 
-  return {
+  return [{
     ...base,
     catalogCode: equivalentLengthResolution.value.catalogCode,
     catalogFamilyId: equivalentLengthResolution.value.catalogFamilyId,
@@ -480,7 +501,7 @@ function createTransitionContribution(params: {
     source: "pipe_system",
     status: "resolved",
     variant: equivalentLengthResolution.value.variant,
-  };
+  }];
 }
 
 function createBaseContribution(params: {
@@ -509,6 +530,92 @@ function createBaseContribution(params: {
     upstreamDiameter: params.upstreamDiameter,
     upstreamSegmentId: params.upstreamSegmentId,
     variant: null,
+  };
+}
+
+function createCompoundTurnTransitionContributions(params: {
+  base: TechnicalRouteTransitionContribution;
+  diameterBySegmentId: DiameterBySegmentId | undefined;
+  includeCompoundTurnTransitions: boolean;
+  network: ManualRouteNetwork | undefined;
+  pipeSystem: PipeSystem;
+  transition: DiameterTransitionProposal;
+}): TechnicalRouteTransitionContribution[] {
+  if (!params.includeCompoundTurnTransitions) {
+    return [
+      unresolvedContribution({
+        ...params.base,
+        reason:
+          "Codo con cambio de diametro pendiente de modelado tecnico compuesto.",
+        source: "unconfirmed",
+      }),
+    ];
+  }
+
+  if (!params.network) {
+    return [
+      unresolvedContribution({
+        ...params.base,
+        reason:
+          "Falta red de recorrido para identificar el codo confirmado del compound.",
+        source: "unconfirmed",
+      }),
+    ];
+  }
+
+  const preview = resolveCompoundTurnTransitionPreview({
+    diameterBySegmentId: params.diameterBySegmentId,
+    directCandidates: [],
+    network: params.network,
+    pipeSystem: params.pipeSystem,
+    proposal: params.transition,
+  });
+
+  if (preview.contributions.length === 0) {
+    return [
+      unresolvedContribution({
+        ...params.base,
+        reason:
+          preview.reason ??
+          "No se pudo resolver la composicion codo + reduccion.",
+        source: "unconfirmed",
+      }),
+    ];
+  }
+
+  return preview.contributions.map((contribution) =>
+    compoundPreviewContributionToRouteContribution({
+      base: params.base,
+      contribution,
+    }),
+  );
+}
+
+function compoundPreviewContributionToRouteContribution(params: {
+  base: TechnicalRouteTransitionContribution;
+  contribution: CompoundTurnTransitionContribution;
+}): TechnicalRouteTransitionContribution {
+  const status =
+    params.contribution.status === "needs_review"
+      ? "unresolved"
+      : params.contribution.status;
+  const source =
+    params.contribution.status === "resolved" ||
+    params.contribution.source === "confirmed_elbow" ||
+    params.contribution.source === "confirmed_reduction"
+      ? "pipe_system"
+      : "unconfirmed";
+
+  return {
+    ...params.base,
+    catalogCode: params.contribution.catalogCode,
+    catalogFamilyId: params.contribution.catalogFamilyId,
+    compoundComponent: params.contribution.role,
+    equivalentLengthMeters: params.contribution.equivalentLengthMeters,
+    reason: params.contribution.reason,
+    source,
+    status,
+    variantLabel: params.contribution.variantLabel,
   };
 }
 

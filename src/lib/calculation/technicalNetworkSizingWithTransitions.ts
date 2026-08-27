@@ -22,7 +22,11 @@ import {
   type TechnicalRouteTransitionResolution,
 } from "@/lib/calculation/technicalRouteTransitions";
 import type { DemandUnit, WorkbenchEquipment } from "@/lib/equipment/types";
-import type { ManualRouteNetwork, RouteSegment } from "@/lib/routing/types";
+import type {
+  ManualRouteNetwork,
+  RouteSegment,
+  RouteSegmentAccessory,
+} from "@/lib/routing/types";
 import type {
   TechnicalNetworkSizingResult,
   TechnicalRoute,
@@ -82,6 +86,7 @@ export type TechnicalTransitionAwareNetworkSizingSegmentResult = {
   finalDiameter: PipeDiameterReference | null;
   governingRouteAccessoryEquivalentLengthMeters: number | null;
   governingRouteBranchTransitionEquivalentLengthMeters: number | null;
+  governingRouteCompoundTransitionEquivalentLengthMeters: number | null;
   governingRouteId: string | null;
   governingRoutePhysicalLengthMeters: number | null;
   governingRouteSimpleTransitionEquivalentLengthMeters: number | null;
@@ -636,16 +641,22 @@ function evaluateAssignmentWithCatalog(params: {
     params.assignment,
     params.sortedSegments,
   );
-  const routeAccessoryResolutions = createRouteAccessoryResolutions({
-    assignment: params.assignment,
-    params: params.params,
-    sortedSegments: params.sortedSegments,
-  });
   const transitions = detectDiameterTransitionProposals({
     decisions: params.decisions ?? [],
     diameterBySegmentId: params.assignment,
     equipment: params.equipment,
     network: params.network,
+  });
+  const compoundTurnAccessoryExclusionKeys =
+    createCompoundTurnAccessoryExclusionKeys({
+      network: params.network,
+      transitions,
+    });
+  const routeAccessoryResolutions = createRouteAccessoryResolutions({
+    assignment: params.assignment,
+    excludedAccessoryKeys: compoundTurnAccessoryExclusionKeys,
+    params: params.params,
+    sortedSegments: params.sortedSegments,
   });
   const routeTransitionResolutions = createRouteTransitionResolutions({
     assignment: params.assignment,
@@ -686,6 +697,7 @@ function evaluateAssignmentWithCatalog(params: {
 
 function createRouteAccessoryResolutions(params: {
   assignment: Assignment;
+  excludedAccessoryKeys?: Iterable<string>;
   params: {
     pipeContextBySegmentId?: Record<string, PipeSegmentPipeContext | undefined>;
     pipeSystem: PipeSystem;
@@ -702,6 +714,7 @@ function createRouteAccessoryResolutions(params: {
       route.id,
       resolveTechnicalRouteAccessories({
         diameterBySegmentId: params.assignment,
+        excludedAccessoryKeys: params.excludedAccessoryKeys,
         pipeContextBySegmentId: params.params.pipeContextBySegmentId,
         pipeSystem: params.params.pipeSystem,
         route,
@@ -733,6 +746,7 @@ function createRouteTransitionResolutions(params: {
           params.routeAccessoryResolutions[route.id]
             ?.governingRouteAccessoryEquivalentLengthMeters ?? null,
         includeBranchTransitions: true,
+        includeCompoundTurnTransitions: true,
         network: params.network,
         pipeSystem: params.params.pipeSystem,
         route,
@@ -740,6 +754,65 @@ function createRouteTransitionResolutions(params: {
       }),
     ]),
   );
+}
+
+function createCompoundTurnAccessoryExclusionKeys(params: {
+  network: ManualRouteNetwork;
+  transitions: DiameterTransitionProposal[];
+}) {
+  const keys = new Set<string>();
+
+  for (const transition of params.transitions) {
+    if (transition.kind !== "compound_turn_transition") {
+      continue;
+    }
+
+    for (const candidate of confirmedSigasElbowsAtCompoundTurn({
+      network: params.network,
+      transition,
+    })) {
+      keys.add(accessoryKey(candidate.segmentId, candidate.accessory.id));
+    }
+  }
+
+  return keys;
+}
+
+function confirmedSigasElbowsAtCompoundTurn(params: {
+  network: ManualRouteNetwork;
+  transition: DiameterTransitionProposal;
+}) {
+  const incidentSegmentIds = new Set(
+    params.transition.incidentSegments.map((segment) => segment.segmentId),
+  );
+
+  return params.network.segments
+    .filter((segment) => incidentSegmentIds.has(segment.id))
+    .flatMap((segment) =>
+      (segment.accessories ?? [])
+        .filter(isConfirmedSigasElbow)
+        .map((accessory) => ({
+          accessory,
+          segmentId: segment.id,
+        })),
+    )
+    .sort(
+      (first, second) =>
+        first.segmentId.localeCompare(second.segmentId) ||
+        first.accessory.id.localeCompare(second.accessory.id),
+    );
+}
+
+function isConfirmedSigasElbow(accessory: RouteSegmentAccessory) {
+  return (
+    accessory.type === "elbow" &&
+    accessory.equivalentLengthSource === "pipe_system" &&
+    Boolean(accessory.catalogFamilyId ?? accessory.catalogCode)
+  );
+}
+
+function accessoryKey(segmentId: string, accessoryId: string) {
+  return `${segmentId}:${accessoryId}`;
 }
 
 function evaluateSegmentAssignment(params: {
@@ -1090,6 +1163,9 @@ function createBaseSegmentSizingResult(params: {
     governingRouteBranchTransitionEquivalentLengthMeters:
       params.routeTransitionResolution?.branchTransitionEquivalentLengthMeters ??
       null,
+    governingRouteCompoundTransitionEquivalentLengthMeters:
+      params.routeTransitionResolution
+        ?.compoundTransitionEquivalentLengthMeters ?? null,
     governingRouteId: params.governingRoute?.routeId ?? null,
     governingRoutePhysicalLengthMeters:
       params.governingRoute?.physicalLengthMeters ?? null,

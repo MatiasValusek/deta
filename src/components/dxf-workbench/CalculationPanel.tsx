@@ -504,7 +504,10 @@ function DiameterTransitionPreview({
 
   if (proposal.kind === "compound_turn_transition" && review?.compoundPreview) {
     return (
-      <CompoundTurnTransitionPreview preview={review.compoundPreview} />
+      <CompoundTurnTransitionPreview
+        isTransitionAwareResolved={isTransitionAwareResolved}
+        preview={review.compoundPreview}
+      />
     );
   }
 
@@ -562,14 +565,21 @@ function DiameterTransitionPreview({
 }
 
 function CompoundTurnTransitionPreview({
+  isTransitionAwareResolved,
   preview,
 }: {
+  isTransitionAwareResolved: boolean;
   preview: CompoundTurnTransitionPreviewModel;
 }) {
+  const participatesInSolver =
+    isTransitionAwareResolved && preview.status === "resolved";
+
   return (
     <div className="mt-1 space-y-0.5 text-[10px] text-[var(--muted)]">
       <div className="font-medium text-[#1d4ed8]">
-        Preview: todavia no participa del solver global.
+        {participatesInSolver
+          ? "Forma parte de la longitud final del solver global."
+          : "Preview: todavia no participa del solver global."}
       </div>
       <div>Solucion tecnica: {preview.solutionLabel}</div>
       <div>{compoundDirectCandidateLabel(preview)}</div>
@@ -590,7 +600,7 @@ function CompoundTurnTransitionPreview({
         </ul>
       ) : null}
       <div>
-        Total preview:{" "}
+        {participatesInSolver ? "Total compound" : "Total preview"}:{" "}
         {formatCalculationMeters(preview.totalEquivalentLengthMeters, "Pendiente")}
       </div>
       <div>Estado: {compoundConfirmationStateLabel(preview.confirmationState)}</div>
@@ -1520,6 +1530,13 @@ function TransitionAwareNetworkSegmentSizing({
             "Pendiente",
           )}
         </dd>
+        <dt>Compounds</dt>
+        <dd className="text-right">
+          {formatCalculationMeters(
+            sizing.governingRouteCompoundTransitionEquivalentLengthMeters,
+            "Pendiente",
+          )}
+        </dd>
         <dt>Longitud final dimensionado</dt>
         <dd className="text-right">
           {formatCalculationMeters(
@@ -1586,6 +1603,17 @@ function RouteTransitionPreviewDetail({
         <dd className="text-right">
           {formatCalculationMeters(
             resolution?.simpleTransitionEquivalentLengthMeters ?? null,
+            "Pendiente",
+          )}
+        </dd>
+        <dt>
+          {isTransitionAwareResolved
+            ? "Compounds"
+            : "Compounds preview"}
+        </dt>
+        <dd className="text-right">
+          {formatCalculationMeters(
+            resolution?.compoundTransitionEquivalentLengthMeters ?? null,
             "Pendiente",
           )}
         </dd>
@@ -1937,9 +1965,15 @@ function formatTransitionContribution(
       ? "0 m"
       : formatCalculationMeters(contribution.equivalentLengthMeters, "Pendiente");
   const variant =
+    contribution.variantLabel ??
     contribution.variant?.label ??
     contribution.catalogFamilyId ??
     diameterTransitionKindLabel(contribution.transitionKind);
+  const compoundComponent =
+    contribution.transitionKind === "compound_turn_transition" &&
+    contribution.compoundComponent
+      ? `${compoundContributionRoleLabel(contribution.compoundComponent)} - `
+      : "";
   const traversal =
     contribution.transitionKind === "branch_transition"
       ? `${transitionTraversalKindLabel(contribution.traversalKind)} - `
@@ -1949,7 +1983,7 @@ function formatTransitionContribution(
     contribution.upstreamDiameter,
   )} -> ${formatCompactDiameterReference(
     contribution.downstreamDiameter,
-  )} - ${traversal}${variant} - ${length}`;
+  )} - ${compoundComponent}${traversal}${variant} - ${length}`;
 }
 
 function transitionTraversalKindLabel(

@@ -71,6 +71,7 @@ export type RouteAccessorySegmentContextBySegmentId =
 
 export function resolveTechnicalRouteAccessories(params: {
   diameterBySegmentId?: DiameterBySegmentId;
+  excludedAccessoryKeys?: Iterable<string>;
   pipeContextBySegmentId?: PipeContextBySegmentId;
   pipeSystem: PipeSystem;
   route: TechnicalRouteAccessoryRoute;
@@ -82,6 +83,7 @@ export function resolveTechnicalRouteAccessories(params: {
   );
   const duplicateAccessoryKeys: string[] = [];
   const contributions: TechnicalRouteAccessoryContribution[] = [];
+  const excludedAccessoryKeys = new Set(params.excludedAccessoryKeys ?? []);
   const reasons: string[] = [];
   const seenAccessoryKeys = new Set<string>();
 
@@ -95,6 +97,10 @@ export function resolveTechnicalRouteAccessories(params: {
 
     for (const accessory of sortRouteAccessories(segment.accessories ?? [])) {
       const accessoryKey = `${segment.id}:${accessory.id}`;
+
+      if (excludedAccessoryKeys.has(accessoryKey)) {
+        continue;
+      }
 
       if (seenAccessoryKeys.has(accessoryKey)) {
         duplicateAccessoryKeys.push(accessoryKey);

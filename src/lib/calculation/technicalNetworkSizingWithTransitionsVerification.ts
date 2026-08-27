@@ -29,6 +29,9 @@ import {
   solveTechnicalNetworkSizingWithTransitions,
   type TechnicalTransitionAwareNetworkSizingResult,
 } from "./technicalNetworkSizingWithTransitions";
+import type {
+  TechnicalRouteTransitionResolution,
+} from "./technicalRouteTransitions";
 
 export type TechnicalTransitionAwareNetworkSizingVerificationResult = {
   name: string;
@@ -40,6 +43,7 @@ type RequiredDiameterRule =
   | ((context: PipeSegmentSizingContext) => string);
 
 type TestPipeSystemOptions = {
+  accessoryEquivalentByFamily?: Record<string, Record<string, number>>;
   diameters?: PipeDiameterReference[];
   maxLengthMeters?: number;
   requiredBySegmentId?: Record<string, RequiredDiameterRule>;
@@ -61,6 +65,7 @@ const TEST_DIAMETERS: PipeDiameterReference[] = [
 ];
 const DEFAULT_TRANSITION_FAMILY = "test-reduction";
 const BRANCH_TRANSITION_FAMILY = "test-reduced-tee";
+const COMPOUND_ELBOW_FAMILY = "test-elbow-90";
 const EPSILON = 0.000001;
 
 export function runTechnicalTransitionAwareNetworkSizingVerifications() {
@@ -771,6 +776,381 @@ export function runTechnicalTransitionAwareNetworkSizingVerifications() {
     );
   });
 
+  verify(results, "Caso AG - compound confirmado suma codo y reduccion", () => {
+    const solved = solveCompoundWithConfirmedReduction({
+      pipeSystem: compoundPipeSystem(),
+    });
+    const sizing = assertTransitionAwareSizing(solved.result);
+    const transition = routeTransition(sizing, "technical-route:appliance");
+
+    assertEqual(sizing.status, "resolved");
+    assertClose(transition.compoundTransitionEquivalentLengthMeters, 3);
+    assertClose(compoundContribution(transition, "turn").equivalentLengthMeters, 1);
+    assertClose(
+      compoundContribution(transition, "diameter_change").equivalentLengthMeters,
+      2,
+    );
+    assertClose(segmentSizing(sizing, "s1").transitionAwareSizingLengthMeters, 23);
+  });
+
+  verify(results, "Caso AH - compound no duplica codo normal", () => {
+    const solved = solveCompoundWithConfirmedReduction({
+      pipeSystem: compoundPipeSystem(),
+    });
+    const sizing = assertTransitionAwareSizing(solved.result);
+    const accessoryResolution = routeAccessory(
+      sizing,
+      "technical-route:appliance",
+    );
+
+    assertEqual(accessoryResolution.contributions.length, 0);
+    assertClose(
+      accessoryResolution.governingRouteAccessoryEquivalentLengthMeters,
+      0,
+    );
+    assertClose(
+      routeTransition(sizing, "technical-route:appliance").equivalentLengthMeters,
+      3,
+    );
+  });
+
+  verify(results, "Caso AI - compound no duplica reduccion", () => {
+    const solved = solveCompoundWithConfirmedReduction({
+      pipeSystem: compoundPipeSystem(),
+    });
+    const transition = routeTransition(
+      assertTransitionAwareSizing(solved.result),
+      "technical-route:appliance",
+    );
+
+    assertEqual(
+      transition.contributions.filter(
+        (item) =>
+          item.transitionKind === "compound_turn_transition" &&
+          item.compoundComponent === "diameter_change",
+      ).length,
+      1,
+    );
+    assertClose(transition.simpleTransitionEquivalentLengthMeters, 0);
+    assertClose(transition.equivalentLengthMeters, 3);
+  });
+
+  verify(results, "Caso AJ - compound sin codo confirmado queda incomplete", () => {
+    const fixture = createCompoundTurnFixture({
+      includeElbow: false,
+      pipeSystem: compoundPipeSystem(),
+    });
+    const decisions = confirmedDecisionsForFixture(
+      fixture,
+      DEFAULT_TRANSITION_FAMILY,
+    );
+    const evaluation = evaluateFixtureAssignment(
+      fixture,
+      { s1: "test-32", s2: "test-25" },
+      decisions,
+    );
+
+    assertEqual(evaluation.status, "incomplete");
+    assertIssue(evaluation, "compound_transition_required");
+  });
+
+  verify(results, "Caso AK - compound sin reduccion confirmada queda incomplete", () => {
+    const fixture = createCompoundTurnFixture({
+      includeElbow: true,
+      pipeSystem: compoundPipeSystem(),
+    });
+    const evaluation = evaluateFixtureAssignment(fixture, {
+      s1: "test-32",
+      s2: "test-25",
+    });
+    const transition = routeTransitionFromEvaluation(evaluation);
+
+    assertEqual(evaluation.status, "incomplete");
+    assertIssue(evaluation, "compound_transition_required");
+    assertClose(compoundContribution(transition, "turn").equivalentLengthMeters, 1);
+    assertEqual(
+      compoundContribution(transition, "diameter_change").equivalentLengthMeters,
+      null,
+    );
+  });
+
+  verify(results, "Caso AL - compound recalcula reduccion al cambiar diametro", () => {
+    const fixture = createCompoundTurnFixture({
+      includeElbow: true,
+      pipeSystem: compoundPipeSystem({
+        transitionPairs: {
+          "32-25": 2,
+          "40-25": 4,
+        },
+      }),
+    });
+    const decisions = confirmedDecisionsForFixture(
+      fixture,
+      DEFAULT_TRANSITION_FAMILY,
+    );
+    const initial = evaluateFixtureAssignment(
+      fixture,
+      { s1: "test-32", s2: "test-25" },
+      decisions,
+    );
+    const changed = evaluateFixtureAssignment(
+      fixture,
+      { s1: "test-40", s2: "test-25" },
+      decisions,
+    );
+    const initialReduction = compoundContribution(
+      routeTransitionFromEvaluation(initial),
+      "diameter_change",
+    );
+    const changedReduction = compoundContribution(
+      routeTransitionFromEvaluation(changed),
+      "diameter_change",
+    );
+
+    assertClose(initialReduction.equivalentLengthMeters, 2);
+    assertClose(changedReduction.equivalentLengthMeters, 4);
+    assertEqual(initialReduction.variantLabel, "test-reduction 32 a 25");
+    assertEqual(changedReduction.variantLabel, "test-reduction 40 a 25");
+  });
+
+  verify(results, "Caso AM - diametros iguales eliminan reduccion y conservan codo", () => {
+    const fixture = createCompoundTurnFixture({
+      includeElbow: true,
+      pipeSystem: compoundPipeSystem(),
+    });
+    const decisions = confirmedDecisionsForFixture(
+      fixture,
+      DEFAULT_TRANSITION_FAMILY,
+    );
+    const evaluation = evaluateFixtureAssignment(
+      fixture,
+      { s1: "test-32", s2: "test-32" },
+      decisions,
+    );
+    const transition = routeTransitionFromEvaluation(evaluation);
+
+    assertEqual(evaluation.status, "resolved");
+    assertEqual(evaluation.transitions[0]?.kind, "not_required");
+    assertClose(
+      evaluationRouteAccessory(evaluation, "technical-route:appliance")
+        .governingRouteAccessoryEquivalentLengthMeters,
+      1,
+    );
+    assertClose(transition.compoundTransitionEquivalentLengthMeters, 0);
+    assertClose(transition.equivalentLengthMeters, 0);
+    assertClose(
+      segmentSizingFromEvaluation(evaluation, "s1")
+        .transitionAwareSizingLengthMeters,
+      21,
+    );
+  });
+
+  verify(results, "Caso AN - sin giro conserva reduccion si aplica", () => {
+    const solved = solveLineWithConfirmedTransitions({
+      pipeSystem: createTestPipeSystem({
+        requiredBySegmentId: {
+          s1: "test-32",
+          s2: "test-25",
+        },
+        transitionEquivalentByFamily: familyPairs({ "32-25": 2 }),
+      }),
+    });
+    const sizing = assertTransitionAwareSizing(solved.result);
+    const transition = routeTransition(sizing, "technical-route:appliance");
+
+    assertEqual(sizing.status, "resolved");
+    assertEqual(sizing.transitions[0]?.kind, "simple_reduction");
+    assertClose(transition.simpleTransitionEquivalentLengthMeters, 2);
+    assertClose(transition.compoundTransitionEquivalentLengthMeters, 0);
+  });
+
+  verify(results, "Caso AO - variante compound incompatible no es factible", () => {
+    const fixture = createCompoundTurnFixture({
+      includeElbow: true,
+      pipeSystem: compoundPipeSystem({
+        transitionPairs: {
+          "32-25": 2,
+        },
+      }),
+    });
+    const decisions = confirmedDecisionsForFixture(
+      fixture,
+      DEFAULT_TRANSITION_FAMILY,
+    );
+    const evaluation = evaluateFixtureAssignment(
+      fixture,
+      { s1: "test-40", s2: "test-25" },
+      decisions,
+    );
+
+    assertEqual(evaluation.feasible, false);
+    assertIssue(evaluation, "transition_family_incompatible");
+  });
+
+  verify(results, "Caso AP - compound puede forzar aumento de diametro", () => {
+    const solved = solveCompoundTailWithConfirmedReduction({
+      pipeSystem: compoundPipeSystem({
+        requiredBySegmentId: {
+          s1: (context) =>
+            (context.calculationLengthMeters ?? 0) > 32
+              ? "test-40"
+              : "test-32",
+          s2: "test-25",
+          s3: "test-25",
+        },
+        transitionPairs: {
+          "32-25": 2,
+          "40-25": 2,
+        },
+      }),
+    });
+    const sizing = assertTransitionAwareSizing(solved.result);
+
+    assertEqual(sizing.status, "resolved");
+    assertEqual(sizing.additionalDiameterStepCost, 1);
+    assertSegmentDiameter(sizing, "s1", "test-40");
+    assertSegmentDiameter(sizing, "s2", "test-25");
+    assertSegmentDiameter(sizing, "s3", "test-25");
+    assertClose(
+      compoundContribution(
+        routeTransition(sizing, "technical-route:appliance"),
+        "diameter_change",
+      ).equivalentLengthMeters,
+      2,
+    );
+  });
+
+  verify(results, "Caso AQ - aumento puede hacer desaparecer reduccion", () => {
+    const solved = solveCompoundWithConfirmedReduction({
+      pipeSystem: compoundPipeSystem({
+        requiredBySegmentId: {
+          s1: "test-32",
+          s2: (context) =>
+            (context.calculationLengthMeters ?? 0) > 22
+              ? "test-32"
+              : "test-25",
+        },
+        transitionPairs: {
+          "32-25": 2,
+        },
+      }),
+    });
+    const sizing = assertTransitionAwareSizing(solved.result);
+    const transition = routeTransition(sizing, "technical-route:appliance");
+
+    assertEqual(sizing.status, "resolved");
+    assertEqual(sizing.additionalDiameterStepCost, 1);
+    assertEqual(sizing.transitions[0]?.kind, "not_required");
+    assertSegmentDiameter(sizing, "s1", "test-32");
+    assertSegmentDiameter(sizing, "s2", "test-32");
+    assertClose(
+      routeAccessory(sizing, "technical-route:appliance")
+        .governingRouteAccessoryEquivalentLengthMeters,
+      1,
+    );
+    assertClose(transition.compoundTransitionEquivalentLengthMeters, 0);
+    assertClose(segmentSizing(sizing, "s1").transitionAwareSizingLengthMeters, 21);
+  });
+
+  verify(results, "Caso AR - determinismo con compound", () => {
+    const first = solveCompoundWithConfirmedReduction({
+      pipeSystem: compoundPipeSystem(),
+    });
+    const second = solveCompoundWithConfirmedReduction({
+      pipeSystem: compoundPipeSystem(),
+    });
+
+    assertEqual(serializeSizing(first.result), serializeSizing(second.result));
+  });
+
+  verify(results, "Caso AS - validacion final con compound", () => {
+    const sizing = assertTransitionAwareSizing(
+      solveCompoundTailWithConfirmedReduction({
+        pipeSystem: compoundPipeSystem({
+          requiredBySegmentId: {
+            s1: (context) =>
+              (context.calculationLengthMeters ?? 0) > 32
+                ? "test-40"
+                : "test-32",
+            s2: "test-25",
+            s3: "test-25",
+          },
+          transitionPairs: {
+            "32-25": 2,
+            "40-25": 2,
+          },
+        }),
+      }).result,
+    );
+
+    for (const segment of sizing.segments) {
+      assert(
+        diameterRank(segment.finalDiameter) >= diameterRank(segment.requiredDiameter),
+        `El tramo ${segment.segmentId} no cubre su diametro requerido.`,
+      );
+    }
+  });
+
+  verify(results, "Caso AT - brute force parity con compound", () => {
+    const { decisions, fixture, result } = solveCompoundTailWithConfirmedReduction({
+      pipeSystem: compoundPipeSystem({
+        requiredBySegmentId: {
+          s1: (context) =>
+            (context.calculationLengthMeters ?? 0) > 32
+              ? "test-40"
+              : "test-32",
+          s2: "test-25",
+          s3: "test-25",
+        },
+        transitionPairs: {
+          "32-25": 2,
+          "40-25": 2,
+        },
+      }),
+    });
+    const sizing = assertTransitionAwareSizing(result);
+    const bruteForce = enumerateTransitionAwareSizingAssignmentsForVerification({
+      baselineSizing: assertBaselineSizing(fixture.result),
+      decisions,
+      equipment: fixture.equipment,
+      network: fixture.network,
+      pipeSystem: fixture.pipeSystem,
+      routeSegments: fixture.network.segments,
+      routes: fixture.result.technicalRoutes,
+      segments: fixture.result.segments,
+    });
+
+    assertEqual(bruteForce.minimalCost, sizing.additionalDiameterStepCost);
+    assertEqual(
+      JSON.stringify(bruteForce.minimalAssignment),
+      JSON.stringify(sizing.finalDiameterBySegmentId),
+    );
+  });
+
+  verify(results, "Caso AU - sin compounds conserva resultado 09C3B", () => {
+    const fixture = createLineFixture({
+      pipeSystem: createTestPipeSystem({
+        requiredBySegmentId: {
+          s1: "test-25",
+        },
+      }),
+      segmentCount: 1,
+    });
+    const sizing = assertTransitionAwareSizing(fixture.result);
+
+    assertEqual(sizing.status, "resolved");
+    assertEqual(sizing.additionalDiameterStepCost, 0);
+    assertEqual(
+      JSON.stringify(sizing.finalDiameterBySegmentId),
+      JSON.stringify(assertBaselineSizing(fixture.result).finalDiameterBySegmentId),
+    );
+    assertClose(
+      routeTransition(sizing, "technical-route:appliance")
+        .compoundTransitionEquivalentLengthMeters,
+      0,
+    );
+  });
+
   return results;
 }
 
@@ -809,6 +1189,80 @@ function branchIncreasePipeSystem() {
       "40-25:turn_90": 4,
     }),
   });
+}
+
+function compoundPipeSystem(params: {
+  elbowEquivalentByDiameter?: Record<string, number>;
+  requiredBySegmentId?: Record<string, RequiredDiameterRule>;
+  transitionPairs?: Record<string, number>;
+} = {}) {
+  return createTestPipeSystem({
+    accessoryEquivalentByFamily: {
+      [COMPOUND_ELBOW_FAMILY]: params.elbowEquivalentByDiameter ?? {
+        "25": 1,
+        "32": 1,
+        "40": 1,
+        "test-25": 1,
+        "test-32": 1,
+        "test-40": 1,
+      },
+    },
+    requiredBySegmentId: params.requiredBySegmentId ?? {
+      s1: "test-32",
+      s2: "test-25",
+    },
+    transitionEquivalentByFamily: familyPairs(
+      params.transitionPairs ?? {
+        "32-25": 2,
+        "40-25": 2,
+      },
+    ),
+  });
+}
+
+function solveCompoundWithConfirmedReduction(params: {
+  pipeSystem: PipeSystem;
+}) {
+  const fixture = createCompoundTurnFixture({
+    includeElbow: true,
+    pipeSystem: params.pipeSystem,
+  });
+  const decisions = confirmedDecisionsForFixture(
+    fixture,
+    DEFAULT_TRANSITION_FAMILY,
+  );
+  const result = calculateTechnicalTree({
+    diameterTransitionDecisions: decisions,
+    equipment: fixture.equipment,
+    minSegmentLengthSource: 0.000001,
+    network: fixture.network,
+    pipeSystem: params.pipeSystem,
+    scaleMetersPerSourceUnit: 1,
+  });
+
+  return { decisions, fixture, result };
+}
+
+function solveCompoundTailWithConfirmedReduction(params: {
+  pipeSystem: PipeSystem;
+}) {
+  const fixture = createCompoundTurnWithTailFixture({
+    pipeSystem: params.pipeSystem,
+  });
+  const decisions = confirmedDecisionsForFixture(
+    fixture,
+    DEFAULT_TRANSITION_FAMILY,
+  );
+  const result = calculateTechnicalTree({
+    diameterTransitionDecisions: decisions,
+    equipment: fixture.equipment,
+    minSegmentLengthSource: 0.000001,
+    network: fixture.network,
+    pipeSystem: params.pipeSystem,
+    scaleMetersPerSourceUnit: 1,
+  });
+
+  return { decisions, fixture, result };
 }
 
 function solveLineWithConfirmedTransitions(params: {
@@ -926,6 +1380,85 @@ function createTurnFixture(params: { pipeSystem: PipeSystem }) {
       segments: [
         { fromNodeId: "node-meter", id: "s1", toNodeId: "n" },
         { fromNodeId: "n", id: "s2", toNodeId: "node-appliance" },
+      ],
+    },
+    pipeSystem: params.pipeSystem,
+  });
+}
+
+function createCompoundTurnFixture(params: {
+  includeElbow: boolean;
+  pipeSystem: PipeSystem;
+}) {
+  return createFixture({
+    equipment: fixtureEquipment([
+      {
+        demandValue: 1,
+        id: "appliance",
+        name: "Artefacto",
+        x: 10,
+        y: 10,
+      },
+    ]),
+    network: {
+      nodes: [
+        supplyNode(),
+        routeNode("n", 10, 0),
+        {
+          equipmentId: "appliance",
+          id: "node-appliance",
+          kind: "appliance",
+        },
+      ],
+      segments: [
+        {
+          accessories: params.includeElbow
+            ? [compoundElbowAccessory("s1")]
+            : undefined,
+          fromNodeId: "node-meter",
+          id: "s1",
+          toNodeId: "n",
+        },
+        { fromNodeId: "n", id: "s2", toNodeId: "node-appliance" },
+      ],
+    },
+    pipeSystem: params.pipeSystem,
+  });
+}
+
+function createCompoundTurnWithTailFixture(params: {
+  pipeSystem: PipeSystem;
+}) {
+  return createFixture({
+    equipment: fixtureEquipment([
+      {
+        demandValue: 1,
+        id: "appliance",
+        name: "Artefacto",
+        x: 10,
+        y: 20,
+      },
+    ]),
+    network: {
+      nodes: [
+        supplyNode(),
+        routeNode("n1", 10, 0),
+        routeNode("n2", 10, 10),
+        {
+          equipmentId: "appliance",
+          id: "node-appliance",
+          kind: "appliance",
+        },
+      ],
+      segments: [
+        {
+          accessories: [compoundElbowAccessory("s1")],
+          fromNodeId: "node-meter",
+          id: "s1",
+          toNodeId: "n1",
+        },
+        { fromNodeId: "n1", id: "s2", toNodeId: "n2" },
+        { fromNodeId: "n2", id: "s3", toNodeId: "node-appliance" },
       ],
     },
     pipeSystem: params.pipeSystem,
@@ -1141,7 +1674,7 @@ function createTestPipeSystem(options: TestPipeSystemOptions = {}): PipeSystem {
     },
     resolveAccessoryEquivalentLength: (
       context: PipeAccessoryEquivalentLengthContext,
-    ) => resolveTestAccessoryEquivalentLength(context),
+    ) => resolveTestAccessoryEquivalentLength(context, options),
     resolveDiameterTransitionEquivalentLength: (
       context: PipeDiameterTransitionEquivalentLengthContext,
     ) => resolveTestTransitionEquivalentLength(context, options),
@@ -1152,11 +1685,46 @@ function createTestPipeSystem(options: TestPipeSystemOptions = {}): PipeSystem {
 
 function resolveTestAccessoryEquivalentLength(
   context: PipeAccessoryEquivalentLengthContext,
+  options: TestPipeSystemOptions,
 ): PipeSystemResolution<number> {
-  if (!context.accessory.catalogCode) {
+  const familyId =
+    context.accessory.catalogFamilyId ?? context.accessory.catalogCode;
+
+  if (!familyId) {
     return {
       reason: "Accesorio sintetico sin catalogCode.",
       status: "unsupported",
+    };
+  }
+
+  const configuredFamily = options.accessoryEquivalentByFamily?.[familyId];
+
+  if (configuredFamily) {
+    const diameter = context.pipe?.diameter ?? null;
+    const externalDiameter = diameter?.externalDiameterMillimeters;
+    const equivalentLength =
+      (diameter ? configuredFamily[diameter.id] : undefined) ??
+      (externalDiameter !== undefined
+        ? configuredFamily[String(externalDiameter)]
+        : undefined);
+
+    if (equivalentLength === undefined) {
+      return {
+        data: {
+          diameterId: diameter?.id ?? null,
+          externalDiameterMillimeters: externalDiameter ?? null,
+          familyId,
+        },
+        reason:
+          "La familia sintetica de accesorio no posee variante para el diametro actual.",
+        status: "unsupported",
+      };
+    }
+
+    return {
+      explanation: `Accesorio sintetico ${familyId}.`,
+      status: "resolved",
+      value: equivalentLength,
     };
   }
 
@@ -1173,7 +1741,8 @@ function resolveTestTransitionEquivalentLength(
 ): PipeSystemResolution<PipeDiameterTransitionEquivalentLengthResult> {
   if (
     context.transition.kind !== "simple_reduction" &&
-    context.transition.kind !== "branch_transition"
+    context.transition.kind !== "branch_transition" &&
+    context.transition.kind !== "compound_turn_transition"
   ) {
     return {
       reason:
@@ -1341,6 +1910,16 @@ function routeTransition(
   return resolution;
 }
 
+function routeAccessory(
+  sizing: TechnicalTransitionAwareNetworkSizingResult,
+  routeId: string,
+) {
+  const resolution = sizing.routeAccessoryResolutions[routeId];
+
+  assert(resolution, `Falta resolucion de accesorios para ${routeId}.`);
+  return resolution;
+}
+
 function evaluationRouteTransition(
   evaluation: ReturnType<typeof evaluateFixtureAssignment>,
   routeId: string,
@@ -1348,6 +1927,16 @@ function evaluationRouteTransition(
   const resolution = evaluation.routeTransitionResolutions[routeId];
 
   assert(resolution, `Falta resolucion de transiciones para ${routeId}.`);
+  return resolution;
+}
+
+function evaluationRouteAccessory(
+  evaluation: ReturnType<typeof evaluateFixtureAssignment>,
+  routeId: string,
+) {
+  const resolution = evaluation.routeAccessoryResolutions[routeId];
+
+  assert(resolution, `Falta resolucion de accesorios para ${routeId}.`);
   return resolution;
 }
 
@@ -1381,12 +1970,38 @@ function routeTransitionFromEvaluation(
   );
 }
 
+function compoundContribution(
+  resolution: TechnicalRouteTransitionResolution,
+  component: "diameter_change" | "turn",
+) {
+  const contribution =
+    resolution.contributions.find(
+      (item) =>
+        item.transitionKind === "compound_turn_transition" &&
+        item.compoundComponent === component,
+    ) ?? null;
+
+  assert(contribution, `Falta contribucion compound ${component}.`);
+  return contribution;
+}
+
 function segmentSizing(
   sizing: TechnicalTransitionAwareNetworkSizingResult,
   segmentId: string,
 ) {
   const segment =
     sizing.segments.find((item) => item.segmentId === segmentId) ?? null;
+
+  assert(segment, `Falta segmento ${segmentId}.`);
+  return segment;
+}
+
+function segmentSizingFromEvaluation(
+  evaluation: ReturnType<typeof evaluateFixtureAssignment>,
+  segmentId: string,
+) {
+  const segment =
+    evaluation.segments.find((item) => item.segmentId === segmentId) ?? null;
 
   assert(segment, `Falta segmento ${segmentId}.`);
   return segment;
@@ -1489,6 +2104,20 @@ function manualAccessory(
     quantity,
     segmentId: "",
     type: "other",
+  };
+}
+
+function compoundElbowAccessory(segmentId: string): RouteSegmentAccessory {
+  return {
+    catalogCode: COMPOUND_ELBOW_FAMILY,
+    catalogFamilyId: COMPOUND_ELBOW_FAMILY,
+    equivalentLengthMetersPerUnit: null,
+    equivalentLengthSource: "pipe_system",
+    id: "compound-elbow",
+    origin: "automatic_confirmed",
+    quantity: 1,
+    segmentId,
+    type: "elbow",
   };
 }
 
