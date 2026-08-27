@@ -31,6 +31,11 @@ import {
   solveTechnicalNetworkSizingWithTransitions,
   type TechnicalTransitionAwareNetworkSizingResult,
 } from "@/lib/calculation/technicalNetworkSizingWithTransitions";
+import {
+  validateProfessionalDiameterAdoption,
+  type AdoptedDiameterDecision,
+  type ProfessionalDiameterAdoptionResult,
+} from "@/lib/calculation/professionalDiameterAdoption";
 import type { TechnicalRouteAccessoryResolution } from "@/lib/calculation/technicalRouteAccessories";
 import type { DiameterTransitionDecision } from "@/lib/calculation/diameterTransitionProposals";
 import {
@@ -96,7 +101,10 @@ export type TechnicalCalculationIssue = {
     | "mixed_demand_units"
     | "pending_equivalent_length"
     | "pending_diameter_sizing"
-    | "pending_route_sizing_length";
+    | "pending_route_sizing_length"
+    | "pending_adopted_diameter_validation"
+    | "incompatible_adopted_diameter"
+    | "unresolved_adopted_diameter";
   equipmentId?: string;
   message: string;
   nodeId?: string;
@@ -189,6 +197,7 @@ export type TechnicalCalculationResult = {
   networkSizing: TechnicalNetworkSizingResult | null;
   nodeLabels: Record<string, string>;
   pipeSystem: PipeSystemIdentity;
+  professionalDiameterAdoption: ProfessionalDiameterAdoptionResult | null;
   projectGas: ProjectGasConfig | null;
   rootNodeId: string | null;
   routeAccessoryResolutions: Record<string, TechnicalRouteAccessoryResolution>;
@@ -220,6 +229,7 @@ type OrientedSegment = {
 const ROUTE_LENGTH_EPSILON = 0.000001;
 
 export function calculateTechnicalTree(params: {
+  adoptedDiameterDecisions?: AdoptedDiameterDecision[];
   diameterTransitionDecisions?: DiameterTransitionDecision[];
   equipment: WorkbenchEquipment[];
   minSegmentLengthSource: number;
@@ -248,6 +258,7 @@ export function calculateTechnicalTree(params: {
       networkSizing: null,
       nodeLabels: createNodeLabels(params.network, params.equipment, []),
       pipeSystem: pipeSystem.identity,
+      professionalDiameterAdoption: null,
       projectGas,
       rootNodeId: null,
       routeAccessoryResolutions: {},
@@ -278,6 +289,7 @@ export function calculateTechnicalTree(params: {
       networkSizing: null,
       nodeLabels: createNodeLabels(params.network, params.equipment, []),
       pipeSystem: pipeSystem.identity,
+      professionalDiameterAdoption: null,
       projectGas,
       rootNodeId: null,
       routeAccessoryResolutions: {},
@@ -303,6 +315,7 @@ export function calculateTechnicalTree(params: {
       networkSizing: null,
       nodeLabels: createNodeLabels(params.network, params.equipment, []),
       pipeSystem: pipeSystem.identity,
+      professionalDiameterAdoption: null,
       projectGas,
       rootNodeId: supplyNode.id,
       routeAccessoryResolutions: {},
@@ -382,6 +395,18 @@ export function calculateTechnicalTree(params: {
     routes: technicalRoutes,
     segments: technicalSegments,
   });
+  const professionalDiameterAdoption = validateProfessionalDiameterAdoption({
+    calculatedSizing: transitionAwareNetworkSizing,
+    decisions: params.adoptedDiameterDecisions ?? [],
+    diameterTransitionDecisions: params.diameterTransitionDecisions ?? [],
+    equipment: params.equipment,
+    network: params.network,
+    pipeContextBySegmentId: params.pipeContextBySegmentId,
+    pipeSystem,
+    routeSegments: params.network.segments,
+    routes: technicalRoutes,
+    segments: technicalSegments,
+  });
   const networkSizingSegmentById = new Map(
     networkSizing.segments.map((segment) => [segment.segmentId, segment]),
   );
@@ -447,6 +472,12 @@ export function calculateTechnicalTree(params: {
     }
   }
 
+  if ((params.adoptedDiameterDecisions?.length ?? 0) > 0) {
+    incompleteIssues.push(
+      ...createProfessionalDiameterAdoptionIssues(professionalDiameterAdoption),
+    );
+  }
+
   if (params.scaleMetersPerSourceUnit === null) {
     incompleteIssues.push({
       code: "missing_scale",
@@ -468,6 +499,7 @@ export function calculateTechnicalTree(params: {
     issues: dedupeIssues(incompleteIssues),
     nodeLabels,
     pipeSystem: pipeSystem.identity,
+    professionalDiameterAdoption,
     projectGas,
     rootNodeId: supplyNode.id,
     routeAccessoryResolutions,
@@ -1935,6 +1967,47 @@ function createTotals(params: {
     physicalLengthMeters,
     segmentCount: params.segments.length,
   };
+}
+
+function createProfessionalDiameterAdoptionIssues(
+  adoption: ProfessionalDiameterAdoptionResult,
+): TechnicalCalculationIssue[] {
+  return adoption.segments
+    .filter(
+      (segment) =>
+        segment.decision &&
+        segment.status !== "validated" &&
+        segment.status !== "using_calculated",
+    )
+    .map((segment): TechnicalCalculationIssue => {
+      if (segment.status === "pending_validation") {
+        return {
+          code: "pending_adopted_diameter_validation",
+          message:
+            `Adopción pendiente de validación en ${segment.segmentId}: ` +
+            (segment.reason ?? "requiere confirmar una transición generada."),
+          segmentId: segment.segmentId,
+        };
+      }
+
+      if (segment.status === "incompatible") {
+        return {
+          code: "incompatible_adopted_diameter",
+          message:
+            `Adopción incompatible en ${segment.segmentId}: ` +
+            (segment.reason ?? "el diámetro adoptado no puede validarse."),
+          segmentId: segment.segmentId,
+        };
+      }
+
+      return {
+        code: "unresolved_adopted_diameter",
+        message:
+          `Adopción no resuelta en ${segment.segmentId}: ` +
+          (segment.reason ?? "falta validar el diámetro efectivo."),
+        segmentId: segment.segmentId,
+      };
+    });
 }
 
 function createEmptyTotals(): TechnicalCalculationResult["totals"] {

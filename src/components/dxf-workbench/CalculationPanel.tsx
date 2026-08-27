@@ -30,6 +30,10 @@ import type {
   DiameterTransitionTechnicalReview,
 } from "@/lib/calculation/diameterTransitionProposals";
 import type {
+  ProfessionalDiameterAdoptionSegmentResult,
+  ProfessionalDiameterAdoptionSegmentStatus,
+} from "@/lib/calculation/professionalDiameterAdoption";
+import type {
   CompoundTurnTransitionPreview as CompoundTurnTransitionPreviewModel,
 } from "@/lib/calculation/compoundTurnTransitionResolution";
 import {
@@ -51,6 +55,7 @@ type CalculationPanelProps = {
   planReady: boolean;
   result: TechnicalCalculationResult | null;
   routeTransitionResolutions: Record<string, TechnicalRouteTransitionResolution>;
+  onAdoptSegmentDiameter: (segmentId: string, diameterId: string | null) => void;
   onConfirmAccessoryProposal: (proposalId: string, candidateId: string) => void;
   onConfirmDiameterTransition: (transitionId: string, candidateId: string) => void;
   onGoToPlan: () => void;
@@ -69,6 +74,7 @@ export function CalculationPanel({
   planReady,
   result,
   routeTransitionResolutions,
+  onAdoptSegmentDiameter,
   onConfirmAccessoryProposal,
   onConfirmDiameterTransition,
   onGoToPlan,
@@ -151,6 +157,7 @@ export function CalculationPanel({
               result={result}
               routeTransitionResolutions={routeTransitionResolutions}
               segment={selectedSegment}
+              onAdoptSegmentDiameter={onAdoptSegmentDiameter}
             />
           ) : null}
         </>
@@ -981,6 +988,7 @@ function CalculationSummary({ result }: { result: TechnicalCalculationResult }) 
   );
   const calculationLength = formatTotalCalculationLength(result);
   const transitionAwareSizing = result.transitionAwareNetworkSizing;
+  const adoption = result.professionalDiameterAdoption;
 
   return (
     <dl className="mt-3 grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 gap-y-1 text-xs">
@@ -1013,6 +1021,14 @@ function CalculationSummary({ result }: { result: TechnicalCalculationResult }) 
           <dd className="text-right font-mono">
             {transitionAwareSizing.evaluatedStateCount}/
             {formatStateCount(transitionAwareSizing.theoreticalStateCount)}
+          </dd>
+        </>
+      ) : null}
+      {adoption && adoption.decisions.length > 0 ? (
+        <>
+          <dt>Adopción diámetros</dt>
+          <dd className="text-right">
+            {professionalAdoptionStatusLabel(adoption.status)}
           </dd>
         </>
       ) : null}
@@ -1108,11 +1124,13 @@ function SegmentDetail({
   result,
   routeTransitionResolutions,
   segment,
+  onAdoptSegmentDiameter,
 }: {
   equipment: WorkbenchEquipment[];
   result: TechnicalCalculationResult;
   routeTransitionResolutions: Record<string, TechnicalRouteTransitionResolution>;
   segment: TechnicalSegmentResult;
+  onAdoptSegmentDiameter: (segmentId: string, diameterId: string | null) => void;
 }) {
   const equipmentById = new Map(equipment.map((item) => [item.id, item]));
   const demandNormalizationByEquipmentId = createDemandNormalizationIndex(
@@ -1149,6 +1167,11 @@ function SegmentDetail({
       />
       <AccessoryList accessories={segment.accessories} />
       <NetworkSegmentSizing result={result} segment={segment} />
+      <ProfessionalDiameterAdoptionControl
+        result={result}
+        segment={segment}
+        onAdoptSegmentDiameter={onAdoptSegmentDiameter}
+      />
 
       <div className="mt-2">
         <div className="font-semibold text-[var(--muted)]">Alimenta</div>
@@ -1209,8 +1232,13 @@ function RouteBasisDetail({
 
   const route = resolution.value;
   const terminal = equipmentById.get(route.terminalEquipmentId);
+  const professionalAdoption = result.professionalDiameterAdoption;
+  const useAdoptedEvaluation =
+    professionalAdoption && professionalAdoption.decisions.length > 0;
   const routeAccessoryResolution =
-    result.routeAccessoryResolutions[route.routeId] ?? null;
+    (useAdoptedEvaluation
+      ? professionalAdoption.routeAccessoryResolutions[route.routeId]
+      : result.routeAccessoryResolutions[route.routeId]) ?? null;
   const routeTransitionResolution =
     routeTransitionResolutions[route.routeId] ?? null;
   const routeSizingReasons = segment.routeSizingBasis.reasons;
@@ -1327,6 +1355,113 @@ function NetworkSegmentSizing({
       segment={segment}
       title="Dimensionado global"
     />
+  );
+}
+
+function ProfessionalDiameterAdoptionControl({
+  result,
+  segment,
+  onAdoptSegmentDiameter,
+}: {
+  result: TechnicalCalculationResult;
+  segment: TechnicalSegmentResult;
+  onAdoptSegmentDiameter: (segmentId: string, diameterId: string | null) => void;
+}) {
+  const adoptionSegment = getProfessionalDiameterAdoptionSegment(
+    result,
+    segment.segmentId,
+  );
+
+  if (!adoptionSegment) {
+    return null;
+  }
+
+  const selectedDiameterId =
+    adoptionSegment.decision &&
+    adoptionSegment.availableDiameters.some(
+      (diameter) => diameter.id === adoptionSegment.decision?.diameterId,
+    )
+      ? adoptionSegment.decision.diameterId
+      : "";
+  const canSelect =
+    adoptionSegment.availableDiameters.length > 0 &&
+    adoptionSegment.calculatedDiameter !== null;
+  const sizing = adoptionSegment.validationSegment;
+
+  return (
+    <div
+      className={`mt-2 rounded border px-2 py-2 ${professionalAdoptionTone(
+        adoptionSegment.status,
+      )}`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="font-semibold text-[var(--muted)]">
+          Diámetro profesional
+        </div>
+        <div className="text-right text-[10px] font-semibold uppercase">
+          {professionalAdoptionStatusLabel(adoptionSegment.status)}
+        </div>
+      </div>
+      <dl className="mt-1 grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 gap-y-1">
+        <dt>Mínimo calculado</dt>
+        <dd className="text-right">
+          {formatDiameterSymbol(adoptionSegment.calculatedDiameter)}
+        </dd>
+        <dt>Diámetro efectivo</dt>
+        <dd className="text-right">
+          {formatDiameterSymbol(adoptionSegment.effectiveDiameter)}
+        </dd>
+        <dt>Caudal normalizado usado</dt>
+        <dd className="text-right">
+          {formatTechnicalFlow(
+            sizing?.accumulatedFlow ?? segment.accumulatedFlow,
+            sizing?.accumulatedFlowUnit ?? segment.accumulatedFlowUnit,
+          )}
+        </dd>
+        <dt>Longitud efectiva</dt>
+        <dd className="text-right">
+          {formatCalculationMeters(
+            sizing?.transitionAwareSizingLengthMeters ?? null,
+            "Pendiente",
+          )}
+        </dd>
+      </dl>
+      <label className="mt-2 block">
+        <span className="text-[var(--muted)]">Diámetro adoptado</span>
+        <select
+          className="mt-1 w-full rounded border border-[var(--line)] bg-white px-2 py-1 text-xs"
+          disabled={!canSelect}
+          value={selectedDiameterId}
+          onChange={(event) =>
+            onAdoptSegmentDiameter(
+              segment.segmentId,
+              event.target.value || null,
+            )
+          }
+        >
+          <option value="">Sin override</option>
+          {adoptionSegment.availableDiameters.map((diameter) => (
+            <option key={diameter.id} value={diameter.id}>
+              {formatDiameterSymbol(diameter)}
+            </option>
+          ))}
+        </select>
+      </label>
+      {adoptionSegment.decision ? (
+        <button
+          className="mt-2 rounded border border-[var(--line)] bg-white px-2 py-1 text-xs hover:border-[var(--accent)]"
+          type="button"
+          onClick={() => onAdoptSegmentDiameter(segment.segmentId, null)}
+        >
+          Usar mínimo calculado
+        </button>
+      ) : null}
+      {adoptionSegment.reason ? (
+        <div className="mt-1 text-[10px]">
+          {adoptionSegment.reason}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -2009,6 +2144,27 @@ function formatSegmentDiameter(
   segment: TechnicalSegmentResult,
   result: TechnicalCalculationResult,
 ) {
+  const adoptionSegment = getProfessionalDiameterAdoptionSegment(
+    result,
+    segment.segmentId,
+  );
+
+  if (adoptionSegment?.decision && adoptionSegment.effectiveDiameter) {
+    return `${formatDiameterSymbol(adoptionSegment.effectiveDiameter)} efectivo`;
+  }
+
+  const transitionAwareSizing = getTransitionAwareSizingSegment(
+    result,
+    segment.segmentId,
+  );
+
+  if (
+    transitionAwareSizing?.status === "resolved" &&
+    transitionAwareSizing.finalDiameter
+  ) {
+    return formatDiameterReference(transitionAwareSizing.finalDiameter);
+  }
+
   const sizing = getNetworkSizingSegment(result, segment.segmentId);
 
   if (sizing?.status === "resolved" && sizing.calculatedDiameter) {
@@ -2044,6 +2200,67 @@ function getTransitionAwareSizingSegment(
       (segment) => segment.segmentId === segmentId,
     ) ?? null
   );
+}
+
+function getProfessionalDiameterAdoptionSegment(
+  result: TechnicalCalculationResult,
+  segmentId: string,
+) {
+  return (
+    result.professionalDiameterAdoption?.segments.find(
+      (segment) => segment.segmentId === segmentId,
+    ) ?? null
+  );
+}
+
+function professionalAdoptionStatusLabel(
+  status:
+    | ProfessionalDiameterAdoptionSegmentStatus
+    | NonNullable<TechnicalCalculationResult["professionalDiameterAdoption"]>["status"],
+) {
+  if (status === "using_calculated") {
+    return "Usa mínimo calculado";
+  }
+
+  if (status === "validated") {
+    return "Validada";
+  }
+
+  if (status === "pending_validation") {
+    return "Adopción pendiente de validación";
+  }
+
+  if (status === "incompatible") {
+    return "Incompatible";
+  }
+
+  return "Pendiente";
+}
+
+function professionalAdoptionTone(
+  status: ProfessionalDiameterAdoptionSegmentStatus,
+) {
+  if (status === "validated" || status === "using_calculated") {
+    return "border-[#badbcc] bg-[#f1faf4] text-[#1f6b45]";
+  }
+
+  if (status === "incompatible") {
+    return "border-red-200 bg-red-50 text-red-800";
+  }
+
+  return "border-[#f1d28a] bg-[#fffaf0] text-[var(--warning)]";
+}
+
+function formatDiameterSymbol(
+  diameter: ProfessionalDiameterAdoptionSegmentResult["effectiveDiameter"],
+) {
+  if (!diameter) {
+    return "Pendiente";
+  }
+
+  const external = formatOptionalNumber(diameter.externalDiameterMillimeters);
+
+  return external ? `Ø${external}` : diameter.label;
 }
 
 function formatInternalDiameter(sizing: {

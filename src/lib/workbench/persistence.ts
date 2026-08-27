@@ -9,6 +9,7 @@ import type {
   RouteIntentConnection,
 } from "@/lib/routing/types";
 import type { DiameterTransitionDecision } from "@/lib/calculation/diameterTransitionProposals";
+import type { AdoptedDiameterDecision } from "@/lib/calculation/professionalDiameterAdoption";
 import type { AccessoryProposalDecision } from "@/lib/routing/routeAccessoryProposals";
 import type { SectionRegistration } from "@/lib/sections/registration";
 import type {
@@ -54,6 +55,7 @@ export type PersistedWorkbenchBase = {
   equipment: WorkbenchEquipment[];
   showEquipment: boolean;
   routeIntentConnections: RouteIntentConnection[];
+  adoptedDiameterDecisions: AdoptedDiameterDecision[];
   diameterTransitionDecisions: DiameterTransitionDecision[];
   routeAccessoryProposalDecisions: AccessoryProposalDecision[];
   routeNetwork: ManualRouteNetwork;
@@ -298,6 +300,7 @@ function createPersistedWorkbenchBase(
     equipment: base.equipment,
     showEquipment: base.showEquipment,
     routeIntentConnections: base.routeIntentConnections,
+    adoptedDiameterDecisions: base.adoptedDiameterDecisions,
     diameterTransitionDecisions: base.diameterTransitionDecisions,
     routeAccessoryProposalDecisions: base.routeAccessoryProposalDecisions,
     routeNetwork: base.routeNetwork,
@@ -385,6 +388,9 @@ function parseWorkbenchBase(value: unknown): PersistedWorkbenchBase | null {
     !isEquipmentArray(value.equipment) ||
     !isBoolean(value.showEquipment) ||
     !isRouteIntentConnectionArray(value.routeIntentConnections) ||
+    !isOptionalAdoptedDiameterDecisionArray(
+      value.adoptedDiameterDecisions,
+    ) ||
     !isOptionalDiameterTransitionDecisionArray(
       value.diameterTransitionDecisions,
     ) ||
@@ -426,6 +432,7 @@ function parseWorkbenchBase(value: unknown): PersistedWorkbenchBase | null {
     equipment: value.equipment,
     showEquipment: value.showEquipment,
     routeIntentConnections: value.routeIntentConnections,
+    adoptedDiameterDecisions: value.adoptedDiameterDecisions ?? [],
     diameterTransitionDecisions: value.diameterTransitionDecisions ?? [],
     routeAccessoryProposalDecisions:
       value.routeAccessoryProposalDecisions ?? [],
@@ -860,6 +867,27 @@ function isOptionalAccessoryProposalDecisionArray(
         (decision.ownerSegmentId === undefined ||
           isString(decision.ownerSegmentId)) &&
         (decision.accessoryId === undefined || isString(decision.accessoryId)),
+    )
+  );
+}
+
+function isOptionalAdoptedDiameterDecisionArray(
+  value: unknown,
+): value is AdoptedDiameterDecision[] | undefined {
+  if (value === undefined) {
+    return true;
+  }
+
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (decision) =>
+        isRecord(decision) &&
+        isString(decision.segmentId) &&
+        isString(decision.diameterId) &&
+        isFiniteNumber(decision.decidedAt) &&
+        (decision.origin === undefined ||
+          decision.origin === "user_adopted"),
     )
   );
 }
