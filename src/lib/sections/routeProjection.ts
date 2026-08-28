@@ -12,7 +12,6 @@ import type {
 import type { TechnicalCalculationResult } from "@/lib/calculation/technicalTree";
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
 import type { Point2D } from "@/lib/geometry/types";
-import { pointZMeters } from "@/lib/geometry/height";
 import {
   buildEquipmentIndex,
   resolveRouteNodePosition,
@@ -28,6 +27,7 @@ import {
   projectPlanPointToSection,
   type SectionRegistration,
 } from "@/lib/sections/registration";
+import type { SectionRouteHeightTarget } from "./routeHeightEditing";
 
 export type SectionRouteProjectionStatus = "pending" | "resolved";
 
@@ -39,6 +39,7 @@ export type SectionRouteProjectedPointSource =
 
 export type SectionRouteProjectedPoint = {
   elevationMeters: number;
+  heightTarget: SectionRouteHeightTarget | null;
   heightInSectionUnits: number;
   planPoint: Point2D;
   sectionPoint: Point2D;
@@ -74,6 +75,7 @@ export type SectionRouteProjectedAccessory = {
 
 export type SectionRouteProjectedEquipment = {
   equipmentId: string;
+  heightTarget: SectionRouteHeightTarget;
   label: string;
   nodeId: string;
   planPoint: Point2D;
@@ -181,6 +183,7 @@ export function createSectionRouteProjection(params: {
     equipment: params.equipment,
     link,
     network: params.network,
+    pendingItems,
     sectionScaleMetersPerSourceUnit,
     toleranceRatio,
   });
@@ -207,7 +210,37 @@ function createProjectedSegment(params: {
   segment: ResolvedRouteSegment;
   toleranceRatio: number;
 }): SectionRouteProjectedSegment | null {
-  const projectedPoints = createElevatedRoutePath(params.segment).map((point) =>
+  const fromElevation = explicitZMeters(params.segment.from);
+  const toElevation = explicitZMeters(params.segment.to);
+
+  if (fromElevation === null || toElevation === null) {
+    const pendingReason = "Falta cota Z confirmada en un extremo del tramo.";
+    params.pendingItems.push({
+      id: `section-route:segment:${params.segment.id}:z`,
+      reason: pendingReason,
+      sourceId: params.segment.id,
+      sourceType: "segment",
+    });
+
+    return {
+      adoptedDiameter: params.adoptedDiameter,
+      adoptedDiameterLabel: formatDiameterSymbol(params.adoptedDiameter),
+      fromNodeId: params.segment.fromNodeId,
+      id: `section-route:segment:${params.segment.id}`,
+      pendingReason,
+      physicalLengthMeters: params.resultPhysicalLengthMeters,
+      points: [],
+      segmentId: params.segment.id,
+      status: "pending",
+      toNodeId: params.segment.toNodeId,
+    };
+  }
+
+  const projectedPoints = createElevatedRoutePath({
+    fromElevation,
+    segment: params.segment,
+    toElevation,
+  }).map((point) =>
     projectPathPoint({
       elevatedPoint: point,
       link: params.link,
@@ -272,7 +305,7 @@ function createProjectedAccessory(params: {
     return null;
   }
 
-  if (!params.item.position) {
+  if (!params.item.position || !hasExplicitZ(params.item.position)) {
     const reason = "Falta posicion confirmada del accesorio fisico.";
     params.pendingItems.push({
       id: `section-route:accessory:${params.item.id}`,
@@ -296,7 +329,7 @@ function createProjectedAccessory(params: {
   }
 
   const projected = projectPlanPointToSection({
-    elevationMeters: pointZMeters(params.item.position),
+    elevationMeters: explicitZMeters(params.item.position) as number,
     planEnd: params.link.planEnd,
     planPoint: params.item.position,
     planStart: params.link.planStart,
@@ -338,6 +371,7 @@ function createProjectedEquipment(params: {
   equipment: WorkbenchEquipment[];
   link: SectionRouteProjectionLink & { registration: SectionRegistration };
   network: ManualRouteNetwork;
+  pendingItems: SectionRouteProjectionPendingItem[];
   sectionScaleMetersPerSourceUnit: number;
   toleranceRatio: number;
 }) {
@@ -349,6 +383,7 @@ function createProjectedEquipment(params: {
         equipmentById,
         link: params.link,
         node,
+        pendingItems: params.pendingItems,
         sectionScaleMetersPerSourceUnit:
           params.sectionScaleMetersPerSourceUnit,
         toleranceRatio: params.toleranceRatio,
@@ -364,6 +399,7 @@ function createProjectedEquipmentNode(params: {
   equipmentById: Map<string, WorkbenchEquipment>;
   link: SectionRouteProjectionLink & { registration: SectionRegistration };
   node: RouteNode;
+  pendingItems: SectionRouteProjectionPendingItem[];
   sectionScaleMetersPerSourceUnit: number;
   toleranceRatio: number;
 }): SectionRouteProjectedEquipment | null {
@@ -378,8 +414,20 @@ function createProjectedEquipmentNode(params: {
     return null;
   }
 
+  const zMeters = explicitZMeters(planPoint);
+
+  if (zMeters === null) {
+    params.pendingItems.push({
+      id: `section-route:equipment:${params.node.id}:z`,
+      reason: "Falta cota Z confirmada del equipo conectado.",
+      sourceId: params.node.id,
+      sourceType: "equipment",
+    });
+    return null;
+  }
+
   const projected = projectPlanPointToSection({
-    elevationMeters: pointZMeters(planPoint),
+    elevationMeters: zMeters,
     planEnd: params.link.planEnd,
     planPoint,
     planStart: params.link.planStart,
@@ -393,67 +441,93 @@ function createProjectedEquipmentNode(params: {
 
   return {
     equipmentId: equipment.id,
+    heightTarget: {
+      kind: "node",
+      nodeId: params.node.id,
+    },
     label: equipment.name,
     nodeId: params.node.id,
     planPoint,
     role: equipment.role,
     sectionPoint: projected.sectionPoint,
-    zMeters: pointZMeters(planPoint),
+    zMeters,
   };
 }
 
-function createElevatedRoutePath(segment: ResolvedRouteSegment) {
+function createElevatedRoutePath(params: {
+  fromElevation: number;
+  segment: ResolvedRouteSegment;
+  toElevation: number;
+}) {
   const rawPath = [
-    segment.from,
-    ...(segment.vertices ?? []).map((point) => ({
+    params.segment.from,
+    ...(params.segment.vertices ?? []).map((point) => ({
       ...point,
     })),
-    segment.to,
+    params.segment.to,
   ];
-  const fromElevation = pointZMeters(segment.from);
-  const toElevation = pointZMeters(segment.to);
   const hasExplicitIntermediateElevation = rawPath
     .slice(1, -1)
     .some(hasExplicitZ);
   const points: Array<{
     elevationMeters: number;
+    heightTarget: SectionRouteHeightTarget | null;
     planPoint: Point2D;
     source: SectionRouteProjectedPointSource;
   }> = [
     {
-      elevationMeters: fromElevation,
+      elevationMeters: params.fromElevation,
+      heightTarget: {
+        kind: "node",
+        nodeId: params.segment.fromNodeId,
+      },
       planPoint: rawPath[0] as Point2D,
       source: "node",
     },
   ];
+  const terminalHeightTarget: SectionRouteHeightTarget = {
+    kind: "node",
+    nodeId: params.segment.toNodeId,
+  };
 
   if (
     !hasExplicitIntermediateElevation &&
-    Math.abs(fromElevation - toElevation) > Number.EPSILON
+    Math.abs(params.fromElevation - params.toElevation) > Number.EPSILON
   ) {
     points.push({
-      elevationMeters: toElevation,
+      elevationMeters: params.toElevation,
+      heightTarget: terminalHeightTarget,
       planPoint: rawPath[0] as Point2D,
       source: "vertical",
     });
   }
 
   let carriedElevation =
-    hasExplicitIntermediateElevation ? fromElevation : toElevation;
+    hasExplicitIntermediateElevation ? params.fromElevation : params.toElevation;
 
-  rawPath.slice(1, -1).forEach((planPoint) => {
+  rawPath.slice(1, -1).forEach((planPoint, vertexIndex) => {
+    let heightTarget: SectionRouteHeightTarget | null =
+      hasExplicitIntermediateElevation ? null : terminalHeightTarget;
+
     if (hasExplicitZ(planPoint)) {
-      carriedElevation = pointZMeters(planPoint);
+      carriedElevation = explicitZMeters(planPoint) as number;
+      heightTarget = {
+        kind: "segment_vertex",
+        segmentId: params.segment.id,
+        vertexIndex,
+      };
     }
 
     points.push({
       elevationMeters: carriedElevation,
+      heightTarget,
       planPoint,
       source: "vertex",
     });
   });
   points.push({
-    elevationMeters: toElevation,
+    elevationMeters: params.toElevation,
+    heightTarget: terminalHeightTarget,
     planPoint: rawPath[rawPath.length - 1] as Point2D,
     source: "connection",
   });
@@ -464,6 +538,7 @@ function createElevatedRoutePath(segment: ResolvedRouteSegment) {
 function projectPathPoint(params: {
   elevatedPoint: {
     elevationMeters: number;
+    heightTarget: SectionRouteHeightTarget | null;
     planPoint: Point2D;
     source: SectionRouteProjectedPointSource;
   };
@@ -481,6 +556,7 @@ function projectPathPoint(params: {
 
   return {
     elevationMeters: params.elevatedPoint.elevationMeters,
+    heightTarget: params.elevatedPoint.heightTarget,
     heightInSectionUnits: projected.heightInSectionUnits,
     planPoint: params.elevatedPoint.planPoint,
     sectionPoint: projected.sectionPoint,
@@ -636,6 +712,10 @@ function samePlanPoint(first: Point2D, second: Point2D) {
 
 function hasExplicitZ(point: Point2D) {
   return typeof point.z === "number" && Number.isFinite(point.z);
+}
+
+function explicitZMeters(point: Point2D) {
+  return hasExplicitZ(point) ? (point.z as number) : null;
 }
 
 function distanceBetween(first: Point2D, second: Point2D) {

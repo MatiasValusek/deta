@@ -54,6 +54,8 @@ import {
 import { SectionRouteProjectionOverlay } from "./SectionRouteProjectionOverlay";
 import { SourceOverlay, type SourceOverlayData } from "./SourceOverlay";
 import type { SectionRouteProjection } from "@/lib/sections/routeProjection";
+import type { SectionRouteHeightTarget } from "@/lib/sections/routeHeightEditing";
+import type { PhysicalRouteEditSelection } from "@/lib/routing/physicalRouteEditing";
 
 type PdfViewerProps = {
   activePage: PdfPageModel | null;
@@ -69,6 +71,7 @@ type PdfViewerProps = {
   equipmentDraft: EquipmentDraft | null;
   equipmentPlacementMode: EquipmentPlacementMode;
   hoveredEquipmentId: string | null;
+  highlightedRouteSegmentIds: Set<string>;
   invalidRouteSegmentIds: Set<string>;
   routeProposal: AutomaticRouteProposal | null;
   routeProposalOutdated: boolean;
@@ -88,6 +91,8 @@ type PdfViewerProps = {
   sectionRegistrationMode: SectionRegistrationToolMode;
   sectionRegistrationSaved: SectionRegistrationSavedOverlay | null;
   sectionRouteProjection: SectionRouteProjection | null;
+  selectedSectionRouteHeightTarget: SectionRouteHeightTarget | null;
+  selectedRouteEdit: PhysicalRouteEditSelection | null;
   showConstraints: boolean;
   onConstraintCreateRectangle: (start: Point2D, end: Point2D) => void;
   onConstraintDraftPoint: (point: Point2D) => void;
@@ -104,6 +109,23 @@ type PdfViewerProps = {
   onEquipmentPoint: (point: Point2D) => void;
   onEquipmentPreview: (point: Point2D | null) => void;
   onEquipmentSelect: (equipmentId: string) => void;
+  onPhysicalRouteElementSelect: (selection: PhysicalRouteEditSelection) => void;
+  onPhysicalRouteNodeMove: (
+    nodeId: string,
+    point: Point2D,
+    tolerance: number,
+  ) => void;
+  onPhysicalRouteVertexInsert: (
+    segmentId: string,
+    point: Point2D,
+    tolerance: number,
+  ) => void;
+  onPhysicalRouteVertexMove: (
+    segmentId: string,
+    vertexIndex: number,
+    point: Point2D,
+    tolerance: number,
+  ) => void;
   onRoutePoint: (point: Point2D, tolerance: number, equipmentId?: string) => void;
   onRoutePreview: (point: Point2D | null, tolerance: number | null) => void;
   onSectionLinkHover: (linkId: string | null) => void;
@@ -114,6 +136,10 @@ type PdfViewerProps = {
   onSectionRegistrationPoint: (point: Point2D) => void;
   onSectionRegistrationPreview: (point: Point2D | null) => void;
   onSectionRegistrationSide: (side: SectionViewSide) => void;
+  onSectionRouteHeightTargetSelect: (
+    target: SectionRouteHeightTarget,
+    currentHeightMeters: number,
+  ) => void;
   onSourcePoint: (point: Point2D) => void;
   onViewChange: (baseId: string, view: PdfViewTransform | null) => void;
   highlightedSectionLinkId: string | null;
@@ -164,6 +190,7 @@ export function PdfViewer({
   equipmentDraft,
   equipmentPlacementMode,
   hoveredEquipmentId,
+  highlightedRouteSegmentIds,
   invalidRouteSegmentIds,
   routeProposal,
   routeProposalOutdated,
@@ -183,6 +210,8 @@ export function PdfViewer({
   sectionRegistrationMode,
   sectionRegistrationSaved,
   sectionRouteProjection,
+  selectedSectionRouteHeightTarget,
+  selectedRouteEdit,
   showConstraints,
   onConstraintCreateRectangle,
   onConstraintDraftPoint,
@@ -195,6 +224,10 @@ export function PdfViewer({
   onEquipmentPoint,
   onEquipmentPreview,
   onEquipmentSelect,
+  onPhysicalRouteElementSelect,
+  onPhysicalRouteNodeMove,
+  onPhysicalRouteVertexInsert,
+  onPhysicalRouteVertexMove,
   onRoutePoint,
   onRoutePreview,
   onSectionLinkHover,
@@ -205,6 +238,7 @@ export function PdfViewer({
   onSectionRegistrationPoint,
   onSectionRegistrationPreview,
   onSectionRegistrationSide,
+  onSectionRouteHeightTargetSelect,
   onSourcePoint,
   onViewChange,
   highlightedSectionLinkId,
@@ -778,19 +812,37 @@ export function PdfViewer({
               />
               <SectionRouteProjectionOverlay
                 projection={sectionRouteProjection}
+                selectedHeightTarget={selectedSectionRouteHeightTarget}
                 sourceToScreen={(point) => pdfSourceToScreen(point, view)}
+                onHeightTargetSelect={onSectionRouteHeightTargetSelect}
               />
               <RouteOverlay
                 draft={routeDraft}
                 equipment={equipment}
+                highlightedSegmentIds={highlightedRouteSegmentIds}
                 invalidSegmentIds={invalidRouteSegmentIds}
+                isEditingEnabled={
+                  routeToolMode === "inactive" &&
+                  equipmentPlacementMode === "inactive" &&
+                  constraintToolMode === "none" &&
+                  sectionLinkMode === "inactive" &&
+                  sectionRegistrationMode === "inactive" &&
+                  !isPointSelectionActive
+                }
                 intentConnections={routeIntentConnections}
                 intentDraft={routeIntentDraft}
                 network={routeNetwork}
                 proposal={routeProposal}
                 proposalOutdated={routeProposalOutdated}
+                routeEditTolerance={ROUTE_POINTER_TOLERANCE_PX / view.scale}
+                screenToSource={(point) => pdfScreenToSource(point, view)}
+                selectedEdit={selectedRouteEdit}
                 showRoute={showRoute}
                 sourceToScreen={(point) => pdfSourceToScreen(point, view)}
+                onElementSelect={onPhysicalRouteElementSelect}
+                onNodeMove={onPhysicalRouteNodeMove}
+                onVertexInsert={onPhysicalRouteVertexInsert}
+                onVertexMove={onPhysicalRouteVertexMove}
               />
               <EquipmentOverlay
                 draft={equipmentDraft}

@@ -48,6 +48,15 @@ import {
 import {
   resolveCompoundTurnTransitionPreview,
 } from "@/lib/calculation/compoundTurnTransitionResolution";
+import {
+  createTechnicalAdoptedDiameterValidation,
+} from "@/lib/calculation/technicalAdoptedDiameterValidation";
+import {
+  createTechnicalEquivalentAccessoryVerification,
+} from "@/lib/calculation/technicalEquivalentAccessoryVerification";
+import {
+  createTechnicalPhysicalAccessoryInventory,
+} from "@/lib/calculation/technicalPhysicalAccessories";
 import { DEFAULT_PROJECT_GAS_CONFIG } from "@/lib/calculation/projectGas";
 import {
   removeAdoptedDiameterDecision,
@@ -123,6 +132,17 @@ import {
   routeIntentEndpointKey,
 } from "@/lib/routing/intentProposal";
 import {
+  DEFAULT_PHYSICAL_ROUTE_SNAP_OPTIONS,
+  insertPhysicalRouteVertex,
+  movePhysicalRouteNode,
+  movePhysicalRouteVertex,
+  relatedRouteSegmentIds,
+  removePhysicalRouteVertex,
+  snapPhysicalRouteEditPoint,
+  type PhysicalRouteEditSelection,
+  type PhysicalRouteSnapOptions,
+} from "@/lib/routing/physicalRouteEditing";
+import {
   confirmRouteAccessoryProposal,
   detectRouteAccessoryProposals,
   reconcileRouteAccessoryProposalState,
@@ -154,6 +174,13 @@ import {
   type SectionRegistration,
   type SectionRegistrationSide,
 } from "@/lib/sections/registration";
+import {
+  createSectionRouteProjection,
+} from "@/lib/sections/routeProjection";
+import {
+  applySectionRouteHeightEdit,
+  type SectionRouteHeightTarget,
+} from "@/lib/sections/routeHeightEditing";
 import {
   buildClassificationIndex,
   createClassificationFromProposal,
@@ -267,6 +294,13 @@ type PersistenceNotice = {
   tone: "error" | "info" | "warning";
 };
 
+type SectionRouteHeightEditorState = {
+  error: string | null;
+  heightInput: string;
+  heightMeters: number;
+  target: SectionRouteHeightTarget;
+};
+
 type WorkbenchBase = {
   id: string;
   type: WorkbenchBaseType;
@@ -319,6 +353,8 @@ export function DxfWorkbench() {
     useState<SectionLinkDraft | null>(null);
   const [sectionRegistrationDraft, setSectionRegistrationDraft] =
     useState<SectionRegistrationDraft | null>(null);
+  const [sectionRouteHeightEditor, setSectionRouteHeightEditor] =
+    useState<SectionRouteHeightEditorState | null>(null);
   const [equipmentDraft, setEquipmentDraft] =
     useState<EquipmentDraft | null>(null);
   const [routeDraft, setRouteDraft] = useState<RouteDraft | null>(null);
@@ -332,6 +368,10 @@ export function DxfWorkbench() {
     useState(false);
   const [routeProposalMarginInput, setRouteProposalMarginInput] =
     useState(DEFAULT_ROUTE_PROPOSAL_MARGIN_INPUT);
+  const [selectedRouteEdit, setSelectedRouteEdit] =
+    useState<PhysicalRouteEditSelection | null>(null);
+  const [routeSnapOptions, setRouteSnapOptions] =
+    useState<PhysicalRouteSnapOptions>(DEFAULT_PHYSICAL_ROUTE_SNAP_OPTIONS);
   const [activeRightPanelSection, setActiveRightPanelSection] =
     useState<RightPanelSectionId>("geometry");
   const [highlightedSectionLinkId, setHighlightedSectionLinkId] =
@@ -1049,6 +1089,58 @@ export function DxfWorkbench() {
     planBase,
     technicalCalculationResult,
   ]);
+  const technicalPhysicalAccessoryInventory = useMemo(
+    () =>
+      createTechnicalPhysicalAccessoryInventory({
+        accessoryProposals: routeAccessoryProposals,
+        diameterTransitionProposals,
+        result: technicalCalculationResult,
+        routeTransitionResolutions,
+      }),
+    [
+      diameterTransitionProposals,
+      routeAccessoryProposals,
+      routeTransitionResolutions,
+      technicalCalculationResult,
+    ],
+  );
+  const technicalEquivalentAccessoryVerificationBySegmentId = useMemo(
+    () =>
+      createTechnicalEquivalentAccessoryVerification({
+        inventory: technicalPhysicalAccessoryInventory,
+        pipeSystem: SIGAS_PIPE_SYSTEM,
+        result: technicalCalculationResult,
+      }),
+    [technicalPhysicalAccessoryInventory, technicalCalculationResult],
+  );
+  const technicalAdoptedDiameterValidation = useMemo(
+    () =>
+      createTechnicalAdoptedDiameterValidation({
+        decisions: planBase?.adoptedDiameterDecisions ?? [],
+        equivalentVerificationBySegmentId:
+          technicalEquivalentAccessoryVerificationBySegmentId,
+        pipeSystem: SIGAS_PIPE_SYSTEM,
+        result: technicalCalculationResult,
+      }),
+    [
+      planBase?.adoptedDiameterDecisions,
+      technicalCalculationResult,
+      technicalEquivalentAccessoryVerificationBySegmentId,
+    ],
+  );
+  const highlightedRouteSegmentIds = useMemo(
+    () =>
+      planBase
+        ? relatedRouteSegmentIds({
+            equipment: planBase.equipment,
+            network: planBase.routeNetwork,
+            result: technicalCalculationResult,
+            selectedEquipmentId: planBase.selectedEquipmentId,
+            selection: selectedRouteEdit,
+          })
+        : new Set<string>(),
+    [planBase, selectedRouteEdit, technicalCalculationResult],
+  );
 
   useEffect(() => {
     if (!planBase) {
@@ -1142,6 +1234,45 @@ export function DxfWorkbench() {
 
     return createSectionRegistrationSummary(activeSectionLink, planBase, activeBase);
   }, [activeBase, activeSectionLink, planBase]);
+  const activeSectionRouteProjection = useMemo(() => {
+    if (!activeBase || activeBase.type !== "section" || !planBase) {
+      return null;
+    }
+
+    if (activeBase.showRoute === false) {
+      return null;
+    }
+
+    if (
+      activeBase.sourceType === "pdf" &&
+      activeSectionLink?.registration?.sectionPdfPageNumber &&
+      activeSectionLink.registration.sectionPdfPageNumber !== activePdfPageNumber
+    ) {
+      return null;
+    }
+
+    return createSectionRouteProjection({
+      adoptedDiameterValidation: technicalAdoptedDiameterValidation,
+      equipment: planBase.equipment,
+      inventory: technicalPhysicalAccessoryInventory,
+      link: activeSectionLink,
+      network: planBase.routeNetwork,
+      result: technicalCalculationResult,
+      sectionScaleMetersPerSourceUnit:
+        calibrationScaleMetersPerSourceUnit(activeBase),
+      toleranceSource: MIN_SECTION_LINK_LENGTH,
+    });
+  }, [
+    activeBase,
+    activePdfPageNumber,
+    activeSectionLink,
+    planBase,
+    technicalAdoptedDiameterValidation,
+    technicalCalculationResult,
+    technicalPhysicalAccessoryInventory,
+  ]);
+  const selectedSectionRouteHeightTarget =
+    activeBase?.type === "section" ? sectionRouteHeightEditor?.target ?? null : null;
   const visiblePlanLinks = useMemo(() => {
     if (activeBase?.type !== "plan") {
       return [];
@@ -1525,6 +1656,7 @@ export function DxfWorkbench() {
     setRouteIntentDraft(null);
     setRouteProposal(null);
     setRouteProposalMode(null);
+    setSelectedRouteEdit(null);
     setEquipmentError(null);
     setRouteError(null);
     setHoveredEquipmentId(null);
@@ -1581,6 +1713,7 @@ export function DxfWorkbench() {
     setRouteProposal((current) =>
       current?.baseId === activeBase.id ? null : current,
     );
+    setSelectedRouteEdit(null);
     if (routeProposal?.baseId === activeBase.id) {
       setRouteProposalMode(null);
     }
@@ -1736,6 +1869,7 @@ export function DxfWorkbench() {
       viewSide: null,
     });
     setSectionRegistrationDraft(null);
+    setSectionRouteHeightEditor(null);
     setEquipmentDraft(null);
     setRouteDraft(null);
     setRouteIntentDraft(null);
@@ -2003,6 +2137,7 @@ export function DxfWorkbench() {
       step: "start",
     });
     setSectionLinkDraft(null);
+    setSectionRouteHeightEditor(null);
     setEquipmentDraft(null);
     setRouteDraft(null);
     setRouteIntentDraft(null);
@@ -2137,6 +2272,109 @@ export function DxfWorkbench() {
     highlightRegistration(sectionRegistrationDraft.editingLinkId);
   }
 
+  function handleSectionRouteHeightTargetSelect(
+    target: SectionRouteHeightTarget,
+    currentHeightMeters: number,
+  ) {
+    if (activeBase?.type !== "section") {
+      return;
+    }
+
+    setSectionRouteHeightEditor({
+      error: null,
+      heightInput: formatElevationInputForEdit(currentHeightMeters),
+      heightMeters: currentHeightMeters,
+      target,
+    });
+    setSectionLinkDraft(null);
+    setSectionRegistrationDraft(null);
+    setEquipmentDraft(null);
+    setRouteDraft(null);
+    setRouteIntentDraft(null);
+    setEquipmentError(null);
+    setRouteError(null);
+    setSessionError(null);
+  }
+
+  function handleSectionRouteHeightInputChange(value: string) {
+    setSectionRouteHeightEditor((current) => {
+      if (!current) {
+        return current;
+      }
+
+      const parsed = parseElevationInput(value);
+
+      return {
+        ...current,
+        error: null,
+        heightInput: value,
+        heightMeters: parsed ?? current.heightMeters,
+      };
+    });
+  }
+
+  function handleCancelSectionRouteHeightEdit() {
+    setSectionRouteHeightEditor(null);
+  }
+
+  function handleSaveSectionRouteHeightEdit() {
+    const current = sectionRouteHeightEditor;
+
+    if (!current) {
+      return;
+    }
+
+    if (!planBase) {
+      setSectionRouteHeightEditor({
+        ...current,
+        error: "Falta planta confirmada para editar la cota.",
+      });
+      return;
+    }
+
+    const heightMeters = parseElevationInput(current.heightInput);
+
+    if (heightMeters === null) {
+      setSectionRouteHeightEditor({
+        ...current,
+        error: "Ingrese una cota valida en metros.",
+      });
+      return;
+    }
+
+    const result = applySectionRouteHeightEdit({
+      equipment: planBase.equipment,
+      heightMeters,
+      network: planBase.routeNetwork,
+      target: current.target,
+    });
+
+    if (!result.ok) {
+      setSectionRouteHeightEditor({
+        ...current,
+        error: result.message,
+      });
+      return;
+    }
+
+    updateBase(planBase.id, (base) => ({
+      ...base,
+      equipment: result.equipment,
+      routeNetwork: result.network,
+      showEquipment: true,
+      showRoute: true,
+    }));
+    setSectionRouteHeightEditor({
+      error: null,
+      heightInput: formatElevationInputForEdit(heightMeters),
+      heightMeters,
+      target: current.target,
+    });
+    setRouteProposal(null);
+    setRouteProposalMode(null);
+    setRouteError(null);
+  }
+
   function handleGoToPlanForEquipment() {
     setActiveRightPanelSection("equipment");
 
@@ -2256,6 +2494,7 @@ export function DxfWorkbench() {
     setRouteProposal(null);
     setRouteProposalMode(null);
     setEquipmentDraft(draft);
+    setSectionRouteHeightEditor(null);
     setEquipmentError(null);
     setRouteError(null);
     setSessionError(null);
@@ -2547,6 +2786,7 @@ export function DxfWorkbench() {
     setEquipmentError(null);
     setRouteProposal(null);
     setRouteProposalMode(null);
+    setSelectedRouteEdit(null);
     setRouteError(null);
     setHoveredEquipmentId(null);
     setCursor(null);
@@ -2567,6 +2807,8 @@ export function DxfWorkbench() {
     setRouteDraft(null);
     setRouteIntentDraft(null);
     setRouteError(null);
+    setSectionRouteHeightEditor(null);
+    setSelectedRouteEdit(null);
     updateBase(planBase.id, (base) => ({
       ...base,
       selectedEquipmentId: equipmentId,
@@ -2646,6 +2888,7 @@ export function DxfWorkbench() {
     setRouteIntentDraft(null);
     setRouteProposal(null);
     setRouteProposalMode(null);
+    setSelectedRouteEdit(null);
     setEquipmentError(null);
     setRouteError(null);
   }
@@ -2665,10 +2908,212 @@ export function DxfWorkbench() {
       return;
     }
 
+    if (!show) {
+      setSelectedRouteEdit(null);
+    }
+
     updateBase(planBase.id, (base) => ({
       ...base,
       showRoute: show,
     }));
+  }
+
+  function handleSelectPhysicalRouteElement(selection: PhysicalRouteEditSelection) {
+    setActiveRightPanelSection("route");
+    setSelectedRouteEdit(selection);
+    setRouteDraft(null);
+    setRouteIntentDraft(null);
+    setSectionRouteHeightEditor(null);
+    setRouteError(null);
+
+    if (!planBase) {
+      return;
+    }
+
+    updateBase(planBase.id, (base) => ({
+      ...base,
+      selectedEquipmentId:
+        selection.kind === "terminal" ? selection.equipmentId : null,
+      showRoute: true,
+    }));
+  }
+
+  function handleClearPhysicalRouteSelection() {
+    setSelectedRouteEdit(null);
+    setRouteError(null);
+  }
+
+  function handleRouteSnapOptionChange(
+    option: keyof PhysicalRouteSnapOptions,
+    enabled: boolean,
+  ) {
+    setRouteSnapOptions((current) => ({
+      ...current,
+      [option]: enabled,
+    }));
+  }
+
+  function handleMovePhysicalRouteNode(
+    nodeId: string,
+    point: Point2D,
+    tolerance: number,
+  ) {
+    const selection: PhysicalRouteEditSelection = {
+      kind: "node",
+      nodeId,
+    };
+    const plan = planBase;
+
+    if (!plan || activeBase?.type !== "plan") {
+      return;
+    }
+
+    const snapped = snapPhysicalRoutePoint(plan, selection, point, tolerance);
+    const result = movePhysicalRouteNode({
+      equipment: plan.equipment,
+      network: plan.routeNetwork,
+      nodeId,
+      point: snapped,
+      tolerance,
+    });
+
+    commitPhysicalRouteEdit(plan, result, selection);
+  }
+
+  function handleMovePhysicalRouteVertex(
+    segmentId: string,
+    vertexIndex: number,
+    point: Point2D,
+    tolerance: number,
+  ) {
+    const selection: PhysicalRouteEditSelection = {
+      kind: "vertex",
+      segmentId,
+      vertexIndex,
+    };
+    const plan = planBase;
+
+    if (!plan || activeBase?.type !== "plan") {
+      return;
+    }
+
+    const snapped = snapPhysicalRoutePoint(plan, selection, point, tolerance);
+    const result = movePhysicalRouteVertex({
+      network: plan.routeNetwork,
+      point: snapped,
+      segmentId,
+      vertexIndex,
+    });
+
+    commitPhysicalRouteEdit(plan, result, selection);
+  }
+
+  function handleInsertPhysicalRouteVertex(
+    segmentId: string,
+    point: Point2D,
+    tolerance: number,
+  ) {
+    const selection: PhysicalRouteEditSelection = {
+      kind: "segment",
+      segmentId,
+    };
+    const plan = planBase;
+
+    if (!plan || activeBase?.type !== "plan") {
+      return;
+    }
+
+    const snapped = snapPhysicalRoutePoint(plan, selection, point, tolerance);
+    const result = insertPhysicalRouteVertex({
+      equipment: plan.equipment,
+      network: plan.routeNetwork,
+      point: snapped,
+      segmentId,
+      tolerance,
+    });
+
+    commitPhysicalRouteEdit(
+      plan,
+      result,
+      result.ok
+        ? {
+            kind: "vertex",
+            segmentId,
+            vertexIndex: result.vertexIndex ?? 0,
+          }
+        : selection,
+    );
+  }
+
+  function handleDeleteSelectedPhysicalRouteVertex() {
+    if (!planBase || selectedRouteEdit?.kind !== "vertex") {
+      return;
+    }
+
+    const result = removePhysicalRouteVertex({
+      network: planBase.routeNetwork,
+      segmentId: selectedRouteEdit.segmentId,
+      vertexIndex: selectedRouteEdit.vertexIndex,
+    });
+
+    commitPhysicalRouteEdit(planBase, result, {
+      kind: "segment",
+      segmentId: selectedRouteEdit.segmentId,
+    });
+  }
+
+  function snapPhysicalRoutePoint(
+    plan: WorkbenchBase,
+    selection: PhysicalRouteEditSelection,
+    point: Point2D,
+    tolerance: number,
+  ) {
+    return snapPhysicalRouteEditPoint({
+      constraints: activeBase?.type === "plan" ? activeConstraints : [],
+      equipment: plan.equipment,
+      movingSelection: selection,
+      network: plan.routeNetwork,
+      options: routeSnapOptions,
+      point,
+      tolerance,
+    });
+  }
+
+  function commitPhysicalRouteEdit(
+    plan: WorkbenchBase,
+    result: ReturnType<typeof movePhysicalRouteNode>,
+    selection: PhysicalRouteEditSelection,
+  ) {
+    setActiveRightPanelSection("route");
+    setSelectedRouteEdit(selection);
+
+    if (!result.ok) {
+      setRouteError(result.message);
+      return;
+    }
+
+    const validation = validatePhysicalRouteEdit(
+      plan,
+      result.network,
+      planClassificationIndex,
+    );
+
+    if (!validation.ok) {
+      setRouteError(validation.message);
+      return;
+    }
+
+    updateBase(plan.id, (base) => ({
+      ...base,
+      routeNetwork: result.network,
+      showRoute: true,
+    }));
+    setRouteDraft(null);
+    setRouteIntentDraft(null);
+    setRouteProposal(null);
+    setRouteProposalMode(null);
+    setSectionRouteHeightEditor(null);
+    setRouteError(null);
   }
 
   function handleStartRouteConnection() {
@@ -2708,9 +3153,11 @@ export function DxfWorkbench() {
     );
     setSectionLinkDraft(null);
     setSectionRegistrationDraft(null);
+    setSectionRouteHeightEditor(null);
     setEquipmentDraft(null);
     setRouteDraft(null);
     setEquipmentError(null);
+    setSelectedRouteEdit(null);
     setRouteIntentDraft({
       planBaseId: planBase.id,
       pdfPageNumber:
@@ -2802,6 +3249,7 @@ export function DxfWorkbench() {
   function handleCancelRouteDraft() {
     setRouteDraft(null);
     setRouteError(null);
+    setSelectedRouteEdit(null);
     setCursor(null);
   }
 
@@ -3272,6 +3720,7 @@ export function DxfWorkbench() {
     setRouteIntentDraft(null);
     setRouteProposal(null);
     setRouteProposalMode(null);
+    setSelectedRouteEdit(null);
     setRouteError(null);
   }
 
@@ -3295,6 +3744,7 @@ export function DxfWorkbench() {
     setRouteIntentDraft(null);
     setRouteProposal(null);
     setRouteProposalMode(null);
+    setSelectedRouteEdit(null);
     setRouteError(null);
   }
 
@@ -3600,6 +4050,7 @@ export function DxfWorkbench() {
     setRouteProposalMode(null);
     setRouteDraft(null);
     setRouteIntentDraft(null);
+    setSelectedRouteEdit(null);
     setRouteError(null);
   }
 
@@ -4516,6 +4967,7 @@ export function DxfWorkbench() {
       setRouteProposal(null);
     }
 
+    setSelectedRouteEdit(null);
     updateActiveBase((base) => ({
       ...base,
       constraintDraft: null,
@@ -4755,6 +5207,8 @@ export function DxfWorkbench() {
           proposalOutdated={isRouteProposalOutdated}
           proposalRequiresScale={routeProposalRequiresScale}
           restrictionCount={routeRestrictionCount}
+          selectedEdit={selectedRouteEdit}
+          snapOptions={routeSnapOptions}
           intentConnections={planBase?.routeIntentConnections ?? []}
           intentDraft={routeIntentDraft}
           segmentCount={routeNetwork.segments.length}
@@ -4764,6 +5218,8 @@ export function DxfWorkbench() {
           onClearNetwork={handleClearRouteNetwork}
           onClearIntentConnections={handleClearRouteIntentConnections}
           onConnectAppliance={handleStartRouteConnection}
+          onClearRouteSelection={handleClearPhysicalRouteSelection}
+          onDeleteSelectedVertex={handleDeleteSelectedPhysicalRouteVertex}
           onDeleteIntentConnection={handleDeleteRouteIntentConnection}
           onDiscardProposal={handleDiscardRouteProposal}
           onDisconnectAppliance={handleDisconnectRouteAppliance}
@@ -4775,6 +5231,7 @@ export function DxfWorkbench() {
           onRegenerateProposal={handleRegenerateRouteProposal}
           onSelectDraftTarget={handleSelectRouteDraftTarget}
           onShowRouteChange={handleShowRouteChange}
+          onSnapOptionChange={handleRouteSnapOptionChange}
         />
       ),
     },
@@ -5152,6 +5609,60 @@ export function DxfWorkbench() {
               onSaveDraft={handleSaveRouteIntentDraft}
             />
           ) : null}
+          {sectionRouteHeightEditor && activeBase?.type === "section" ? (
+            <div className="absolute left-4 top-4 z-10 w-[280px] rounded border border-[var(--line)] bg-white/95 px-3 py-2 text-xs shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="font-semibold">Cota de instalacion</div>
+                  <div className="mt-1 text-[var(--muted)]">
+                    Actual {formatMeters(sectionRouteHeightEditor.heightMeters)}
+                  </div>
+                </div>
+                <button
+                  className="rounded border border-[var(--line)] bg-white px-2 py-1 hover:border-[var(--accent)]"
+                  type="button"
+                  onClick={handleCancelSectionRouteHeightEdit}
+                >
+                  Cancelar
+                </button>
+              </div>
+              <div className="mt-3 grid grid-cols-[minmax(0,1fr)_auto] items-end gap-2">
+                <label className="min-w-0 text-[var(--muted)]">
+                  <span className="block">Nueva cota</span>
+                  <span className="mt-1 flex items-center gap-1">
+                    <input
+                      className="min-w-0 rounded border border-[var(--line)] px-2 py-1 text-[var(--foreground)]"
+                      inputMode="decimal"
+                      name="section-route-height"
+                      type="text"
+                      value={sectionRouteHeightEditor.heightInput}
+                      onChange={(event) =>
+                        handleSectionRouteHeightInputChange(event.target.value)
+                      }
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          handleSaveSectionRouteHeightEdit();
+                        }
+                      }}
+                    />
+                    <span>m</span>
+                  </span>
+                </label>
+                <button
+                  className="rounded border border-[var(--accent)] bg-[var(--accent)] px-2 py-1 font-medium text-white hover:bg-[var(--accent-strong)]"
+                  type="button"
+                  onClick={handleSaveSectionRouteHeightEdit}
+                >
+                  Guardar
+                </button>
+              </div>
+              {sectionRouteHeightEditor.error ? (
+                <div className="mt-2 text-red-700">
+                  {sectionRouteHeightEditor.error}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
             {sectionLinkDraft && activeBase?.id === sectionLinkDraft.planBaseId ? (
               <div className="absolute left-4 top-4 z-10 max-w-[360px] rounded border border-[var(--line)] bg-white/95 px-3 py-2 text-xs shadow-sm">
                 <div className="flex items-start justify-between gap-3">
@@ -5281,6 +5792,7 @@ export function DxfWorkbench() {
                 equipmentPlacementMode={equipmentPlacementMode}
                 fitNonce={activeBase?.visual.dxfFitNonce ?? 0}
                 hoveredEquipmentId={hoveredEquipmentId}
+                highlightedRouteSegmentIds={highlightedRouteSegmentIds}
                 invalidRouteSegmentIds={routeInvalidSegmentIds}
                 isPointSelectionActive={
                   activeBase ? activeBase.calibration.toolMode !== "idle" : false
@@ -5298,6 +5810,7 @@ export function DxfWorkbench() {
                 selectedConstraintId={activeBase?.selectedConstraintId ?? null}
                 selectedEquipmentId={activeBase?.selectedEquipmentId ?? null}
                 selectedEntityIds={activeBase?.selectedEntityIds ?? []}
+                selectedRouteEdit={selectedRouteEdit}
                 sectionLinkDraft={activeSectionLinkDraftOverlay}
                 sectionLinkMode={sectionLinkMode}
                 sectionLinks={visiblePlanLinks}
@@ -5305,6 +5818,8 @@ export function DxfWorkbench() {
                 sectionRegistrationDraft={activeSectionRegistrationDraftOverlay}
                 sectionRegistrationMode={sectionRegistrationMode}
                 sectionRegistrationSaved={activeSectionRegistrationSavedOverlay}
+                sectionRouteProjection={activeSectionRouteProjection}
+                selectedSectionRouteHeightTarget={selectedSectionRouteHeightTarget}
                 selectionMode={activeBase?.selectionMode ?? "pan"}
                 semanticViewMode={activeBase?.semanticViewMode ?? "original"}
                 showConstraints={activeBase?.showConstraints ?? true}
@@ -5323,6 +5838,10 @@ export function DxfWorkbench() {
                 onEquipmentPoint={handleEquipmentPoint}
                 onEquipmentPreview={handleEquipmentPreview}
                 onEquipmentSelect={handleSelectEquipment}
+                onPhysicalRouteElementSelect={handleSelectPhysicalRouteElement}
+                onPhysicalRouteNodeMove={handleMovePhysicalRouteNode}
+                onPhysicalRouteVertexInsert={handleInsertPhysicalRouteVertex}
+                onPhysicalRouteVertexMove={handleMovePhysicalRouteVertex}
                 onRectangleSelect={handleRectangleSelect}
                 onRoutePoint={handleRoutePoint}
                 onRoutePreview={handleRoutePreview}
@@ -5334,6 +5853,9 @@ export function DxfWorkbench() {
                 onSectionRegistrationPoint={handleSectionRegistrationPoint}
                 onSectionRegistrationPreview={handleSectionRegistrationPreview}
                 onSectionRegistrationSide={handleSectionRegistrationSide}
+                onSectionRouteHeightTargetSelect={
+                  handleSectionRouteHeightTargetSelect
+                }
                 onSourcePoint={(point) => handleSourcePoint("dxf", point)}
                 onViewChange={handleDxfViewChange}
                 highlightedSectionLinkId={highlightedSectionLinkId}
@@ -5355,6 +5877,7 @@ export function DxfWorkbench() {
                 equipmentPlacementMode={equipmentPlacementMode}
                 fitNonce={activeBase?.visual.pdfFitNonce ?? 0}
                 hoveredEquipmentId={hoveredEquipmentId}
+                highlightedRouteSegmentIds={highlightedRouteSegmentIds}
                 invalidRouteSegmentIds={routeInvalidSegmentIds}
                 isPointSelectionActive={
                   activeBase ? activeBase.calibration.toolMode !== "idle" : false
@@ -5370,6 +5893,7 @@ export function DxfWorkbench() {
                 savedView={activeBase?.visual.pdfView ?? null}
                 selectedConstraintId={activeBase?.selectedConstraintId ?? null}
                 selectedEquipmentId={activeBase?.selectedEquipmentId ?? null}
+                selectedRouteEdit={selectedRouteEdit}
                 sectionLinkDraft={activeSectionLinkDraftOverlay}
                 sectionLinkMode={sectionLinkMode}
                 sectionLinks={visiblePlanLinks}
@@ -5377,6 +5901,8 @@ export function DxfWorkbench() {
                 sectionRegistrationDraft={activeSectionRegistrationDraftOverlay}
                 sectionRegistrationMode={sectionRegistrationMode}
                 sectionRegistrationSaved={activeSectionRegistrationSavedOverlay}
+                sectionRouteProjection={activeSectionRouteProjection}
+                selectedSectionRouteHeightTarget={selectedSectionRouteHeightTarget}
                 showConstraints={activeBase?.showConstraints ?? true}
                 showEquipment={activeBase?.showEquipment ?? true}
                 showRoute={activeBase?.showRoute ?? true}
@@ -5391,6 +5917,10 @@ export function DxfWorkbench() {
                 onEquipmentPoint={handleEquipmentPoint}
                 onEquipmentPreview={handleEquipmentPreview}
                 onEquipmentSelect={handleSelectEquipment}
+                onPhysicalRouteElementSelect={handleSelectPhysicalRouteElement}
+                onPhysicalRouteNodeMove={handleMovePhysicalRouteNode}
+                onPhysicalRouteVertexInsert={handleInsertPhysicalRouteVertex}
+                onPhysicalRouteVertexMove={handleMovePhysicalRouteVertex}
                 onRoutePoint={handleRoutePoint}
                 onRoutePreview={handleRoutePreview}
                 onSectionLinkHover={setHoveredSectionLinkId}
@@ -5401,6 +5931,9 @@ export function DxfWorkbench() {
                 onSectionRegistrationPoint={handleSectionRegistrationPoint}
                 onSectionRegistrationPreview={handleSectionRegistrationPreview}
                 onSectionRegistrationSide={handleSectionRegistrationSide}
+                onSectionRouteHeightTargetSelect={
+                  handleSectionRouteHeightTargetSelect
+                }
                 onSourcePoint={(point) => handleSourcePoint("pdf", point)}
                 onViewChange={handlePdfViewChange}
                 highlightedSectionLinkId={highlightedSectionLinkId}
@@ -7033,6 +7566,77 @@ function routeNetworkConnectedToSupply(
       getRouteNodeDegree(network, node.id) === 0 ||
       hasRoutePath(network, supplyNode.id, node.id),
   );
+}
+
+function validatePhysicalRouteEdit(
+  plan: WorkbenchBase,
+  network: ManualRouteNetwork,
+  classificationIndex: ClassificationIndex,
+): RouteValidationResult {
+  if (hasDuplicateNodeIds(network) || hasDuplicateSegmentIds(network)) {
+    return {
+      ok: false,
+      message: "La red contiene IDs duplicados.",
+    };
+  }
+
+  if (hasSegmentsWithMissingEndpoints(network)) {
+    return {
+      ok: false,
+      message: "La red contiene tramos con extremos inexistentes.",
+    };
+  }
+
+  if (findInvalidRouteSegmentIds(plan, network, classificationIndex).size > 0) {
+    return {
+      ok: false,
+      message: "La edicion atraviesa una restriccion activa.",
+    };
+  }
+
+  if (hasDuplicateSegments(network)) {
+    return {
+      ok: false,
+      message: "La red duplica un tramo.",
+    };
+  }
+
+  if (hasZeroLengthSegments(network, plan.equipment, MIN_SECTION_LINK_LENGTH)) {
+    return {
+      ok: false,
+      message: "La edicion deja un tramo sin longitud.",
+    };
+  }
+
+  if (detectRouteCycle(network)) {
+    return {
+      ok: false,
+      message: "La edicion genera un ciclo.",
+    };
+  }
+
+  if (hasRouteCrossingsWithoutNode(network, plan.equipment)) {
+    return {
+      ok: false,
+      message: "La edicion cruza tramos sin nodo.",
+    };
+  }
+
+  if (!routeNetworkConnectedToSupply(network, plan.equipment)) {
+    return {
+      ok: false,
+      message: "Todos los tramos deben tener camino hasta la alimentacion.",
+    };
+  }
+
+  if (!applianceNodesAreTerminal(network)) {
+    return {
+      ok: false,
+      message: "Cada artefacto conectado debe quedar como terminal.",
+    };
+  }
+
+  return { ok: true };
 }
 
 function validateRouteNetworkForAcceptance(

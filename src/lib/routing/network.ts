@@ -116,8 +116,29 @@ export function routeSegmentPhysicalLengthMeters(
 ) {
   return (
     routeSegmentHorizontalLengthSource(segment) * scaleMetersPerSourceUnit +
-    Math.abs(pointZMeters(segment.from) - pointZMeters(segment.to))
+    routeSegmentVerticalLengthMeters(segment)
   );
+}
+
+export function routeSegmentVerticalLengthMeters(segment: ResolvedRouteSegment) {
+  const path = segment.path.length >= 2
+    ? segment.path
+    : resolveRouteSegmentPath(segment, segment.from, segment.to);
+
+  let previousZ = pointZMeters(path[0]);
+  let total = 0;
+
+  for (let index = 1; index < path.length; index += 1) {
+    const point = path[index];
+    const isEndpoint = index === path.length - 1;
+    const nextZ =
+      pointHasExplicitZ(point) || isEndpoint ? pointZMeters(point) : previousZ;
+
+    total += Math.abs(nextZ - previousZ);
+    previousZ = nextZ;
+  }
+
+  return total;
 }
 
 export function projectPointToRouteSegmentPath(
@@ -1007,10 +1028,16 @@ function routeSegmentVertices(segment: RouteSegment) {
 }
 
 function routeSegmentVertex(point: Point2D): Point2D {
-  return {
-    x: point.x,
-    y: point.y,
-  };
+  return typeof point.z === "number" && Number.isFinite(point.z)
+    ? {
+        x: point.x,
+        y: point.y,
+        z: point.z,
+      }
+    : {
+        x: point.x,
+        y: point.y,
+      };
 }
 
 function updateRouteSegmentVertices(

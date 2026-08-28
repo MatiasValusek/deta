@@ -6,27 +6,41 @@ import type {
   SectionRouteProjectedSegment,
   SectionRouteProjection,
 } from "@/lib/sections/routeProjection";
+import {
+  sectionRouteHeightTargetKey,
+  sectionRouteHeightTargetsEqual,
+  type SectionRouteHeightTarget,
+} from "@/lib/sections/routeHeightEditing";
 
 type SectionRouteProjectionOverlayProps = {
+  selectedHeightTarget?: SectionRouteHeightTarget | null;
   projection: SectionRouteProjection | null;
   sourceToScreen: (point: Point2D) => Point2D;
+  onHeightTargetSelect?: (
+    target: SectionRouteHeightTarget,
+    currentHeightMeters: number,
+  ) => void;
 };
 
 export function SectionRouteProjectionOverlay({
+  selectedHeightTarget,
   projection,
   sourceToScreen,
+  onHeightTargetSelect,
 }: SectionRouteProjectionOverlayProps) {
   if (!projection) {
     return null;
   }
 
   return (
-    <g className="section-route-projection-overlay" pointerEvents="none">
+    <g className="section-route-projection-overlay">
       {projection.segments.map((segment) => (
         <ProjectedSegment
           key={segment.id}
+          selectedHeightTarget={selectedHeightTarget}
           segment={segment}
           sourceToScreen={sourceToScreen}
+          onHeightTargetSelect={onHeightTargetSelect}
         />
       ))}
       {projection.accessories.map((accessory) => (
@@ -40,7 +54,9 @@ export function SectionRouteProjectionOverlay({
         <ProjectedEquipment
           equipment={equipment}
           key={equipment.nodeId}
+          selectedHeightTarget={selectedHeightTarget}
           sourceToScreen={sourceToScreen}
+          onHeightTargetSelect={onHeightTargetSelect}
         />
       ))}
     </g>
@@ -48,11 +64,18 @@ export function SectionRouteProjectionOverlay({
 }
 
 function ProjectedSegment({
+  selectedHeightTarget,
   segment,
   sourceToScreen,
+  onHeightTargetSelect,
 }: {
+  selectedHeightTarget?: SectionRouteHeightTarget | null;
   segment: SectionRouteProjectedSegment;
   sourceToScreen: (point: Point2D) => Point2D;
+  onHeightTargetSelect?: (
+    target: SectionRouteHeightTarget,
+    currentHeightMeters: number,
+  ) => void;
 }) {
   const screenPoints = segment.points.map((point) =>
     sourceToScreen(point.sectionPoint),
@@ -77,6 +100,7 @@ function ProjectedSegment({
         strokeLinecap="round"
         strokeLinejoin="round"
         strokeWidth="4"
+        pointerEvents="none"
       />
       <path
         d={path}
@@ -86,6 +110,7 @@ function ProjectedSegment({
         strokeLinejoin="round"
         strokeOpacity="0.55"
         strokeWidth="1.2"
+        pointerEvents="none"
       />
       {labelPoint ? (
         <ProjectionLabel
@@ -107,6 +132,19 @@ function ProjectedSegment({
             text={formatElevation(point.elevationMeters)}
           />
         ))}
+      {segment.points.map((point, index) => (
+        <ProjectedHeightHandle
+          currentHeightMeters={point.elevationMeters}
+          key={`${segment.segmentId}:height:${index}`}
+          point={sourceToScreen(point.sectionPoint)}
+          selected={sectionRouteHeightTargetsEqual(
+            selectedHeightTarget,
+            point.heightTarget,
+          )}
+          target={point.heightTarget}
+          onHeightTargetSelect={onHeightTargetSelect}
+        />
+      ))}
     </g>
   );
 }
@@ -130,6 +168,7 @@ function ProjectedAccessory({
       data-section-route-accessory-id={accessory.id}
       data-section-route-accessory-kind={accessory.kind}
       data-section-route-accessory-status={accessory.status}
+      pointerEvents="none"
       transform={`translate(${point.x} ${point.y})`}
     >
       {accessory.kind === "valve" ? (
@@ -155,13 +194,24 @@ function ProjectedAccessory({
 
 function ProjectedEquipment({
   equipment,
+  selectedHeightTarget,
   sourceToScreen,
+  onHeightTargetSelect,
 }: {
   equipment: SectionRouteProjectedEquipment;
+  selectedHeightTarget?: SectionRouteHeightTarget | null;
   sourceToScreen: (point: Point2D) => Point2D;
+  onHeightTargetSelect?: (
+    target: SectionRouteHeightTarget,
+    currentHeightMeters: number,
+  ) => void;
 }) {
   const point = sourceToScreen(equipment.sectionPoint);
   const isSupply = equipment.role === "supply";
+  const selected = sectionRouteHeightTargetsEqual(
+    selectedHeightTarget,
+    equipment.heightTarget,
+  );
 
   return (
     <g
@@ -174,12 +224,73 @@ function ProjectedEquipment({
         r={isSupply ? 6 : 5}
         stroke={isSupply ? "#92400e" : "#6d28d9"}
         strokeWidth="2"
+        pointerEvents="none"
+      />
+      <ProjectedHeightHandle
+        currentHeightMeters={equipment.zMeters}
+        point={{ x: 0, y: 0 }}
+        selected={selected}
+        target={equipment.heightTarget}
+        onHeightTargetSelect={onHeightTargetSelect}
       />
       <ProjectionLabel
         fill={isSupply ? "#92400e" : "#5b21b6"}
         point={{ x: 0, y: 16 }}
         text={equipment.label}
       />
+    </g>
+  );
+}
+
+function ProjectedHeightHandle({
+  currentHeightMeters,
+  point,
+  selected,
+  target,
+  onHeightTargetSelect,
+}: {
+  currentHeightMeters: number;
+  point: Point2D;
+  selected: boolean;
+  target: SectionRouteHeightTarget | null;
+  onHeightTargetSelect?: (
+    target: SectionRouteHeightTarget,
+    currentHeightMeters: number,
+  ) => void;
+}) {
+  if (!target || !onHeightTargetSelect) {
+    return null;
+  }
+
+  const stroke = selected ? "#be123c" : "#0f766e";
+
+  return (
+    <g
+      data-section-route-height-target={sectionRouteHeightTargetKey(target)}
+      pointerEvents="all"
+      transform={`translate(${point.x} ${point.y})`}
+      onClick={(event) => {
+        event.stopPropagation();
+        onHeightTargetSelect(target, currentHeightMeters);
+      }}
+      onPointerDown={(event) => {
+        event.stopPropagation();
+      }}
+    >
+      <circle
+        fill={selected ? "#fff1f2" : "#ecfeff"}
+        r={selected ? 7 : 5}
+        stroke={stroke}
+        strokeWidth={selected ? 2.4 : 1.8}
+      />
+      {selected ? (
+        <ProjectionLabel
+          fill={stroke}
+          point={{ x: 0, y: -18 }}
+          text={formatElevation(currentHeightMeters)}
+        />
+      ) : null}
+      <title>{`Editar cota ${formatElevation(currentHeightMeters)}`}</title>
     </g>
   );
 }

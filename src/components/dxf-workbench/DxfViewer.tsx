@@ -70,6 +70,8 @@ import {
 import { SectionRouteProjectionOverlay } from "./SectionRouteProjectionOverlay";
 import { SourceOverlay, type SourceOverlayData } from "./SourceOverlay";
 import type { SectionRouteProjection } from "@/lib/sections/routeProjection";
+import type { SectionRouteHeightTarget } from "@/lib/sections/routeHeightEditing";
+import type { PhysicalRouteEditSelection } from "@/lib/routing/physicalRouteEditing";
 
 type DxfViewerProps = {
   baseId: string;
@@ -86,6 +88,7 @@ type DxfViewerProps = {
   equipmentDraft: EquipmentDraft | null;
   equipmentPlacementMode: EquipmentPlacementMode;
   hoveredEquipmentId: string | null;
+  highlightedRouteSegmentIds: Set<string>;
   invalidRouteSegmentIds: Set<string>;
   pendingEntityIds: string[];
   routeProposal: AutomaticRouteProposal | null;
@@ -107,6 +110,8 @@ type DxfViewerProps = {
   sectionRegistrationMode: SectionRegistrationToolMode;
   sectionRegistrationSaved: SectionRegistrationSavedOverlay | null;
   sectionRouteProjection: SectionRouteProjection | null;
+  selectedSectionRouteHeightTarget: SectionRouteHeightTarget | null;
+  selectedRouteEdit: PhysicalRouteEditSelection | null;
   selectionMode: ManualSelectionMode;
   semanticViewMode: SemanticViewMode;
   showConstraints: boolean;
@@ -126,6 +131,23 @@ type DxfViewerProps = {
   onEquipmentPoint: (point: Point2D) => void;
   onEquipmentPreview: (point: Point2D | null) => void;
   onEquipmentSelect: (equipmentId: string) => void;
+  onPhysicalRouteElementSelect: (selection: PhysicalRouteEditSelection) => void;
+  onPhysicalRouteNodeMove: (
+    nodeId: string,
+    point: Point2D,
+    tolerance: number,
+  ) => void;
+  onPhysicalRouteVertexInsert: (
+    segmentId: string,
+    point: Point2D,
+    tolerance: number,
+  ) => void;
+  onPhysicalRouteVertexMove: (
+    segmentId: string,
+    vertexIndex: number,
+    point: Point2D,
+    tolerance: number,
+  ) => void;
   onRectangleSelect: (entityIds: string[]) => void;
   onRoutePoint: (point: Point2D, tolerance: number, equipmentId?: string) => void;
   onRoutePreview: (point: Point2D | null, tolerance: number | null) => void;
@@ -137,6 +159,10 @@ type DxfViewerProps = {
   onSectionRegistrationPoint: (point: Point2D) => void;
   onSectionRegistrationPreview: (point: Point2D | null) => void;
   onSectionRegistrationSide: (side: SectionViewSide) => void;
+  onSectionRouteHeightTargetSelect: (
+    target: SectionRouteHeightTarget,
+    currentHeightMeters: number,
+  ) => void;
   onSourcePoint: (point: Point2D) => void;
   onViewChange: (baseId: string, view: ViewTransform | null) => void;
   highlightedSectionLinkId: string | null;
@@ -203,6 +229,7 @@ export function DxfViewer({
   equipmentDraft,
   equipmentPlacementMode,
   hoveredEquipmentId,
+  highlightedRouteSegmentIds,
   invalidRouteSegmentIds,
   pendingEntityIds,
   routeProposal,
@@ -224,6 +251,8 @@ export function DxfViewer({
   sectionRegistrationMode,
   sectionRegistrationSaved,
   sectionRouteProjection,
+  selectedSectionRouteHeightTarget,
+  selectedRouteEdit,
   selectionMode,
   semanticViewMode,
   showConstraints,
@@ -239,6 +268,10 @@ export function DxfViewer({
   onEquipmentPoint,
   onEquipmentPreview,
   onEquipmentSelect,
+  onPhysicalRouteElementSelect,
+  onPhysicalRouteNodeMove,
+  onPhysicalRouteVertexInsert,
+  onPhysicalRouteVertexMove,
   onRectangleSelect,
   onRoutePoint,
   onRoutePreview,
@@ -250,6 +283,7 @@ export function DxfViewer({
   onSectionRegistrationPoint,
   onSectionRegistrationPreview,
   onSectionRegistrationSide,
+  onSectionRouteHeightTargetSelect,
   onSourcePoint,
   onViewChange,
   highlightedSectionLinkId,
@@ -857,19 +891,38 @@ export function DxfViewer({
             />
             <SectionRouteProjectionOverlay
               projection={sectionRouteProjection}
+              selectedHeightTarget={selectedSectionRouteHeightTarget}
               sourceToScreen={(point) => worldToScreen(point, view)}
+              onHeightTargetSelect={onSectionRouteHeightTargetSelect}
             />
             <RouteOverlay
               draft={routeDraft}
               equipment={equipment}
+              highlightedSegmentIds={highlightedRouteSegmentIds}
               invalidSegmentIds={invalidRouteSegmentIds}
+              isEditingEnabled={
+                routeToolMode === "inactive" &&
+                equipmentPlacementMode === "inactive" &&
+                constraintToolMode === "none" &&
+                sectionLinkMode === "inactive" &&
+                sectionRegistrationMode === "inactive" &&
+                !isPointSelectionActive &&
+                selectionMode === "pan"
+              }
               intentConnections={routeIntentConnections}
               intentDraft={routeIntentDraft}
               network={routeNetwork}
               proposal={routeProposal}
               proposalOutdated={routeProposalOutdated}
+              routeEditTolerance={ROUTE_POINTER_TOLERANCE_PX / view.scale}
+              screenToSource={(point) => screenToWorld(point, view)}
+              selectedEdit={selectedRouteEdit}
               showRoute={showRoute}
               sourceToScreen={(point) => worldToScreen(point, view)}
+              onElementSelect={onPhysicalRouteElementSelect}
+              onNodeMove={onPhysicalRouteNodeMove}
+              onVertexInsert={onPhysicalRouteVertexInsert}
+              onVertexMove={onPhysicalRouteVertexMove}
             />
             <EquipmentOverlay
               draft={equipmentDraft}

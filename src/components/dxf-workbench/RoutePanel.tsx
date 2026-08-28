@@ -5,6 +5,10 @@ import {
   type WorkbenchEquipment,
 } from "@/lib/equipment/types";
 import type {
+  PhysicalRouteEditSelection,
+  PhysicalRouteSnapOptions,
+} from "@/lib/routing/physicalRouteEditing";
+import type {
   AutomaticRouteProposal,
   RouteDraft,
   RouteIntentConnection,
@@ -39,6 +43,8 @@ type RoutePanelProps = {
   proposalOutdated: boolean;
   proposalRequiresScale: boolean;
   restrictionCount: number;
+  selectedEdit: PhysicalRouteEditSelection | null;
+  snapOptions: PhysicalRouteSnapOptions;
   intentConnections: RouteIntentConnection[];
   intentDraft: RouteIntentDraft | null;
   segmentCount: number;
@@ -47,7 +53,9 @@ type RoutePanelProps = {
   onCancelIntentDraft: () => void;
   onClearNetwork: () => void;
   onClearIntentConnections: () => void;
+  onClearRouteSelection: () => void;
   onConnectAppliance: () => void;
+  onDeleteSelectedVertex: () => void;
   onDeleteIntentConnection: (connectionId: string) => void;
   onDiscardProposal: () => void;
   onDisconnectAppliance: (equipmentId: string) => void;
@@ -59,6 +67,10 @@ type RoutePanelProps = {
   onRegenerateProposal: () => void;
   onSelectDraftTarget: (equipmentId: string) => void;
   onShowRouteChange: (show: boolean) => void;
+  onSnapOptionChange: (
+    option: keyof PhysicalRouteSnapOptions,
+    enabled: boolean,
+  ) => void;
 };
 
 export function RoutePanel({
@@ -82,6 +94,8 @@ export function RoutePanel({
   proposalOutdated,
   proposalRequiresScale,
   restrictionCount,
+  selectedEdit,
+  snapOptions,
   intentConnections,
   intentDraft,
   segmentCount,
@@ -90,7 +104,9 @@ export function RoutePanel({
   onCancelIntentDraft,
   onClearNetwork,
   onClearIntentConnections,
+  onClearRouteSelection,
   onConnectAppliance,
+  onDeleteSelectedVertex,
   onDeleteIntentConnection,
   onDiscardProposal,
   onDisconnectAppliance,
@@ -102,6 +118,7 @@ export function RoutePanel({
   onRegenerateProposal,
   onSelectDraftTarget,
   onShowRouteChange,
+  onSnapOptionChange,
 }: RoutePanelProps) {
   const marginIsValid = parseProposalMarginInput(proposalMarginInput);
   const canConnect =
@@ -193,6 +210,16 @@ export function RoutePanel({
         <dt>Longitud total</dt>
         <dd className="text-right">{lengthLabel}</dd>
       </dl>
+
+      <RoutePhysicalEditControls
+        disabled={!planReady || !isPlanActive || Boolean(draft) || Boolean(intentDraft) || Boolean(proposal)}
+        equipment={equipment}
+        selectedEdit={selectedEdit}
+        snapOptions={snapOptions}
+        onClearSelection={onClearRouteSelection}
+        onDeleteSelectedVertex={onDeleteSelectedVertex}
+        onSnapOptionChange={onSnapOptionChange}
+      />
 
       <div className="mt-3 grid grid-cols-2 gap-1">
         <button
@@ -536,6 +563,150 @@ function ProposalSummary({
       </div>
     </section>
   );
+}
+
+function RoutePhysicalEditControls({
+  disabled,
+  equipment,
+  selectedEdit,
+  snapOptions,
+  onClearSelection,
+  onDeleteSelectedVertex,
+  onSnapOptionChange,
+}: {
+  disabled: boolean;
+  equipment: WorkbenchEquipment[];
+  selectedEdit: PhysicalRouteEditSelection | null;
+  snapOptions: PhysicalRouteSnapOptions;
+  onClearSelection: () => void;
+  onDeleteSelectedVertex: () => void;
+  onSnapOptionChange: (
+    option: keyof PhysicalRouteSnapOptions,
+    enabled: boolean,
+  ) => void;
+}) {
+  return (
+    <section className="mt-3 rounded border border-[var(--line)] px-3 py-2 text-xs">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="font-semibold">Edicion fisica</div>
+          <p className="mt-1 truncate text-[var(--muted)]">
+            {routeEditSelectionLabel(selectedEdit, equipment)}
+          </p>
+        </div>
+        <button
+          className="shrink-0 rounded border border-[var(--line)] px-2 py-1 hover:border-[var(--accent)] disabled:text-[var(--muted)]"
+          disabled={!selectedEdit}
+          type="button"
+          onClick={onClearSelection}
+        >
+          Soltar
+        </button>
+      </div>
+
+      {selectedEdit?.kind === "vertex" ? (
+        <button
+          className="mt-2 w-full rounded border border-[var(--line)] px-2 py-1 hover:border-[var(--accent)] disabled:text-[var(--muted)]"
+          disabled={disabled}
+          type="button"
+          onClick={onDeleteSelectedVertex}
+        >
+          Borrar vertice
+        </button>
+      ) : null}
+
+      <div className="mt-2 grid grid-cols-2 gap-1">
+        <SnapToggle
+          checked={snapOptions.enabled}
+          disabled={disabled}
+          label="Snap"
+          option="enabled"
+          onChange={onSnapOptionChange}
+        />
+        <SnapToggle
+          checked={snapOptions.axes}
+          disabled={disabled || !snapOptions.enabled}
+          label="Ejes X/Y"
+          option="axes"
+          onChange={onSnapOptionChange}
+        />
+        <SnapToggle
+          checked={snapOptions.vertices}
+          disabled={disabled || !snapOptions.enabled}
+          label="Vertices"
+          option="vertices"
+          onChange={onSnapOptionChange}
+        />
+        <SnapToggle
+          checked={snapOptions.structure}
+          disabled={disabled || !snapOptions.enabled}
+          label="Muros"
+          option="structure"
+          onChange={onSnapOptionChange}
+        />
+        <SnapToggle
+          checked={snapOptions.orthogonal}
+          disabled={disabled || !snapOptions.enabled}
+          label="Ortogonal"
+          option="orthogonal"
+          onChange={onSnapOptionChange}
+        />
+      </div>
+    </section>
+  );
+}
+
+function SnapToggle({
+  checked,
+  disabled,
+  label,
+  option,
+  onChange,
+}: {
+  checked: boolean;
+  disabled: boolean;
+  label: string;
+  option: keyof PhysicalRouteSnapOptions;
+  onChange: (option: keyof PhysicalRouteSnapOptions, enabled: boolean) => void;
+}) {
+  return (
+    <label className="flex items-center gap-2 rounded border border-[var(--line)] px-2 py-1">
+      <input
+        checked={checked}
+        disabled={disabled}
+        type="checkbox"
+        onChange={(event) => onChange(option, event.target.checked)}
+      />
+      <span className="truncate">{label}</span>
+    </label>
+  );
+}
+
+function routeEditSelectionLabel(
+  selection: PhysicalRouteEditSelection | null,
+  equipment: WorkbenchEquipment[],
+) {
+  if (!selection) {
+    return "Sin seleccion";
+  }
+
+  if (selection.kind === "segment") {
+    return `Tramo ${selection.segmentId}`;
+  }
+
+  if (selection.kind === "vertex") {
+    return `Vertice ${selection.vertexIndex + 1} de ${selection.segmentId}`;
+  }
+
+  if (selection.kind === "terminal") {
+    return `Terminal ${equipmentName(selection.equipmentId, equipment)}`;
+  }
+
+  return `Nodo ${selection.nodeId}`;
+}
+
+function equipmentName(equipmentId: string, equipment: WorkbenchEquipment[]) {
+  return equipment.find((item) => item.id === equipmentId)?.name ?? equipmentId;
 }
 
 function RouteIntentDraftControls({
