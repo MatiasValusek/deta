@@ -15,6 +15,49 @@ export type EquipmentType =
 
 export type DemandUnit = "kcal_h" | "m3_h";
 
+export type EquipmentWallReferenceKind =
+  | "hard_structure"
+  | "manual_constraint"
+  | "reference_wall";
+
+export type EquipmentWallAnchor = {
+  distanceSource: number | null;
+  normal: Point2D | null;
+  orientationRadians: number | null;
+  pageNumber: number | null;
+  referenceId: string | null;
+  referenceKind: EquipmentWallReferenceKind | null;
+  source: "dxf" | "pdf" | null;
+  status: "anchored" | "pending";
+  wallPoint: Point2D | null;
+};
+
+export type EquipmentTerminalHeightStatus =
+  | "confirmed"
+  | "pending"
+  | "suggested";
+
+export type EquipmentTerminalOutletSide = "direct" | "left" | "right";
+
+export type EquipmentTerminalProfile =
+  | "boiler_wall_rh"
+  | "dryer_wall_valve"
+  | "generic_terminal"
+  | "heater_wall_rh"
+  | "oven_wall_valve"
+  | "space_heater_wall_valve"
+  | "stove_wall_valve"
+  | "storage_heater_wall_rh";
+
+export type EquipmentTerminalConfig = {
+  connectionHeightMeters: number | null;
+  heightStatus: EquipmentTerminalHeightStatus;
+  lateralOffsetMeters: number;
+  outletSide: EquipmentTerminalOutletSide;
+  requiresShutoffValve: boolean;
+  terminalProfile: EquipmentTerminalProfile;
+};
+
 export type WorkbenchEquipment = {
   id: string;
   planBaseId: string;
@@ -22,7 +65,10 @@ export type WorkbenchEquipment = {
   role: EquipmentRole;
   type: EquipmentType;
   name: string;
+  bodyPoint?: Point2D;
   connectionPoint: Point2D;
+  terminalConfig?: EquipmentTerminalConfig;
+  wallAnchor?: EquipmentWallAnchor;
   demandValue?: number;
   demandUnit?: DemandUnit;
   notes?: string;
@@ -38,9 +84,13 @@ export type EquipmentDraft = {
   role: EquipmentRole;
   type: EquipmentType;
   name: string;
+  bodyPoint: Point2D | null;
   connectionPoint: Point2D | null;
   connectionHeightInput: string;
   previewPoint: Point2D | null;
+  terminalConfig: EquipmentTerminalConfig | null;
+  terminalLateralOffsetInput: string;
+  wallAnchor: EquipmentWallAnchor | null;
   demandValueInput: string;
   demandUnit: DemandUnit;
   notes: string;

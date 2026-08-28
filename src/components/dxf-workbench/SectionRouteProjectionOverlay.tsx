@@ -206,8 +206,19 @@ function ProjectedEquipment({
     currentHeightMeters: number,
   ) => void;
 }) {
-  const point = sourceToScreen(equipment.sectionPoint);
+  const connectionPoint = sourceToScreen(equipment.sectionPoint);
+  const bodyPoint = sourceToScreen(
+    equipment.bodySectionPoint ?? equipment.sectionPoint,
+  );
   const isSupply = equipment.role === "supply";
+  const stroke = isSupply
+    ? "#92400e"
+    : equipment.anchorStatus === "pending"
+      ? "#d97706"
+      : "#6d28d9";
+  const connectorVisible =
+    Math.hypot(bodyPoint.x - connectionPoint.x, bodyPoint.y - connectionPoint.y) >
+    0.5;
   const selected = sectionRouteHeightTargetsEqual(
     selectedHeightTarget,
     equipment.heightTarget,
@@ -215,28 +226,66 @@ function ProjectedEquipment({
 
   return (
     <g
+      data-section-route-equipment-anchor-status={equipment.anchorStatus ?? "none"}
       data-section-route-equipment-id={equipment.equipmentId}
       data-section-route-node-id={equipment.nodeId}
-      transform={`translate(${point.x} ${point.y})`}
     >
+      {connectorVisible ? (
+        <line
+          pointerEvents="none"
+          stroke={stroke}
+          strokeDasharray={equipment.anchorStatus === "pending" ? "4 3" : undefined}
+          strokeLinecap="round"
+          strokeWidth="1.6"
+          x1={bodyPoint.x}
+          x2={connectionPoint.x}
+          y1={bodyPoint.y}
+          y2={connectionPoint.y}
+        />
+      ) : null}
+      {isSupply ? (
+        <circle
+          cx={bodyPoint.x}
+          cy={bodyPoint.y}
+          fill="#ffffff"
+          r="6"
+          stroke={stroke}
+          strokeWidth="2"
+          pointerEvents="none"
+        />
+      ) : (
+        <rect
+          fill="#ffffff"
+          height="12"
+          pointerEvents="none"
+          stroke={stroke}
+          strokeDasharray={equipment.anchorStatus === "pending" ? "4 3" : undefined}
+          strokeWidth="2"
+          width="16"
+          x={bodyPoint.x - 8}
+          y={bodyPoint.y - 6}
+        />
+      )}
       <circle
-        fill="#ffffff"
-        r={isSupply ? 6 : 5}
-        stroke={isSupply ? "#92400e" : "#6d28d9"}
-        strokeWidth="2"
+        cx={connectionPoint.x}
+        cy={connectionPoint.y}
+        fill={selected ? "#fff1f2" : "#ffffff"}
+        r="3.5"
+        stroke={selected ? "#be123c" : stroke}
+        strokeWidth="1.8"
         pointerEvents="none"
       />
       <ProjectedHeightHandle
         currentHeightMeters={equipment.zMeters}
-        point={{ x: 0, y: 0 }}
+        point={connectionPoint}
         selected={selected}
         target={equipment.heightTarget}
         onHeightTargetSelect={onHeightTargetSelect}
       />
       <ProjectionLabel
-        fill={isSupply ? "#92400e" : "#5b21b6"}
-        point={{ x: 0, y: 16 }}
-        text={equipment.label}
+        fill={stroke}
+        point={offsetPoint(bodyPoint, 0, 17)}
+        text={`${equipment.label} ${formatElevation(equipment.zMeters)}`}
       />
     </g>
   );

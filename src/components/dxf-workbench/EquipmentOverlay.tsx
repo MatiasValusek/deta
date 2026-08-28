@@ -48,28 +48,36 @@ export function EquipmentOverlay({
   return (
     <g className="equipment-overlay">
       {showEquipment
-        ? equipment.map((item) => (
-            <EquipmentMarker
-              equipment={item}
-              isHovered={item.id === hoveredEquipmentId}
-              interaction={equipmentInteractionForRoute(
-                item,
-                routeDraft,
-                routeIntentDraft,
-                {
-                  isInteractionDisabled,
-                  isPlacingEquipment: draft?.step === "placing",
-                },
-              )}
-              isSelected={item.id === selectedEquipmentId}
-              key={item.id}
-              point={sourceToScreen(item.connectionPoint)}
-              routeHitTolerance={routeHitTolerance}
-              onHoverEquipment={onHoverEquipment}
-              onRouteEquipmentPoint={onRouteEquipmentPoint}
-              onSelectEquipment={onSelectEquipment}
-            />
-          ))
+        ? equipment.map((item) => {
+            const bodyPoint =
+              item.role === "appliance"
+                ? item.bodyPoint ?? item.connectionPoint
+                : item.connectionPoint;
+
+            return (
+              <EquipmentMarker
+                bodyPoint={sourceToScreen(bodyPoint)}
+                connectionPoint={sourceToScreen(item.connectionPoint)}
+                equipment={item}
+                isHovered={item.id === hoveredEquipmentId}
+                interaction={equipmentInteractionForRoute(
+                  item,
+                  routeDraft,
+                  routeIntentDraft,
+                  {
+                    isInteractionDisabled,
+                    isPlacingEquipment: draft?.step === "placing",
+                  },
+                )}
+                isSelected={item.id === selectedEquipmentId}
+                key={item.id}
+                routeHitTolerance={routeHitTolerance}
+                onHoverEquipment={onHoverEquipment}
+                onRouteEquipmentPoint={onRouteEquipmentPoint}
+                onSelectEquipment={onSelectEquipment}
+              />
+            );
+          })
         : null}
       {draft ? (
         <DraftEquipmentMarker draft={draft} sourceToScreen={sourceToScreen} />
@@ -79,21 +87,23 @@ export function EquipmentOverlay({
 }
 
 function EquipmentMarker({
+  bodyPoint,
+  connectionPoint,
   equipment,
   isHovered,
   interaction,
   isSelected,
-  point,
   routeHitTolerance,
   onHoverEquipment,
   onRouteEquipmentPoint,
   onSelectEquipment,
 }: {
+  bodyPoint: Point2D;
+  connectionPoint: Point2D;
   equipment: WorkbenchEquipment;
   isHovered: boolean;
   interaction: EquipmentMarkerInteraction;
   isSelected: boolean;
-  point: Point2D;
   routeHitTolerance: number;
   onHoverEquipment: (equipmentId: string | null) => void;
   onRouteEquipmentPoint?: (
@@ -105,8 +115,13 @@ function EquipmentMarker({
 }) {
   const [isLocalHovered, setIsLocalHovered] = useState(false);
   const highlighted = isHovered || isSelected || isLocalHovered;
-  const pending = hasPendingDemand(equipment);
+  const hasPendingAnchor = equipmentAnchorIsPending(equipment);
+  const pending = hasPendingDemand(equipment) || hasPendingAnchor;
   const isInteractive = interaction !== "none";
+  const connectionOffset = {
+    x: connectionPoint.x - bodyPoint.x,
+    y: connectionPoint.y - bodyPoint.y,
+  };
 
   return (
     <g
@@ -116,9 +131,14 @@ function EquipmentMarker({
       data-equipment-interaction={interaction}
       data-equipment-role={equipment.role}
       data-equipment-type={equipment.type}
+      data-wall-anchor-status={
+        equipment.role === "appliance"
+          ? equipment.wallAnchor?.status ?? "pending"
+          : undefined
+      }
       opacity={highlighted ? 1 : 0.88}
       pointerEvents={isInteractive ? "all" : "none"}
-      transform={`translate(${point.x} ${point.y})`}
+      transform={`translate(${bodyPoint.x} ${bodyPoint.y})`}
       onClick={(event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -151,7 +171,14 @@ function EquipmentMarker({
         event.stopPropagation();
       }}
     >
-      <title>{equipment.name}</title>
+      <title>
+        {equipment.name}
+        {equipment.role === "appliance"
+          ? hasPendingAnchor
+            ? " - anclaje pendiente"
+            : " - anclado a pared"
+          : ""}
+      </title>
       <circle
         data-equipment-hitbox={EQUIPMENT_HITBOX_SIZE}
         fill="#000000"
@@ -165,6 +192,13 @@ function EquipmentMarker({
         pending={pending}
         role={equipment.role}
       />
+      {equipment.role === "appliance" ? (
+        <GasConnectionMarker
+          highlighted={highlighted}
+          offset={connectionOffset}
+          pending={hasPendingAnchor}
+        />
+      ) : null}
       {highlighted ? <MarkerLabel name={equipment.name} role={equipment.role} /> : null}
     </g>
   );
@@ -211,19 +245,33 @@ function DraftEquipmentMarker({
   draft: EquipmentDraft;
   sourceToScreen: (point: Point2D) => Point2D;
 }) {
-  const sourcePoint = draft.connectionPoint ?? draft.previewPoint;
+  const sourcePoint = draft.bodyPoint ?? draft.connectionPoint ?? draft.previewPoint;
+  const sourceConnectionPoint =
+    draft.connectionPoint ?? draft.previewPoint ?? draft.bodyPoint;
 
-  if (!sourcePoint) {
+  if (!sourcePoint || !sourceConnectionPoint) {
     return null;
   }
 
   const point = sourceToScreen(sourcePoint);
+  const connectionPoint = sourceToScreen(sourceConnectionPoint);
+  const hasPendingAnchor = draftAnchorIsPending(draft);
   const pending =
-    draft.role === "appliance" && draft.demandValueInput.trim().length === 0;
+    draft.role === "appliance" &&
+    (draft.demandValueInput.trim().length === 0 || hasPendingAnchor);
+  const connectionOffset = {
+    x: connectionPoint.x - point.x,
+    y: connectionPoint.y - point.y,
+  };
 
   return (
     <g
       data-equipment-draft="true"
+      data-wall-anchor-status={
+        draft.role === "appliance"
+          ? draft.wallAnchor?.status ?? "pending"
+          : undefined
+      }
       opacity="0.82"
       pointerEvents="none"
       transform={`translate(${point.x} ${point.y})`}
@@ -241,6 +289,53 @@ function DraftEquipmentMarker({
         pending={pending}
         role={draft.role}
       />
+      {draft.role === "appliance" ? (
+        <GasConnectionMarker
+          highlighted
+          offset={connectionOffset}
+          pending={hasPendingAnchor}
+        />
+      ) : null}
+    </g>
+  );
+}
+
+function GasConnectionMarker({
+  highlighted,
+  offset,
+  pending,
+}: {
+  highlighted: boolean;
+  offset: Point2D;
+  pending: boolean;
+}) {
+  const color = pending ? "#f59e0b" : "#111827";
+  const isSeparate = Math.hypot(offset.x, offset.y) > 0.5;
+
+  return (
+    <g data-equipment-connection-point="true" pointerEvents="all">
+      {isSeparate ? (
+        <line
+          stroke={pending ? "#f59e0b" : "#6d28d9"}
+          strokeDasharray={pending ? "4 3" : "2 3"}
+          strokeLinecap="round"
+          strokeWidth={highlighted ? "1.8" : "1.3"}
+          x1="0"
+          x2={offset.x}
+          y1="0"
+          y2={offset.y}
+        />
+      ) : null}
+      <circle
+        cx={offset.x}
+        cy={offset.y}
+        fill="#ffffff"
+        r={highlighted ? "5" : "4"}
+        stroke={color}
+        strokeDasharray={pending ? "3 2" : undefined}
+        strokeWidth="1.8"
+      />
+      <circle cx={offset.x} cy={offset.y} fill={color} r="1.7" />
     </g>
   );
 }
@@ -302,6 +397,12 @@ function MarkerSymbol({
         y1="-5"
         y2="5"
       />
+      <circle
+        data-equipment-body-point="true"
+        fill="#111827"
+        pointerEvents="none"
+        r="1.8"
+      />
       <text
         fill="#111827"
         fontSize={code.length > 2 ? "8.5" : "10"}
@@ -314,6 +415,16 @@ function MarkerSymbol({
       </text>
     </>
   );
+}
+
+function equipmentAnchorIsPending(equipment: WorkbenchEquipment) {
+  return (
+    equipment.role === "appliance" && equipment.wallAnchor?.status !== "anchored"
+  );
+}
+
+function draftAnchorIsPending(draft: EquipmentDraft) {
+  return draft.role === "appliance" && draft.wallAnchor?.status !== "anchored";
 }
 
 function MarkerLabel({

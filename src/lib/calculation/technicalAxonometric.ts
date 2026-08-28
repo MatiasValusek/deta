@@ -1,7 +1,16 @@
 import { equipmentCode, type WorkbenchEquipment } from "@/lib/equipment/types";
 import type { Point2D } from "@/lib/geometry/types";
-import { buildEquipmentIndex, getRouteNeighbors, resolveRouteNodePosition } from "@/lib/routing/network";
-import type { ManualRouteNetwork, RouteNode } from "@/lib/routing/types";
+import {
+  buildEquipmentIndex,
+  getRouteNeighbors,
+  resolveRouteNodePosition,
+  resolveRouteSegments,
+} from "@/lib/routing/network";
+import type {
+  ManualRouteNetwork,
+  ResolvedRouteSegment,
+  RouteNode,
+} from "@/lib/routing/types";
 import type { PipeDiameterReference } from "@/lib/calculation/pipeSystem";
 import type { TechnicalCalculationResult } from "@/lib/calculation/technicalTree";
 import type { TechnicalAdoptedDiameterValidation } from "@/lib/calculation/technicalAdoptedDiameterValidation";
@@ -164,6 +173,12 @@ export function createTechnicalAxonometricView(params: {
       segment,
     ]) ?? [],
   );
+  const resolvedSegmentById = new Map(
+    resolveRouteSegments(params.network, params.equipment).map((segment) => [
+      segment.id,
+      segment,
+    ]),
+  );
   const rawNodeById = new Map(
     sortNodes(params.network.nodes).map((node) => {
       const raw = createRawNode({
@@ -201,6 +216,7 @@ export function createTechnicalAxonometricView(params: {
         equipmentById,
         item,
         nodeById,
+        resolvedSegmentById,
         scaleMetersPerSourceUnit: params.scaleMetersPerSourceUnit,
       }),
     )
@@ -357,6 +373,7 @@ function createRawAccessory(params: {
   equipmentById: Map<string, WorkbenchEquipment>;
   item: TechnicalPhysicalAccessory;
   nodeById: Map<string, RouteNode>;
+  resolvedSegmentById: Map<string, ResolvedRouteSegment>;
   scaleMetersPerSourceUnit: number | null;
 }): RawAccessory {
   const nodePoint = params.item.nodeId
@@ -367,7 +384,11 @@ function createRawAccessory(params: {
       )
     : null;
   const anchorPoint = createAccessoryAnchorPoint(
-    params.item.position ?? null,
+    params.item.position ??
+      terminalRouteAccessoryPlanPoint({
+        item: params.item,
+        resolvedSegmentById: params.resolvedSegmentById,
+      }),
     nodePoint,
   );
   const point = anchorPoint
@@ -414,6 +435,60 @@ function createAccessoryAnchorPoint(
         z: zPoint.z,
       }
     : xy;
+}
+
+function terminalRouteAccessoryPlanPoint(params: {
+  item: TechnicalPhysicalAccessory;
+  resolvedSegmentById: Map<string, ResolvedRouteSegment>;
+}): Point2D | null {
+  const terminalKind = terminalRouteAccessoryKind(params.item);
+
+  if (!terminalKind) {
+    return null;
+  }
+
+  const segment =
+    params.item.segmentIds
+      .map((segmentId) => params.resolvedSegmentById.get(segmentId) ?? null)
+      .find((item): item is ResolvedRouteSegment => item !== null) ?? null;
+
+  if (!segment || segment.path.length < 2) {
+    return null;
+  }
+
+  const point =
+    terminalKind === "terminal"
+      ? segment.path[segment.path.length - 1]
+      : segment.path[Math.max(0, segment.path.length - 2)];
+
+  return point ? { ...point } : null;
+}
+
+function terminalRouteAccessoryKind(
+  item: TechnicalPhysicalAccessory,
+): "terminal" | "valve" | null {
+  const sourceKeys = [item.id, ...item.sourceIds];
+
+  if (
+    sourceKeys.some(
+      (sourceId) =>
+        sourceId.includes(":route-terminal:") &&
+        sourceId.endsWith(":terminal"),
+    )
+  ) {
+    return "terminal";
+  }
+
+  if (
+    sourceKeys.some(
+      (sourceId) =>
+        sourceId.includes(":route-terminal:") && sourceId.endsWith(":valve"),
+    )
+  ) {
+    return "valve";
+  }
+
+  return null;
 }
 
 function createPendingItems(params: {

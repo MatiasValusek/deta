@@ -5,9 +5,16 @@ import {
   equipmentTypeLabel,
   type DemandUnit,
   type EquipmentDraft,
+  type EquipmentTerminalOutletSide,
   type EquipmentType,
   type WorkbenchEquipment,
 } from "@/lib/equipment/types";
+import {
+  TERMINAL_OUTLET_SIDE_OPTIONS,
+  terminalHeightStatusLabel,
+  terminalOutletSideLabel,
+  terminalProfileLabel,
+} from "@/lib/equipment/terminalConfig";
 import {
   createDemandNormalizationIndex,
   formatEquipmentDemandWithNormalization,
@@ -34,12 +41,15 @@ type EquipmentPanelProps = {
   onAddSupply: () => void;
   onBeginPlacement: () => void;
   onCancelDraft: () => void;
+  onConfirmTerminalConfig: () => void;
   onDraftConnectionHeightChange: (value: string) => void;
   onDeleteSelected: () => void;
   onDraftDemandUnitChange: (unit: DemandUnit) => void;
   onDraftDemandValueChange: (value: string) => void;
   onDraftNameChange: (value: string) => void;
   onDraftNotesChange: (value: string) => void;
+  onDraftTerminalLateralOffsetChange: (value: string) => void;
+  onDraftTerminalOutletSideChange: (side: EquipmentTerminalOutletSide) => void;
   onDraftTypeChange: (type: EquipmentType) => void;
   onEditSelected: () => void;
   onGoToPlan: () => void;
@@ -67,12 +77,15 @@ export function EquipmentPanel({
   onAddSupply,
   onBeginPlacement,
   onCancelDraft,
+  onConfirmTerminalConfig,
   onDraftConnectionHeightChange,
   onDeleteSelected,
   onDraftDemandUnitChange,
   onDraftDemandValueChange,
   onDraftNameChange,
   onDraftNotesChange,
+  onDraftTerminalLateralOffsetChange,
+  onDraftTerminalOutletSideChange,
   onDraftTypeChange,
   onEditSelected,
   onGoToPlan,
@@ -180,11 +193,14 @@ export function EquipmentPanel({
           draft={draft}
           onBeginPlacement={onBeginPlacement}
           onCancelDraft={onCancelDraft}
+          onConfirmTerminalConfig={onConfirmTerminalConfig}
           onDraftConnectionHeightChange={onDraftConnectionHeightChange}
           onDraftDemandUnitChange={onDraftDemandUnitChange}
           onDraftDemandValueChange={onDraftDemandValueChange}
           onDraftNameChange={onDraftNameChange}
           onDraftNotesChange={onDraftNotesChange}
+          onDraftTerminalLateralOffsetChange={onDraftTerminalLateralOffsetChange}
+          onDraftTerminalOutletSideChange={onDraftTerminalOutletSideChange}
           onDraftTypeChange={onDraftTypeChange}
           onSaveDraft={onSaveDraft}
         />
@@ -214,7 +230,7 @@ export function EquipmentPanel({
                 <span className="mt-0.5 block text-[10px] text-[var(--muted)]">
                   {equipmentTypeLabel(item.type)} - {equipmentDemandLabel(item)}
                   {item.role === "appliance"
-                    ? ` - Altura ${formatEquipmentHeight(item)}`
+                    ? ` - Altura ${formatEquipmentHeight(item)} - ${formatTerminalSummary(item)} - ${formatWallAnchorStatus(item.wallAnchor)}`
                     : ""}
                 </span>
               </button>
@@ -230,7 +246,7 @@ export function EquipmentPanel({
             {equipmentTypeLabel(selectedEquipment.type)} -{" "}
             {equipmentDemandLabel(selectedEquipment)}
             {selectedEquipment.role === "appliance"
-              ? ` - Altura ${formatEquipmentHeight(selectedEquipment)}`
+              ? ` - Altura ${formatEquipmentHeight(selectedEquipment)} - ${formatTerminalSummary(selectedEquipment)} - ${formatWallAnchorStatus(selectedEquipment.wallAnchor)}`
               : ""}
           </div>
           <div className="mt-2 grid grid-cols-3 gap-1">
@@ -267,11 +283,14 @@ function DraftEditor({
   draft,
   onBeginPlacement,
   onCancelDraft,
+  onConfirmTerminalConfig,
   onDraftConnectionHeightChange,
   onDraftDemandUnitChange,
   onDraftDemandValueChange,
   onDraftNameChange,
   onDraftNotesChange,
+  onDraftTerminalLateralOffsetChange,
+  onDraftTerminalOutletSideChange,
   onDraftTypeChange,
   onSaveDraft,
 }: {
@@ -279,11 +298,14 @@ function DraftEditor({
   draft: EquipmentDraft;
   onBeginPlacement: () => void;
   onCancelDraft: () => void;
+  onConfirmTerminalConfig: () => void;
   onDraftConnectionHeightChange: (value: string) => void;
   onDraftDemandUnitChange: (unit: DemandUnit) => void;
   onDraftDemandValueChange: (value: string) => void;
   onDraftNameChange: (value: string) => void;
   onDraftNotesChange: (value: string) => void;
+  onDraftTerminalLateralOffsetChange: (value: string) => void;
+  onDraftTerminalOutletSideChange: (side: EquipmentTerminalOutletSide) => void;
   onDraftTypeChange: (type: EquipmentType) => void;
   onSaveDraft: () => void;
 }) {
@@ -361,20 +383,15 @@ function DraftEditor({
       ) : null}
 
       {!isSupply ? (
-        <label className="mt-2 block text-[var(--muted)]">
-          <span className="mb-1 block">Altura conexion (m)</span>
-          <input
-            className="w-full rounded border border-[var(--line)] px-2 py-1 text-[var(--foreground)]"
-            inputMode="decimal"
-            name="equipment-connection-height"
-            placeholder="0"
-            type="text"
-            value={draft.connectionHeightInput}
-            onChange={(event) =>
-              onDraftConnectionHeightChange(event.target.value)
-            }
-          />
-        </label>
+        <TerminalDraftEditor
+          draft={draft}
+          onConfirmTerminalConfig={onConfirmTerminalConfig}
+          onDraftConnectionHeightChange={onDraftConnectionHeightChange}
+          onDraftTerminalLateralOffsetChange={
+            onDraftTerminalLateralOffsetChange
+          }
+          onDraftTerminalOutletSideChange={onDraftTerminalOutletSideChange}
+        />
       ) : null}
 
       <label className="mt-2 block text-[var(--muted)]">
@@ -396,6 +413,12 @@ function DraftEditor({
             ? "Punto de conexión definido"
             : "Sin punto de conexión"}
       </p>
+
+      {!isSupply ? (
+        <p className="mt-1 text-[10px] font-medium text-[var(--muted)]">
+          {formatWallAnchorStatus(draft.wallAnchor)}
+        </p>
+      ) : null}
 
       {draft.error ? (
         <div className="mt-2 rounded border border-red-200 bg-red-50 px-2 py-1 text-red-800">
@@ -431,8 +454,135 @@ function DraftEditor({
   );
 }
 
+function TerminalDraftEditor({
+  draft,
+  onConfirmTerminalConfig,
+  onDraftConnectionHeightChange,
+  onDraftTerminalLateralOffsetChange,
+  onDraftTerminalOutletSideChange,
+}: {
+  draft: EquipmentDraft;
+  onConfirmTerminalConfig: () => void;
+  onDraftConnectionHeightChange: (value: string) => void;
+  onDraftTerminalLateralOffsetChange: (value: string) => void;
+  onDraftTerminalOutletSideChange: (side: EquipmentTerminalOutletSide) => void;
+}) {
+  const config = draft.terminalConfig;
+  const status = config?.heightStatus ?? "pending";
+
+  return (
+    <section className="mt-2 rounded border border-[var(--line)] px-2 py-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] font-semibold uppercase text-[var(--muted)]">
+          Terminal
+        </span>
+        <span
+          className={`rounded px-2 py-0.5 text-[10px] font-semibold ${status === "confirmed" ? "bg-[#ecfdf5] text-[#047857]" : status === "suggested" ? "bg-[#eef2ff] text-[#4338ca]" : "bg-[#fff7ed] text-[#b45309]"}`}
+        >
+          {terminalHeightStatusLabel(status)}
+        </span>
+      </div>
+
+      <div className="mt-2 grid grid-cols-[minmax(0,1fr)_96px] gap-2">
+        <label className="min-w-0 text-[var(--muted)]">
+          <span className="mb-1 block">Altura conexion (m)</span>
+          <input
+            className="w-full rounded border border-[var(--line)] px-2 py-1 text-[var(--foreground)]"
+            inputMode="decimal"
+            name="equipment-connection-height"
+            placeholder="0"
+            type="text"
+            value={draft.connectionHeightInput}
+            onChange={(event) =>
+              onDraftConnectionHeightChange(event.target.value)
+            }
+          />
+        </label>
+        <label className="text-[var(--muted)]">
+          <span className="mb-1 block">Salida</span>
+          <select
+            className="w-full rounded border border-[var(--line)] px-2 py-1 text-[var(--foreground)]"
+            name="equipment-terminal-side"
+            value={config?.outletSide ?? "direct"}
+            onChange={(event) =>
+              onDraftTerminalOutletSideChange(
+                event.target.value as EquipmentTerminalOutletSide,
+              )
+            }
+          >
+            {TERMINAL_OUTLET_SIDE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div className="mt-2 grid grid-cols-[96px_minmax(0,1fr)_84px] gap-2">
+        <label className="text-[var(--muted)]">
+          <span className="mb-1 block">Despl. m</span>
+          <input
+            className="w-full rounded border border-[var(--line)] px-2 py-1 text-[var(--foreground)]"
+            inputMode="decimal"
+            name="equipment-terminal-offset"
+            placeholder="0"
+            type="text"
+            value={draft.terminalLateralOffsetInput}
+            onChange={(event) =>
+              onDraftTerminalLateralOffsetChange(event.target.value)
+            }
+          />
+        </label>
+        <dl className="min-w-0 text-[10px] text-[var(--muted)]">
+          <dt>Perfil</dt>
+          <dd className="truncate font-medium text-[var(--foreground)]">
+            {config ? terminalProfileLabel(config.terminalProfile) : "Pendiente"}
+          </dd>
+          <dt className="mt-1">Llave</dt>
+          <dd className="font-medium text-[var(--foreground)]">
+            {config?.requiresShutoffValve ? "Si" : "No"}
+          </dd>
+        </dl>
+        <button
+          className="self-end rounded border border-[var(--line)] px-2 py-1 text-[10px] font-medium hover:border-[var(--accent)] disabled:text-[var(--muted)]"
+          disabled={status === "confirmed"}
+          type="button"
+          onClick={onConfirmTerminalConfig}
+        >
+          Confirmar
+        </button>
+      </div>
+    </section>
+  );
+}
+
 function formatEquipmentHeight(equipment: WorkbenchEquipment) {
   return `${new Intl.NumberFormat("es-AR", {
     maximumFractionDigits: 3,
   }).format(pointZMeters(equipment.connectionPoint))} m`;
+}
+
+function formatTerminalSummary(equipment: WorkbenchEquipment) {
+  const config = equipment.terminalConfig;
+
+  if (!config) {
+    return "Terminal pendiente";
+  }
+
+  return `${terminalHeightStatusLabel(config.heightStatus)} ${terminalOutletSideLabel(config.outletSide)} ${formatMeters(config.lateralOffsetMeters)}`;
+}
+
+function formatWallAnchorStatus(
+  wallAnchor: EquipmentDraft["wallAnchor"] | WorkbenchEquipment["wallAnchor"],
+) {
+  return wallAnchor?.status === "anchored"
+    ? "Anclado a pared"
+    : "Anclaje pendiente";
+}
+
+function formatMeters(value: number) {
+  return `${new Intl.NumberFormat("es-AR", {
+    maximumFractionDigits: 2,
+  }).format(value)} m`;
 }

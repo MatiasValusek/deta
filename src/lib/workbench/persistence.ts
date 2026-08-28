@@ -814,7 +814,10 @@ function isEquipmentArray(value: unknown): value is WorkbenchEquipment[] {
         (equipment.role === "supply" || equipment.role === "appliance") &&
         isString(equipment.type) &&
         isString(equipment.name) &&
+        (equipment.bodyPoint === undefined || isPoint(equipment.bodyPoint)) &&
         isPoint(equipment.connectionPoint) &&
+        isOptionalEquipmentTerminalConfig(equipment.terminalConfig) &&
+        isOptionalEquipmentWallAnchor(equipment.wallAnchor) &&
         (equipment.demandValue === undefined ||
           isFiniteNumber(equipment.demandValue)) &&
         (equipment.demandUnit === undefined ||
@@ -822,6 +825,57 @@ function isEquipmentArray(value: unknown): value is WorkbenchEquipment[] {
           equipment.demandUnit === "m3_h") &&
         equipment.source === "manual",
     )
+  );
+}
+
+function isOptionalEquipmentTerminalConfig(value: unknown) {
+  if (value === undefined) {
+    return true;
+  }
+
+  return (
+    isRecord(value) &&
+    (value.connectionHeightMeters === null ||
+      isFiniteNumber(value.connectionHeightMeters)) &&
+    (value.heightStatus === "confirmed" ||
+      value.heightStatus === "pending" ||
+      value.heightStatus === "suggested") &&
+    isFiniteNumber(value.lateralOffsetMeters) &&
+    (value.outletSide === "direct" ||
+      value.outletSide === "left" ||
+      value.outletSide === "right") &&
+    isBoolean(value.requiresShutoffValve) &&
+    (value.terminalProfile === "boiler_wall_rh" ||
+      value.terminalProfile === "dryer_wall_valve" ||
+      value.terminalProfile === "generic_terminal" ||
+      value.terminalProfile === "heater_wall_rh" ||
+      value.terminalProfile === "oven_wall_valve" ||
+      value.terminalProfile === "space_heater_wall_valve" ||
+      value.terminalProfile === "stove_wall_valve" ||
+      value.terminalProfile === "storage_heater_wall_rh")
+  );
+}
+
+function isOptionalEquipmentWallAnchor(value: unknown) {
+  if (value === undefined) {
+    return true;
+  }
+
+  return (
+    isRecord(value) &&
+    (value.distanceSource === null || isFiniteNumber(value.distanceSource)) &&
+    (value.normal === null || isPoint(value.normal)) &&
+    (value.orientationRadians === null ||
+      isFiniteNumber(value.orientationRadians)) &&
+    (value.pageNumber === null || isFiniteNumber(value.pageNumber)) &&
+    (value.referenceId === null || isString(value.referenceId)) &&
+    (value.referenceKind === null ||
+      value.referenceKind === "hard_structure" ||
+      value.referenceKind === "manual_constraint" ||
+      value.referenceKind === "reference_wall") &&
+    (value.source === null || value.source === "dxf" || value.source === "pdf") &&
+    (value.status === "anchored" || value.status === "pending") &&
+    (value.wallPoint === null || isPoint(value.wallPoint))
   );
 }
 

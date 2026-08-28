@@ -74,6 +74,9 @@ export type SectionRouteProjectedAccessory = {
 };
 
 export type SectionRouteProjectedEquipment = {
+  anchorStatus: "anchored" | "pending" | null;
+  bodyPlanPoint: Point2D;
+  bodySectionPoint: Point2D | null;
   equipmentId: string;
   heightTarget: SectionRouteHeightTarget;
   label: string;
@@ -139,7 +142,11 @@ export function createSectionRouteProjection(params: {
   const resultSegmentById = new Map(
     (params.result?.segments ?? []).map((segment) => [segment.segmentId, segment]),
   );
-  const segments = resolveRouteSegments(params.network, params.equipment)
+  const resolvedSegments = resolveRouteSegments(params.network, params.equipment);
+  const resolvedSegmentById = new Map(
+    resolvedSegments.map((segment) => [segment.id, segment]),
+  );
+  const segments = resolvedSegments
     .map((segment) =>
       createProjectedSegment({
         adoptedDiameter:
@@ -169,6 +176,7 @@ export function createSectionRouteProjection(params: {
         link,
         pendingItems,
         relevantSegmentIds,
+        resolvedSegmentById,
         sectionScaleMetersPerSourceUnit,
         toleranceRatio,
       }),
@@ -294,6 +302,7 @@ function createProjectedAccessory(params: {
   link: SectionRouteProjectionLink & { registration: SectionRegistration };
   pendingItems: SectionRouteProjectionPendingItem[];
   relevantSegmentIds: Set<string>;
+  resolvedSegmentById: Map<string, ResolvedRouteSegment>;
   sectionScaleMetersPerSourceUnit: number;
   toleranceRatio: number;
 }): SectionRouteProjectedAccessory | null {
@@ -305,7 +314,15 @@ function createProjectedAccessory(params: {
     return null;
   }
 
-  if (!params.item.position || !hasExplicitZ(params.item.position)) {
+  const accessoryPlanPoint =
+    params.item.position && hasExplicitZ(params.item.position)
+      ? params.item.position
+      : terminalRouteAccessoryPlanPoint({
+          item: params.item,
+          resolvedSegmentById: params.resolvedSegmentById,
+        });
+
+  if (!accessoryPlanPoint || !hasExplicitZ(accessoryPlanPoint)) {
     const reason = "Falta posicion confirmada del accesorio fisico.";
     params.pendingItems.push({
       id: `section-route:accessory:${params.item.id}`,
@@ -329,9 +346,9 @@ function createProjectedAccessory(params: {
   }
 
   const projected = projectPlanPointToSection({
-    elevationMeters: explicitZMeters(params.item.position) as number,
+    elevationMeters: explicitZMeters(accessoryPlanPoint) as number,
     planEnd: params.link.planEnd,
-    planPoint: params.item.position,
+    planPoint: accessoryPlanPoint,
     planStart: params.link.planStart,
     registration: params.link.registration,
     sectionScaleMetersPerSourceUnit: params.sectionScaleMetersPerSourceUnit,
@@ -358,7 +375,7 @@ function createProjectedAccessory(params: {
     kind: params.item.kind,
     label: accessoryLabel(params.item),
     pendingReason,
-    planPoint: params.item.position,
+    planPoint: accessoryPlanPoint,
     routeUseCount: params.item.routeUses.length,
     sectionPoint: projected.sectionPoint,
     segmentIds: params.item.segmentIds,
@@ -439,7 +456,43 @@ function createProjectedEquipmentNode(params: {
     return null;
   }
 
+  const bodyPlanPoint = equipment.bodyPoint ?? planPoint;
+  const bodyZ = explicitZMeters(bodyPlanPoint);
+  let bodySectionPoint: Point2D | null = null;
+
+  if (bodyZ === null) {
+    params.pendingItems.push({
+      id: `section-route:equipment:${params.node.id}:body-z`,
+      reason: "Falta cota Z confirmada del simbolo del equipo.",
+      sourceId: params.node.id,
+      sourceType: "equipment",
+    });
+  } else {
+    const projectedBody = projectPlanPointToSection({
+      elevationMeters: bodyZ,
+      planEnd: params.link.planEnd,
+      planPoint: bodyPlanPoint,
+      planStart: params.link.planStart,
+      registration: params.link.registration,
+      sectionScaleMetersPerSourceUnit: params.sectionScaleMetersPerSourceUnit,
+    });
+
+    if (tWithinSectionSpan(projectedBody.t, params.toleranceRatio)) {
+      bodySectionPoint = projectedBody.sectionPoint;
+    } else {
+      params.pendingItems.push({
+        id: `section-route:equipment:${params.node.id}:body-span`,
+        reason: "El simbolo del equipo queda fuera de los extremos registrados del corte.",
+        sourceId: params.node.id,
+        sourceType: "equipment",
+      });
+    }
+  }
+
   return {
+    anchorStatus: equipment.wallAnchor?.status ?? null,
+    bodyPlanPoint,
+    bodySectionPoint,
     equipmentId: equipment.id,
     heightTarget: {
       kind: "node",
@@ -505,12 +558,21 @@ function createElevatedRoutePath(params: {
   let carriedElevation =
     hasExplicitIntermediateElevation ? params.fromElevation : params.toElevation;
 
+  let previousPlanPoint = rawPath[0] as Point2D;
+
   rawPath.slice(1, -1).forEach((planPoint, vertexIndex) => {
+    const previousElevation = carriedElevation;
+    let pointSource: SectionRouteProjectedPointSource = "vertex";
     let heightTarget: SectionRouteHeightTarget | null =
       hasExplicitIntermediateElevation ? null : terminalHeightTarget;
 
     if (hasExplicitZ(planPoint)) {
       carriedElevation = explicitZMeters(planPoint) as number;
+      pointSource =
+        samePlanPoint(previousPlanPoint, planPoint) &&
+        Math.abs(carriedElevation - previousElevation) > Number.EPSILON
+          ? "vertical"
+          : "vertex";
       heightTarget = {
         kind: "segment_vertex",
         segmentId: params.segment.id,
@@ -522,8 +584,9 @@ function createElevatedRoutePath(params: {
       elevationMeters: carriedElevation,
       heightTarget,
       planPoint,
-      source: "vertex",
+      source: pointSource,
     });
+    previousPlanPoint = planPoint;
   });
   points.push({
     elevationMeters: params.toElevation,
@@ -683,6 +746,60 @@ function dedupePendingItems(items: SectionRouteProjectionPendingItem[]) {
       (first.sourceId ?? "").localeCompare(second.sourceId ?? "") ||
       first.id.localeCompare(second.id),
   );
+}
+
+function terminalRouteAccessoryPlanPoint(params: {
+  item: TechnicalPhysicalAccessory;
+  resolvedSegmentById: Map<string, ResolvedRouteSegment>;
+}): Point2D | null {
+  const terminalKind = terminalRouteAccessoryKind(params.item);
+
+  if (!terminalKind) {
+    return null;
+  }
+
+  const segment =
+    params.item.segmentIds
+      .map((segmentId) => params.resolvedSegmentById.get(segmentId) ?? null)
+      .find((item): item is ResolvedRouteSegment => item !== null) ?? null;
+
+  if (!segment || segment.path.length < 2) {
+    return null;
+  }
+
+  const point =
+    terminalKind === "terminal"
+      ? segment.path[segment.path.length - 1]
+      : segment.path[Math.max(0, segment.path.length - 2)];
+
+  return point ? { ...point } : null;
+}
+
+function terminalRouteAccessoryKind(
+  item: TechnicalPhysicalAccessory,
+): "terminal" | "valve" | null {
+  const sourceKeys = [item.id, ...item.sourceIds];
+
+  if (
+    sourceKeys.some(
+      (sourceId) =>
+        sourceId.includes(":route-terminal:") &&
+        sourceId.endsWith(":terminal"),
+    )
+  ) {
+    return "terminal";
+  }
+
+  if (
+    sourceKeys.some(
+      (sourceId) =>
+        sourceId.includes(":route-terminal:") && sourceId.endsWith(":valve"),
+    )
+  ) {
+    return "valve";
+  }
+
+  return null;
 }
 
 function accessoryLabel(item: TechnicalPhysicalAccessory) {

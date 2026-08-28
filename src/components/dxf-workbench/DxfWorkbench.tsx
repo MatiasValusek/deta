@@ -77,9 +77,25 @@ import {
   type DemandUnit,
   type EquipmentDraft,
   type EquipmentPlacementMode,
+  type EquipmentTerminalConfig,
+  type EquipmentTerminalOutletSide,
   type EquipmentType,
+  type EquipmentWallAnchor,
   type WorkbenchEquipment,
 } from "@/lib/equipment/types";
+import {
+  confirmEquipmentTerminalConfig,
+  createEquipmentTerminalConfigFromHeight,
+  createSuggestedEquipmentTerminalConfig,
+  parseTerminalLateralOffsetInput,
+} from "@/lib/equipment/terminalConfig";
+import {
+  DEFAULT_WALL_SNAP_TOLERANCE_SOURCE,
+  createPendingEquipmentWallAnchor,
+  resolveEquipmentPhysicalPlacement,
+  withEquipmentWallAnchorZ,
+  type EquipmentPhysicalPlacement,
+} from "@/lib/equipment/wallAnchoring";
 import type { Bounds, DrawingPrimitive, NormalizedDrawing, Point2D } from "@/lib/geometry/types";
 import { pointZMeters, withPointZ } from "@/lib/geometry/height";
 import { worldToScreen, type ViewTransform } from "@/lib/geometry/viewport";
@@ -142,6 +158,7 @@ import {
   type PhysicalRouteEditSelection,
   type PhysicalRouteSnapOptions,
 } from "@/lib/routing/physicalRouteEditing";
+import { applyConfirmedEquipmentTerminalConnection } from "@/lib/routing/terminalConnection";
 import {
   confirmRouteAccessoryProposal,
   detectRouteAccessoryProposals,
@@ -647,7 +664,11 @@ export function DxfWorkbench() {
   const canSaveEquipmentDraft = Boolean(
     equipmentDraft?.name.trim() &&
       equipmentDraft.connectionPoint &&
-      parseConnectionHeightInput(equipmentDraft.connectionHeightInput).ok,
+      parseConnectionHeightInput(equipmentDraft.connectionHeightInput).ok &&
+      (equipmentDraft.role !== "appliance" ||
+        parseTerminalLateralOffsetInput(
+          equipmentDraft.terminalLateralOffsetInput,
+        ).ok),
   );
   const applianceEquipment = planEquipment.filter(
     (item) => item.role === "appliance",
@@ -2346,6 +2367,7 @@ export function DxfWorkbench() {
       equipment: planBase.equipment,
       heightMeters,
       network: planBase.routeNetwork,
+      scaleMetersPerSourceUnit: calibrationScaleMetersPerSourceUnit(planBase),
       target: current.target,
     });
 
@@ -2428,9 +2450,13 @@ export function DxfWorkbench() {
       role: "supply",
       type: "meter_regulator",
       name: "Medidor/regulador",
+      bodyPoint: null,
       connectionPoint: null,
       connectionHeightInput: "0",
       previewPoint: null,
+      terminalConfig: null,
+      terminalLateralOffsetInput: "0",
+      wallAnchor: null,
       demandValueInput: "",
       demandUnit: DEFAULT_DEMAND_UNIT,
       notes: "",
@@ -2453,6 +2479,7 @@ export function DxfWorkbench() {
     }
 
     const type: EquipmentType = "stove";
+    const terminalConfig = createSuggestedEquipmentTerminalConfig(type);
     startEquipmentDraft({
       editingEquipmentId: null,
       planBaseId: planBase.id,
@@ -2463,9 +2490,17 @@ export function DxfWorkbench() {
       role: "appliance",
       type,
       name: suggestEquipmentName(type, planBase.equipment),
+      bodyPoint: null,
       connectionPoint: null,
-      connectionHeightInput: "0",
+      connectionHeightInput: formatHeightInput(
+        terminalConfig.connectionHeightMeters ?? 0,
+      ),
       previewPoint: null,
+      terminalConfig,
+      terminalLateralOffsetInput: formatHeightInput(
+        terminalConfig.lateralOffsetMeters,
+      ),
+      wallAnchor: null,
       demandValueInput: "",
       demandUnit: DEFAULT_DEMAND_UNIT,
       notes: "",
@@ -2546,9 +2581,103 @@ export function DxfWorkbench() {
         connectionPoint: current.connectionPoint
           ? withPointZ(current.connectionPoint, parsedHeight.heightMeters)
           : null,
+        bodyPoint: current.bodyPoint
+          ? withPointZ(current.bodyPoint, parsedHeight.heightMeters)
+          : null,
         previewPoint: current.previewPoint
           ? withPointZ(current.previewPoint, parsedHeight.heightMeters)
           : null,
+        terminalConfig:
+          current.role === "appliance"
+            ? {
+                ...draftTerminalConfig(current),
+                connectionHeightMeters: parsedHeight.heightMeters,
+                heightStatus: "suggested",
+              }
+            : null,
+        wallAnchor: withEquipmentWallAnchorZ(
+          current.wallAnchor,
+          parsedHeight.heightMeters,
+        ),
+      };
+    });
+  }
+
+  function handleEquipmentDraftTerminalOutletSideChange(
+    outletSide: EquipmentTerminalOutletSide,
+  ) {
+    setEquipmentDraft((current) =>
+      current?.role === "appliance"
+        ? {
+            ...current,
+            terminalConfig: {
+              ...draftTerminalConfig(current),
+              outletSide,
+            },
+            error: null,
+          }
+        : current,
+    );
+  }
+
+  function handleEquipmentDraftTerminalLateralOffsetChange(value: string) {
+    setEquipmentDraft((current) => {
+      if (!current || current.role !== "appliance") {
+        return current;
+      }
+
+      const parsedOffset = parseTerminalLateralOffsetInput(value);
+
+      return {
+        ...current,
+        terminalLateralOffsetInput: value,
+        terminalConfig: parsedOffset.ok
+          ? {
+              ...draftTerminalConfig(current),
+              lateralOffsetMeters: parsedOffset.offsetMeters,
+            }
+          : current.terminalConfig,
+        error: null,
+      };
+    });
+  }
+
+  function handleConfirmEquipmentDraftTerminalConfig() {
+    setEquipmentDraft((current) => {
+      if (!current || current.role !== "appliance") {
+        return current;
+      }
+
+      const parsedHeight = parseConnectionHeightInput(
+        current.connectionHeightInput,
+      );
+
+      if (!parsedHeight.ok) {
+        return {
+          ...current,
+          error: parsedHeight.message,
+        };
+      }
+
+      const parsedOffset = parseTerminalLateralOffsetInput(
+        current.terminalLateralOffsetInput,
+      );
+
+      if (!parsedOffset.ok) {
+        return {
+          ...current,
+          error: parsedOffset.message,
+        };
+      }
+
+      return {
+        ...current,
+        terminalConfig: confirmEquipmentTerminalConfig({
+          ...draftTerminalConfig(current),
+          connectionHeightMeters: parsedHeight.heightMeters,
+          lateralOffsetMeters: parsedOffset.offsetMeters,
+        }),
+        error: null,
       };
     });
   }
@@ -2569,6 +2698,8 @@ export function DxfWorkbench() {
       );
       const shouldReplaceName =
         current.name.trim().length === 0 || current.name === previousSuggestion;
+      const terminalConfig = createSuggestedEquipmentTerminalConfig(type);
+      const heightMeters = terminalConfig.connectionHeightMeters ?? 0;
 
       return {
         ...current,
@@ -2576,6 +2707,21 @@ export function DxfWorkbench() {
         name: shouldReplaceName
           ? suggestEquipmentName(type, planEquipment)
           : current.name,
+        connectionHeightInput: formatHeightInput(heightMeters),
+        connectionPoint: current.connectionPoint
+          ? withPointZ(current.connectionPoint, heightMeters)
+          : null,
+        bodyPoint: current.bodyPoint
+          ? withPointZ(current.bodyPoint, heightMeters)
+          : null,
+        previewPoint: current.previewPoint
+          ? withPointZ(current.previewPoint, heightMeters)
+          : null,
+        terminalConfig,
+        terminalLateralOffsetInput: formatHeightInput(
+          terminalConfig.lateralOffsetMeters,
+        ),
+        wallAnchor: withEquipmentWallAnchorZ(current.wallAnchor, heightMeters),
         error: null,
       };
     });
@@ -2633,6 +2779,9 @@ export function DxfWorkbench() {
         ? {
             ...current,
             step: "placing",
+            bodyPoint:
+              current.bodyPoint ?? current.connectionPoint ?? current.previewPoint,
+            connectionPoint: null,
             previewPoint: current.connectionPoint ?? current.previewPoint,
             error: null,
           }
@@ -2649,9 +2798,14 @@ export function DxfWorkbench() {
       current?.step === "placing"
         ? {
             ...current,
-            previewPoint: point
-              ? withPointZ(point, draftConnectionHeightMeters(current))
-              : null,
+            ...(point
+              ? equipmentDraftPlacementPatch(current, point)
+              : {
+                  bodyPoint: null,
+                  connectionPoint: null,
+                  previewPoint: null,
+                  wallAnchor: null,
+                }),
           }
         : current,
     );
@@ -2662,17 +2816,34 @@ export function DxfWorkbench() {
       current?.step === "placing"
         ? {
             ...current,
-            connectionPoint: withPointZ(
-              point,
-              draftConnectionHeightMeters(current),
-            ),
-            previewPoint: withPointZ(point, draftConnectionHeightMeters(current)),
+            ...equipmentDraftPlacementPatch(current, point, true),
             step: "review",
             error: null,
           }
         : current,
     );
     setEquipmentError(null);
+  }
+
+  function equipmentDraftPlacementPatch(
+    draft: EquipmentDraft,
+    point: Point2D,
+    commitConnection = false,
+  ): Pick<
+    EquipmentDraft,
+    "bodyPoint" | "connectionPoint" | "previewPoint" | "wallAnchor"
+  > {
+    const plan =
+      bases.find((base) => base.id === draft.planBaseId && base.type === "plan") ??
+      null;
+    const placement = resolveDraftEquipmentPhysicalPlacement(draft, point, plan);
+
+    return {
+      bodyPoint: placement.bodyPoint,
+      connectionPoint: commitConnection ? placement.connectionPoint : null,
+      previewPoint: placement.connectionPoint,
+      wallAnchor: placement.wallAnchor,
+    };
   }
 
   function handleSaveEquipmentDraft() {
@@ -2714,7 +2885,10 @@ export function DxfWorkbench() {
       role: current.role,
       type: current.type,
       name: current.name.trim(),
+      bodyPoint: validation.bodyPoint,
       connectionPoint: validation.connectionPoint,
+      terminalConfig: validation.terminalConfig,
+      wallAnchor: validation.wallAnchor,
       demandValue: validation.demandValue,
       demandUnit: validation.demandUnit,
       notes: current.notes.trim() ? current.notes.trim() : undefined,
@@ -2768,14 +2942,38 @@ export function DxfWorkbench() {
       );
     }
 
-    updateBase(plan.id, (base) => {
-      const withoutPrevious = base.equipment.filter(
-        (item) => item.id !== equipmentId,
-      );
+    const nextEquipmentList = [
+      ...plan.equipment.filter((item) => item.id !== equipmentId),
+      nextEquipment,
+    ].sort(compareEquipment);
 
+    if (
+      nextEquipment.role === "appliance" &&
+      findRouteNodeByEquipment(nextRouteNetwork, nextEquipment.id)
+    ) {
+      const terminalUpdate = applyConfirmedEquipmentTerminalConnection({
+        equipment: nextEquipmentList,
+        equipmentId: nextEquipment.id,
+        network: nextRouteNetwork,
+        scaleMetersPerSourceUnit: calibrationScaleMetersPerSourceUnit(plan),
+      });
+
+      if (!terminalUpdate.ok) {
+        setEquipmentDraft({
+          ...current,
+          error: terminalUpdate.message,
+        });
+        setEquipmentError(terminalUpdate.message);
+        return;
+      }
+
+      nextRouteNetwork = terminalUpdate.network;
+    }
+
+    updateBase(plan.id, (base) => {
       return {
         ...base,
-        equipment: [...withoutPrevious, nextEquipment].sort(compareEquipment),
+        equipment: nextEquipmentList,
         routeNetwork: nextRouteNetwork,
         selectedEquipmentId: equipmentId,
         showEquipment: true,
@@ -2838,8 +3036,10 @@ export function DxfWorkbench() {
 
     startEquipmentDraft({
       ...createDraftFromEquipment(selectedEquipment, "placing"),
+      bodyPoint: selectedEquipment.bodyPoint ?? selectedEquipment.connectionPoint,
       connectionPoint: null,
       previewPoint: selectedEquipment.connectionPoint,
+      wallAnchor: selectedEquipment.wallAnchor ?? null,
     });
   }
 
@@ -5162,12 +5362,19 @@ export function DxfWorkbench() {
           onAddSupply={handleStartSupplyPlacement}
           onBeginPlacement={handleBeginEquipmentPlacement}
           onCancelDraft={handleCancelEquipmentDraft}
+          onConfirmTerminalConfig={handleConfirmEquipmentDraftTerminalConfig}
           onDeleteSelected={handleDeleteSelectedEquipment}
           onDraftConnectionHeightChange={handleEquipmentDraftConnectionHeightChange}
           onDraftDemandUnitChange={handleEquipmentDraftDemandUnitChange}
           onDraftDemandValueChange={handleEquipmentDraftDemandValueChange}
           onDraftNameChange={handleEquipmentDraftNameChange}
           onDraftNotesChange={handleEquipmentDraftNotesChange}
+          onDraftTerminalLateralOffsetChange={
+            handleEquipmentDraftTerminalLateralOffsetChange
+          }
+          onDraftTerminalOutletSideChange={
+            handleEquipmentDraftTerminalOutletSideChange
+          }
           onDraftTypeChange={handleEquipmentDraftTypeChange}
           onEditSelected={handleEditSelectedEquipment}
           onGoToPlan={handleGoToPlanForEquipment}
@@ -6182,9 +6389,12 @@ function validateEquipmentDraft(
 ):
   | {
       ok: true;
+      bodyPoint?: Point2D;
       connectionPoint: Point2D;
       demandUnit?: DemandUnit;
       demandValue?: number;
+      terminalConfig?: EquipmentTerminalConfig;
+      wallAnchor?: EquipmentWallAnchor;
     }
   | { ok: false; message: string } {
   if (draft.name.trim().length === 0) {
@@ -6214,12 +6424,126 @@ function validateEquipmentDraft(
     return demand;
   }
 
+  const terminal = validateDraftTerminalConfig(draft, height.heightMeters);
+
+  if (!terminal.ok) {
+    return terminal;
+  }
+
+  const connectionPoint = withPointZ(
+    draft.connectionPoint,
+    height.heightMeters,
+  );
+  const bodyPoint =
+    draft.role === "appliance"
+      ? withPointZ(draft.bodyPoint ?? draft.connectionPoint, height.heightMeters)
+      : undefined;
+  const wallAnchor =
+    draft.role === "appliance"
+      ? withEquipmentWallAnchorZ(draft.wallAnchor, height.heightMeters) ??
+        createPendingEquipmentWallAnchor({
+          pageNumber:
+            plan.sourceType === "pdf"
+              ? draft.pdfPageNumber ?? plan.visual.activePdfPageNumber
+              : null,
+          source: plan.sourceType,
+        })
+      : undefined;
+
   return {
     ok: true,
-    connectionPoint: withPointZ(draft.connectionPoint, height.heightMeters),
+    bodyPoint,
+    connectionPoint,
     demandUnit: demand.demandUnit,
     demandValue: demand.demandValue,
+    terminalConfig: terminal.terminalConfig,
+    wallAnchor,
   };
+}
+
+function validateDraftTerminalConfig(
+  draft: EquipmentDraft,
+  connectionHeightMeters: number,
+):
+  | { ok: true; terminalConfig?: EquipmentTerminalConfig }
+  | { ok: false; message: string } {
+  if (draft.role !== "appliance") {
+    return { ok: true };
+  }
+
+  const parsedOffset = parseTerminalLateralOffsetInput(
+    draft.terminalLateralOffsetInput,
+  );
+
+  if (!parsedOffset.ok) {
+    return parsedOffset;
+  }
+
+  const base = draftTerminalConfig(draft);
+  const heightStatus =
+    base.heightStatus === "confirmed" ? "confirmed" : "suggested";
+
+  return {
+    ok: true,
+    terminalConfig: {
+      ...base,
+      connectionHeightMeters,
+      heightStatus,
+      lateralOffsetMeters: parsedOffset.offsetMeters,
+    },
+  };
+}
+
+function draftTerminalConfig(draft: EquipmentDraft): EquipmentTerminalConfig {
+  return (
+    draft.terminalConfig ??
+    createEquipmentTerminalConfigFromHeight(
+      draft.type,
+      draftConnectionHeightMeters(draft),
+    )
+  );
+}
+
+function resolveDraftEquipmentPhysicalPlacement(
+  draft: EquipmentDraft,
+  point: Point2D,
+  plan: WorkbenchBase | null,
+): EquipmentPhysicalPlacement {
+  const heightMeters = draftConnectionHeightMeters(draft);
+
+  if (!plan || plan.type !== "plan") {
+    const freePoint = withPointZ(point, heightMeters);
+
+    return {
+      bodyPoint: freePoint,
+      connectionPoint: freePoint,
+      wallAnchor: null,
+    };
+  }
+
+  return resolveEquipmentPhysicalPlacement({
+    classificationIndex: buildClassificationIndex(plan.semanticAssignments),
+    constraints: plan.constraints,
+    drawing: plan.drawing,
+    heightMeters,
+    pageNumber:
+      plan.sourceType === "pdf"
+        ? draft.pdfPageNumber ?? plan.visual.activePdfPageNumber
+        : null,
+    point,
+    role: draft.role,
+    scaleMetersPerSourceUnit: calibrationScaleMetersPerSourceUnit(plan),
+    snapToleranceSource: equipmentWallSnapToleranceSource(plan),
+    source: plan.sourceType,
+  });
+}
+
+function equipmentWallSnapToleranceSource(plan: WorkbenchBase) {
+  const scaleMetersPerSourceUnit = calibrationScaleMetersPerSourceUnit(plan);
+
+  return scaleMetersPerSourceUnit && scaleMetersPerSourceUnit > 0
+    ? 0.5 / scaleMetersPerSourceUnit
+    : DEFAULT_WALL_SNAP_TOLERANCE_SOURCE;
 }
 
 function parseConnectionHeightInput(
@@ -6250,7 +6574,7 @@ function draftConnectionHeightMeters(draft: EquipmentDraft) {
 
   return parsedHeight.ok
     ? parsedHeight.heightMeters
-    : pointZMeters(draft.connectionPoint ?? draft.previewPoint);
+    : pointZMeters(draft.connectionPoint ?? draft.previewPoint ?? draft.bodyPoint);
 }
 
 function formatHeightInput(heightMeters: number) {
@@ -6310,6 +6634,15 @@ function createDraftFromEquipment(
   equipment: WorkbenchEquipment,
   step: EquipmentDraft["step"],
 ): EquipmentDraft {
+  const terminalConfig =
+    equipment.role === "appliance"
+      ? equipment.terminalConfig ??
+        createEquipmentTerminalConfigFromHeight(
+          equipment.type,
+          pointZMeters(equipment.connectionPoint),
+        )
+      : null;
+
   return {
     editingEquipmentId: equipment.id,
     planBaseId: equipment.planBaseId,
@@ -6317,9 +6650,18 @@ function createDraftFromEquipment(
     role: equipment.role,
     type: equipment.type,
     name: equipment.name,
+    bodyPoint: equipment.bodyPoint ?? equipment.connectionPoint,
     connectionPoint: equipment.connectionPoint,
-    connectionHeightInput: formatHeightInput(pointZMeters(equipment.connectionPoint)),
+    connectionHeightInput: formatHeightInput(
+      terminalConfig?.connectionHeightMeters ??
+        pointZMeters(equipment.connectionPoint),
+    ),
     previewPoint: equipment.connectionPoint,
+    terminalConfig,
+    terminalLateralOffsetInput: formatHeightInput(
+      terminalConfig?.lateralOffsetMeters ?? 0,
+    ),
+    wallAnchor: equipment.wallAnchor ?? null,
     demandValueInput:
       equipment.demandValue === undefined ? "" : String(equipment.demandValue),
     demandUnit: equipment.demandUnit ?? DEFAULT_DEMAND_UNIT,
@@ -7490,10 +7832,25 @@ function appendRouteDraftToNetwork(
     ),
   );
 
-  const network = pruneOrphanRouteNodes({
+  let network = pruneOrphanRouteNodes({
     nodes,
     segments,
   });
+  const terminalUpdate = applyConfirmedEquipmentTerminalConnection({
+    equipment: plan.equipment,
+    equipmentId: target.id,
+    network,
+    scaleMetersPerSourceUnit: calibrationScaleMetersPerSourceUnit(plan),
+  });
+
+  if (!terminalUpdate.ok) {
+    return {
+      ok: false,
+      message: terminalUpdate.message,
+    };
+  }
+
+  network = terminalUpdate.network;
 
   if (hasDuplicateNodeIds(network) || hasDuplicateSegmentIds(network)) {
     return {
