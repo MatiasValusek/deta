@@ -51,7 +51,9 @@ import {
   type SectionRegistrationSavedOverlay,
   type SectionRegistrationToolMode,
 } from "./SectionRegistrationOverlay";
+import { SectionRouteProjectionOverlay } from "./SectionRouteProjectionOverlay";
 import { SourceOverlay, type SourceOverlayData } from "./SourceOverlay";
+import type { SectionRouteProjection } from "@/lib/sections/routeProjection";
 
 type PdfViewerProps = {
   activePage: PdfPageModel | null;
@@ -85,6 +87,7 @@ type PdfViewerProps = {
   sectionRegistrationDraft: SectionRegistrationDraftOverlay | null;
   sectionRegistrationMode: SectionRegistrationToolMode;
   sectionRegistrationSaved: SectionRegistrationSavedOverlay | null;
+  sectionRouteProjection: SectionRouteProjection | null;
   showConstraints: boolean;
   onConstraintCreateRectangle: (start: Point2D, end: Point2D) => void;
   onConstraintDraftPoint: (point: Point2D) => void;
@@ -179,6 +182,7 @@ export function PdfViewer({
   sectionRegistrationDraft,
   sectionRegistrationMode,
   sectionRegistrationSaved,
+  sectionRouteProjection,
   showConstraints,
   onConstraintCreateRectangle,
   onConstraintDraftPoint,
@@ -771,6 +775,10 @@ export function PdfViewer({
                 saved={sectionRegistrationSaved}
                 sourceToScreen={(point) => pdfSourceToScreen(point, view)}
                 onChooseDraftSide={onSectionRegistrationSide}
+              />
+              <SectionRouteProjectionOverlay
+                projection={sectionRouteProjection}
+                sourceToScreen={(point) => pdfSourceToScreen(point, view)}
               />
               <RouteOverlay
                 draft={routeDraft}

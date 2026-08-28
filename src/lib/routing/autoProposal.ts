@@ -21,10 +21,13 @@ import {
   hasRouteCrossingsWithoutNode,
   hasRoutePath,
   hasZeroLengthSegments,
+  projectPointToRouteSegmentPath,
   resolveRouteNodePosition,
   resolveRouteSegments,
+  routeSegmentPlanLegs,
   routeEquipmentNodeId,
   segmentConnects,
+  splitRouteSegmentAtPoint,
   totalRouteLengthSource,
 } from "@/lib/routing/network";
 import type {
@@ -647,40 +650,60 @@ function resolveAutomaticAttachment(
   }
 
   for (const segment of resolveRouteSegments(network, input.equipment)) {
-    if (!pointOnSegment(point, segment.from, segment.to)) {
+    const projection = projectPointToRouteSegmentPath(point, segment);
+
+    if (projection.distance > input.minSegmentLengthSource) {
       continue;
     }
 
     if (
-      pointAlmostEqual(point, segment.from, input.minSegmentLengthSource) ||
-      pointAlmostEqual(point, segment.to, input.minSegmentLengthSource)
+      pointAlmostEqual(
+        projection.point,
+        segment.from,
+        input.minSegmentLengthSource,
+      ) ||
+      pointAlmostEqual(
+        projection.point,
+        segment.to,
+        input.minSegmentLengthSource,
+      )
     ) {
       continue;
     }
 
     const nodeId = createAutomaticNodeId(input.planBaseId, idContext);
-    const nodes = [
-      ...network.nodes,
-      {
+    const split = splitRouteSegmentAtPoint({
+      createNode: (splitPoint) => ({
         id: nodeId,
         kind: "route" as const,
         origin: "automatic" as const,
         pdfPageNumber: input.pdfPageNumber,
-        position: point,
-      },
-    ];
-    const segments = network.segments.filter((item) => item.id !== segment.id);
+        position: splitPoint,
+      }),
+      createSegment: (fromNodeId, toNodeId, _origin, vertices) =>
+        createAutomaticSegment(
+          input.planBaseId,
+          fromNodeId,
+          toNodeId,
+          idContext,
+          vertices,
+        ),
+      equipment: input.equipment,
+      network,
+      point: projection.point,
+      segmentId: segment.id,
+      tolerance: input.minSegmentLengthSource,
+    });
 
-    segments.push(
-      createAutomaticSegment(input.planBaseId, segment.fromNodeId, nodeId, idContext),
-      createAutomaticSegment(input.planBaseId, nodeId, segment.toNodeId, idContext),
-    );
+    if (!split.ok) {
+      continue;
+    }
 
     return {
       ok: true,
       nodeId,
-      nodes,
-      segments,
+      nodes: split.network.nodes,
+      segments: split.network.segments,
     };
   }
 
@@ -721,8 +744,9 @@ function collectOrthogonalCoordinates(
   }
 
   for (const segment of resolveRouteSegments(network, input.equipment)) {
-    addPointCoordinates(segment.from, xValues, yValues);
-    addPointCoordinates(segment.to, xValues, yValues);
+    for (const point of segment.path) {
+      addPointCoordinates(point, xValues, yValues);
+    }
   }
 
   for (const equipment of input.equipment) {
@@ -801,7 +825,9 @@ function collectTreeKeys(
 
     if (
       resolvedSegments.some((segment) =>
-        pointOnSegment(gridPoint.point, segment.from, segment.to),
+        routeSegmentPlanLegs(segment).some((leg) =>
+          pointOnSegment(gridPoint.point, leg.from, leg.to),
+        ),
       )
     ) {
       keys.add(gridPoint.key);
@@ -984,7 +1010,9 @@ function validateGeneratedNetwork(
 ) {
   const invalidSegments = resolveRouteSegments(network, input.equipment).filter(
     (segment) =>
-      segmentViolatesRestrictions(segment.from, segment.to, input.restrictions, 0),
+      routeSegmentPlanLegs(segment).some((leg) =>
+        segmentViolatesRestrictions(leg.from, leg.to, input.restrictions, 0),
+      ),
   );
   const hasCycle = detectRouteCycle(network);
   const hasDuplicate = hasDuplicateSegments(network);
@@ -1080,33 +1108,37 @@ function segmentCrossesRouteWithoutEndpoint(
   to: Point2D,
 ) {
   for (const segment of resolveRouteSegments(network, equipment)) {
-    if (!segmentsIntersect(from, to, segment.from, segment.to)) {
+    const crossingLeg = routeSegmentPlanLegs(segment).find((leg) =>
+      segmentsIntersect(from, to, leg.from, leg.to),
+    );
+
+    if (!crossingLeg) {
       continue;
     }
 
     const touchesAtFrom =
       pointAlmostEqual(from, segment.from, COORDINATE_EPSILON) ||
       pointAlmostEqual(from, segment.to, COORDINATE_EPSILON) ||
-      pointOnSegment(from, segment.from, segment.to);
+      pointOnSegment(from, crossingLeg.from, crossingLeg.to);
     const touchesAtTo =
       pointAlmostEqual(to, segment.from, COORDINATE_EPSILON) ||
       pointAlmostEqual(to, segment.to, COORDINATE_EPSILON) ||
-      pointOnSegment(to, segment.from, segment.to);
+      pointOnSegment(to, crossingLeg.from, crossingLeg.to);
     const allowedTouch =
       (touchesAtFrom &&
         segmentsOnlyTouchAtAllowedPoint(
           from,
           to,
-          segment.from,
-          segment.to,
+          crossingLeg.from,
+          crossingLeg.to,
           from,
         )) ||
       (touchesAtTo &&
         segmentsOnlyTouchAtAllowedPoint(
           from,
           to,
-          segment.from,
-          segment.to,
+          crossingLeg.from,
+          crossingLeg.to,
           to,
         ));
 
@@ -1510,6 +1542,7 @@ function createAutomaticSegment(
   fromNodeId: string,
   toNodeId: string,
   context: IdContext,
+  vertices: Point2D[] = [],
 ): RouteSegment {
   context.segmentIndex += 1;
   return {
@@ -1519,6 +1552,14 @@ function createAutomaticSegment(
     )}:s${context.segmentIndex}`,
     origin: "automatic",
     toNodeId,
+    ...(vertices.length > 0
+      ? {
+          vertices: vertices.map((point) => ({
+            x: point.x,
+            y: point.y,
+          })),
+        }
+      : {}),
   };
 }
 

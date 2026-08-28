@@ -17,6 +17,12 @@ export type SectionPointProjection = {
   t: number;
 };
 
+export type PlanPointSectionProjection = {
+  heightInSectionUnits: number;
+  sectionPoint: Point2D;
+  t: number;
+};
+
 export const MIN_SECTION_REGISTRATION_LENGTH = 0.0001;
 export const SECTION_LENGTH_TOLERANCE_RATIO = 0.02;
 
@@ -53,6 +59,46 @@ export function projectSectionPointToPlan(params: {
     planPoint: {
       x: params.planStart.x + planVector.x * t,
       y: params.planStart.y + planVector.y * t,
+    },
+    t,
+  };
+}
+
+export function projectPlanPointToSection(params: {
+  elevationMeters: number;
+  planEnd: Point2D;
+  planPoint: Point2D;
+  planStart: Point2D;
+  registration: SectionRegistration;
+  sectionScaleMetersPerSourceUnit: number;
+}): PlanPointSectionProjection {
+  const basis = createSectionRegistrationBasis(params.registration);
+  const planVector = subtractPoints(params.planEnd, params.planStart);
+  const planLength = Math.hypot(planVector.x, planVector.y);
+
+  if (planLength <= MIN_SECTION_REGISTRATION_LENGTH) {
+    throw new Error("La linea de corte en planta necesita dos puntos separados.");
+  }
+
+  const planUnit = {
+    x: planVector.x / planLength,
+    y: planVector.y / planLength,
+  };
+  const relativePlanPoint = subtractPoints(params.planPoint, params.planStart);
+  const t = dotProduct(relativePlanPoint, planUnit) / planLength;
+  const heightInSectionUnits =
+    (params.elevationMeters - params.registration.referenceElevationMeters) /
+    params.sectionScaleMetersPerSourceUnit;
+  const station = {
+    x: params.registration.sectionStart.x + basis.unit.x * basis.length * t,
+    y: params.registration.sectionStart.y + basis.unit.y * basis.length * t,
+  };
+
+  return {
+    heightInSectionUnits,
+    sectionPoint: {
+      x: station.x + basis.positiveZNormal.x * heightInSectionUnits,
+      y: station.y + basis.positiveZNormal.y * heightInSectionUnits,
     },
     t,
   };

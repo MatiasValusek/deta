@@ -67,7 +67,9 @@ import {
   type SectionRegistrationSavedOverlay,
   type SectionRegistrationToolMode,
 } from "./SectionRegistrationOverlay";
+import { SectionRouteProjectionOverlay } from "./SectionRouteProjectionOverlay";
 import { SourceOverlay, type SourceOverlayData } from "./SourceOverlay";
+import type { SectionRouteProjection } from "@/lib/sections/routeProjection";
 
 type DxfViewerProps = {
   baseId: string;
@@ -104,6 +106,7 @@ type DxfViewerProps = {
   sectionRegistrationDraft: SectionRegistrationDraftOverlay | null;
   sectionRegistrationMode: SectionRegistrationToolMode;
   sectionRegistrationSaved: SectionRegistrationSavedOverlay | null;
+  sectionRouteProjection: SectionRouteProjection | null;
   selectionMode: ManualSelectionMode;
   semanticViewMode: SemanticViewMode;
   showConstraints: boolean;
@@ -220,6 +223,7 @@ export function DxfViewer({
   sectionRegistrationDraft,
   sectionRegistrationMode,
   sectionRegistrationSaved,
+  sectionRouteProjection,
   selectionMode,
   semanticViewMode,
   showConstraints,
@@ -850,6 +854,10 @@ export function DxfViewer({
               saved={sectionRegistrationSaved}
               sourceToScreen={(point) => worldToScreen(point, view)}
               onChooseDraftSide={onSectionRegistrationSide}
+            />
+            <SectionRouteProjectionOverlay
+              projection={sectionRouteProjection}
+              sourceToScreen={(point) => worldToScreen(point, view)}
             />
             <RouteOverlay
               draft={routeDraft}

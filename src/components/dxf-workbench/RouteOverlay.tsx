@@ -5,6 +5,7 @@ import {
   getRouteNodeDegree,
   resolveRouteNodePosition,
   resolveRouteSegments,
+  routeSegmentPlanLegs,
 } from "@/lib/routing/network";
 import type {
   AutomaticRouteProposal,
@@ -51,10 +52,13 @@ export function RouteOverlay({
         ? resolvedSegments.map((segment) => (
             <RouteSegmentLine
               dimmed={hasProposal}
-              from={sourceToScreen(segment.from)}
               isInvalid={invalidSegmentIds.has(segment.id)}
+              points={routeSegmentPlanLegs(segment).flatMap((leg, index) =>
+                index === 0
+                  ? [sourceToScreen(leg.from), sourceToScreen(leg.to)]
+                  : [sourceToScreen(leg.to)],
+              )}
               key={segment.id}
-              to={sourceToScreen(segment.to)}
             />
           ))
         : null}
@@ -102,40 +106,87 @@ export function RouteOverlay({
 
 function RouteSegmentLine({
   dimmed = false,
-  from,
   isInvalid,
-  to,
+  points,
 }: {
   dimmed?: boolean;
-  from: Point2D;
   isInvalid: boolean;
-  to: Point2D;
+  points: Point2D[];
 }) {
+  const path = svgPath(points);
+
+  if (!path) {
+    return null;
+  }
+
   return (
     <g>
-      <line
+      <path
+        d={path}
+        fill="none"
         stroke={isInvalid ? "#dc2626" : "#a16207"}
         strokeDasharray={isInvalid ? "7 5" : undefined}
         strokeLinecap="round"
+        strokeLinejoin="round"
         strokeOpacity={dimmed ? 0.32 : 1}
         strokeWidth={isInvalid ? 3.2 : 3}
-        x1={from.x}
-        x2={to.x}
-        y1={from.y}
-        y2={to.y}
       />
-      <line
+      <path
+        d={path}
+        fill="none"
         stroke="#ffffff"
         strokeLinecap="round"
+        strokeLinejoin="round"
         strokeOpacity={dimmed ? 0.22 : 0.55}
         strokeWidth="1"
-        x1={from.x}
-        x2={to.x}
-        y1={from.y}
-        y2={to.y}
       />
     </g>
   );
+}
+
+function RouteProposalSegmentLine({ points }: { points: Point2D[] }) {
+  const path = svgPath(points);
+
+  if (!path) {
+    return null;
+  }
+
+  return (
+    <>
+      <path
+        d={path}
+        fill="none"
+        stroke="#2563eb"
+        strokeDasharray="8 6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="3.4"
+      />
+      <path
+        d={path}
+        fill="none"
+        stroke="#ffffff"
+        strokeDasharray="8 6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeOpacity="0.5"
+        strokeWidth="1"
+      />
+    </>
+  );
+}
+
+function svgPath(points: Point2D[]) {
+  const [first, ...rest] = points;
+
+  if (!first || rest.length === 0) {
+    return null;
+  }
+
+  return [
+    `M ${first.x} ${first.y}`,
+    ...rest.map((point) => `L ${point.x} ${point.y}`),
+  ].join(" ");
 }
 
 function RouteIntentLayer({
@@ -288,26 +339,12 @@ function RouteProposalPreview({
     <g data-route-proposal="true" opacity={opacity}>
       {resolveRouteSegments(network, equipment).map((segment) => (
         <g key={segment.id}>
-          <line
-            stroke="#2563eb"
-            strokeDasharray="8 6"
-            strokeLinecap="round"
-            strokeWidth="3.4"
-            x1={sourceToScreen(segment.from).x}
-            x2={sourceToScreen(segment.to).x}
-            y1={sourceToScreen(segment.from).y}
-            y2={sourceToScreen(segment.to).y}
-          />
-          <line
-            stroke="#ffffff"
-            strokeDasharray="8 6"
-            strokeLinecap="round"
-            strokeOpacity="0.5"
-            strokeWidth="1"
-            x1={sourceToScreen(segment.from).x}
-            x2={sourceToScreen(segment.to).x}
-            y1={sourceToScreen(segment.from).y}
-            y2={sourceToScreen(segment.to).y}
+          <RouteProposalSegmentLine
+            points={routeSegmentPlanLegs(segment).flatMap((leg, index) =>
+              index === 0
+                ? [sourceToScreen(leg.from), sourceToScreen(leg.to)]
+                : [sourceToScreen(leg.to)],
+            )}
           />
         </g>
       ))}

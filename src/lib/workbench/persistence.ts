@@ -958,6 +958,9 @@ function isRouteNetwork(value: unknown): value is ManualRouteNetwork {
         (segment.origin === undefined ||
           segment.origin === "manual" ||
           segment.origin === "automatic") &&
+        (segment.vertices === undefined ||
+          (Array.isArray(segment.vertices) &&
+            segment.vertices.every(isPoint))) &&
         (segment.accessories === undefined ||
           isRouteAccessoryArray(segment.accessories)),
     )

@@ -39,10 +39,6 @@ import {
 import type { TechnicalRouteAccessoryResolution } from "@/lib/calculation/technicalRouteAccessories";
 import type { DiameterTransitionDecision } from "@/lib/calculation/diameterTransitionProposals";
 import {
-  horizontalDistanceSource,
-  physicalLengthMetersWithVertical,
-} from "@/lib/geometry/height";
-import {
   applianceNodesAreTerminal,
   buildEquipmentIndex,
   detectRouteCycle,
@@ -54,7 +50,10 @@ import {
   hasDuplicateSegments,
   hasSegmentsWithMissingEndpoints,
   hasZeroLengthSegments,
+  resolveRouteSegmentPath,
   resolveRouteNodePosition,
+  routeSegmentHorizontalLengthSource,
+  routeSegmentPhysicalLengthMeters,
   segmentConnects,
 } from "@/lib/routing/network";
 import type {
@@ -780,6 +779,7 @@ function createSegmentPhysicalLengthIndex(params: {
         fromNodeId: oriented.fromNodeId,
         nodeById: params.nodeById,
         scaleMetersPerSourceUnit: params.scaleMetersPerSourceUnit,
+        segment: oriented.segment,
         toNodeId: oriented.toNodeId,
       }),
     );
@@ -793,6 +793,7 @@ function calculateSegmentPhysicalLengthMeters(params: {
   fromNodeId: string;
   nodeById: Map<string, RouteNode>;
   scaleMetersPerSourceUnit: number | null;
+  segment: RouteSegment;
   toNodeId: string;
 }) {
   if (params.scaleMetersPerSourceUnit === null) {
@@ -814,11 +815,15 @@ function calculateSegmentPhysicalLengthMeters(params: {
     return null;
   }
 
-  return physicalLengthMetersWithVertical({
-    first: fromPoint,
-    scaleMetersPerSourceUnit: params.scaleMetersPerSourceUnit,
-    second: toPoint,
-  });
+  return routeSegmentPhysicalLengthMeters(
+    {
+      ...params.segment,
+      from: fromPoint,
+      path: resolveRouteSegmentPath(params.segment, fromPoint, toPoint),
+      to: toPoint,
+    },
+    params.scaleMetersPerSourceUnit,
+  );
 }
 
 function resolveTechnicalRouteNodePosition(
@@ -1144,16 +1149,25 @@ function createTechnicalSegmentResult(params: {
     ? resolveRouteNodePosition(from, params.equipmentById)
     : null;
   const toPoint = to ? resolveRouteNodePosition(to, params.equipmentById) : null;
-  const drawingLength =
-    fromPoint && toPoint ? horizontalDistanceSource(fromPoint, toPoint) : 0;
+  const resolvedRouteSegment =
+    fromPoint && toPoint
+      ? {
+          ...params.oriented.segment,
+          from: fromPoint,
+          path: resolveRouteSegmentPath(params.oriented.segment, fromPoint, toPoint),
+          to: toPoint,
+        }
+      : null;
+  const drawingLength = resolvedRouteSegment
+    ? routeSegmentHorizontalLengthSource(resolvedRouteSegment)
+    : 0;
   const physicalLengthMeters =
-    params.scaleMetersPerSourceUnit === null || !fromPoint || !toPoint
+    params.scaleMetersPerSourceUnit === null || !resolvedRouteSegment
       ? null
-      : physicalLengthMetersWithVertical({
-          first: fromPoint,
-          scaleMetersPerSourceUnit: params.scaleMetersPerSourceUnit,
-          second: toPoint,
-        });
+      : routeSegmentPhysicalLengthMeters(
+          resolvedRouteSegment,
+          params.scaleMetersPerSourceUnit,
+        );
   const accessoryContext = {
     accumulatedFlow: flow.value,
     accumulatedFlowUnit: flow.unit,

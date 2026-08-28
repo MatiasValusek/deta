@@ -103,9 +103,11 @@ import {
   hasSegmentsWithMissingEndpoints,
   hasZeroLengthSegments,
   pruneOrphanRouteNodes,
+  projectPointToRouteSegmentPath,
   removeApplianceBranch,
   resolveRouteNodePosition,
   resolveRouteSegments,
+  routeSegmentPlanLegs,
   routeEquipmentNodeId,
   resolveTerminalApplianceBranchOrigin,
   segmentIdsForNodePath,
@@ -6067,12 +6069,14 @@ function findInvalidRouteSegmentIds(
         : undefined;
 
     if (
-      segmentViolatesRouteRestrictions(
-        plan,
-        classificationIndex,
-        segment.from,
-        segment.to,
-        pdfPageNumber,
+      routeSegmentPlanLegs(segment).some((leg) =>
+        segmentViolatesRouteRestrictions(
+          plan,
+          classificationIndex,
+          leg.from,
+          leg.to,
+          pdfPageNumber,
+        ),
       )
     ) {
       invalidSegmentIds.add(segment.id);
@@ -6390,7 +6394,7 @@ function findRouteSegmentAtPoint(
       continue;
     }
 
-    const projection = projectPointToSegment(point, segment.from, segment.to);
+    const projection = projectPointToRouteSegmentPath(point, segment);
 
     if (
       projection.distance <= tolerance &&
@@ -6758,7 +6762,11 @@ function segmentCrossesExistingRoute(
       continue;
     }
 
-    if (!segmentsIntersect(from, to, segment.from, segment.to)) {
+    const crossingLeg = routeSegmentPlanLegs(segment).find((leg) =>
+      segmentsIntersect(from, to, leg.from, leg.to),
+    );
+
+    if (!crossingLeg) {
       continue;
     }
 
@@ -6766,13 +6774,13 @@ function segmentCrossesExistingRoute(
       draft.originPoint &&
       pointAlmostEqual(from, draft.originPoint, tolerance) &&
       segmentsOnlyTouchAtAllowedPoint(
-        from,
-        to,
-        segment.from,
-        segment.to,
-        draft.originPoint,
-        tolerance,
-      )
+          from,
+          to,
+          crossingLeg.from,
+          crossingLeg.to,
+          draft.originPoint,
+          tolerance,
+        )
     ) {
       continue;
     }
@@ -6890,8 +6898,14 @@ function appendRouteDraftToNetwork(
         pdfPageNumber: draft.pdfPageNumber,
         position: point,
       }),
-      createSegment: (fromNodeId, toNodeId, origin) =>
-        createRouteSegment(plan.id, fromNodeId, toNodeId, origin ?? "manual"),
+      createSegment: (fromNodeId, toNodeId, origin, vertices) =>
+        createRouteSegment(
+          plan.id,
+          fromNodeId,
+          toNodeId,
+          origin ?? "manual",
+          vertices,
+        ),
       equipment: plan.equipment,
       network: {
         nodes,
@@ -6933,26 +6947,15 @@ function appendRouteDraftToNetwork(
     });
   }
 
-  const routeNodeIds = draft.routePoints.map((point) => {
-    const nodeId = createRouteNodeId(plan.id);
-
-    nodes.push({
-      id: nodeId,
-      kind: "route",
-      origin: "manual",
-      pdfPageNumber: draft.pdfPageNumber,
-      position: point,
-    });
-
-    return nodeId;
-  });
-  const pathNodeIds = [originNodeId, ...routeNodeIds, targetNodeId];
-
-  for (let index = 0; index < pathNodeIds.length - 1; index += 1) {
-    segments.push(
-      createRouteSegment(plan.id, pathNodeIds[index], pathNodeIds[index + 1]),
-    );
-  }
+  segments.push(
+    createRouteSegment(
+      plan.id,
+      originNodeId,
+      targetNodeId,
+      "manual",
+      draft.routePoints,
+    ),
+  );
 
   const network = pruneOrphanRouteNodes({
     nodes,
@@ -7245,6 +7248,10 @@ function routeNetworkSignature(network: ManualRouteNetwork) {
         segment.fromNodeId,
         segment.toNodeId,
         segment.origin ?? "",
+        ...(segment.vertices ?? []).flatMap((point) => [
+          formatFingerprintNumber(point.x),
+          formatFingerprintNumber(point.y),
+        ]),
       ].join(":"),
     )
     .sort()
@@ -7404,12 +7411,21 @@ function createRouteSegment(
   fromNodeId: string,
   toNodeId: string,
   origin: RouteSegment["origin"] = "manual",
+  vertices: Point2D[] = [],
 ): RouteSegment {
   return {
     id: `route-segment:${planBaseId}:manual:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 8)}`,
     fromNodeId,
     origin,
     toNodeId,
+    ...(vertices.length > 0
+      ? {
+          vertices: vertices.map((point) => ({
+            x: point.x,
+            y: point.y,
+          })),
+        }
+      : {}),
   };
 }
 

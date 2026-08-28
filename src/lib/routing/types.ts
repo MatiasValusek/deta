@@ -39,6 +39,7 @@ export type RouteSegment = {
   fromNodeId: string;
   origin?: RouteElementOrigin;
   toNodeId: string;
+  vertices?: Point2D[];
 };
 
 export type ManualRouteNetwork = {
@@ -93,6 +94,7 @@ export type RouteToolMode = "inactive" | "origin" | "drawing";
 
 export type ResolvedRouteSegment = RouteSegment & {
   from: Point2D;
+  path: Point2D[];
   to: Point2D;
 };
 

@@ -3,6 +3,7 @@ import type { WorkbenchEquipment } from "@/lib/equipment/types";
 import { pointZMeters } from "@/lib/geometry/height";
 import {
   projectPointToSegment,
+  pointAlmostEqual,
   segmentsIntersect,
 } from "./geometry";
 import type {
@@ -73,11 +74,137 @@ export function resolveRouteSegments(
     resolved.push({
       ...segment,
       from,
+      path: resolveRouteSegmentPath(segment, from, to),
       to,
     });
   }
 
   return resolved;
+}
+
+export function resolveRouteSegmentPath(
+  segment: RouteSegment,
+  from: Point2D,
+  to: Point2D,
+) {
+  return [from, ...routeSegmentVertices(segment), to];
+}
+
+export function routeSegmentPlanLegs(segment: ResolvedRouteSegment) {
+  const path = segment.path.length >= 2
+    ? segment.path
+    : resolveRouteSegmentPath(segment, segment.from, segment.to);
+
+  return path.slice(0, -1).map((from, index) => ({
+    from,
+    to: path[index + 1] as Point2D,
+  }));
+}
+
+export function routeSegmentHorizontalLengthSource(
+  segment: ResolvedRouteSegment,
+) {
+  return routeSegmentPlanLegs(segment).reduce(
+    (sum, leg) => sum + distanceBetween(leg.from, leg.to),
+    0,
+  );
+}
+
+export function routeSegmentPhysicalLengthMeters(
+  segment: ResolvedRouteSegment,
+  scaleMetersPerSourceUnit: number,
+) {
+  return (
+    routeSegmentHorizontalLengthSource(segment) * scaleMetersPerSourceUnit +
+    Math.abs(pointZMeters(segment.from) - pointZMeters(segment.to))
+  );
+}
+
+export function projectPointToRouteSegmentPath(
+  point: Point2D,
+  segment: ResolvedRouteSegment,
+) {
+  const legs = routeSegmentPlanLegs(segment);
+  let nearest: {
+    distance: number;
+    distanceFromStartSource: number;
+    legIndex: number;
+    point: Point2D;
+    t: number;
+  } | null = null;
+  let distanceBeforeLeg = 0;
+
+  legs.forEach((leg, legIndex) => {
+    const projection = projectPointToSegment(point, leg.from, leg.to);
+    const legLength = distanceBetween(leg.from, leg.to);
+    const candidate = {
+      distance: projection.distance,
+      distanceFromStartSource: distanceBeforeLeg + legLength * projection.t,
+      legIndex,
+      point: projection.point,
+      t: projection.t,
+    };
+
+    if (
+      !nearest ||
+      candidate.distance < nearest.distance ||
+      (candidate.distance === nearest.distance &&
+        candidate.legIndex < nearest.legIndex)
+    ) {
+      nearest = candidate;
+    }
+
+    distanceBeforeLeg += legLength;
+  });
+
+  return (
+    nearest ?? {
+      distance: distanceBetween(point, segment.from),
+      distanceFromStartSource: 0,
+      legIndex: 0,
+      point: segment.from,
+      t: 0,
+    }
+  );
+}
+
+export function insertRouteSegmentVertex(params: {
+  index?: number;
+  network: ManualRouteNetwork;
+  point: Point2D;
+  segmentId: string;
+}) {
+  return updateRouteSegmentVertices(params.network, params.segmentId, (vertices) => {
+    const index = clampVertexIndex(params.index ?? vertices.length, vertices.length);
+    return [
+      ...vertices.slice(0, index),
+      routeSegmentVertex(params.point),
+      ...vertices.slice(index),
+    ];
+  });
+}
+
+export function moveRouteSegmentVertex(params: {
+  network: ManualRouteNetwork;
+  point: Point2D;
+  segmentId: string;
+  vertexIndex: number;
+}) {
+  return updateRouteSegmentVertices(params.network, params.segmentId, (vertices) =>
+    vertices.map((vertex, index) =>
+      index === params.vertexIndex ? routeSegmentVertex(params.point) : vertex,
+    ),
+  );
+}
+
+export function removeRouteSegmentVertex(params: {
+  network: ManualRouteNetwork;
+  segmentId: string;
+  vertexIndex: number;
+}) {
+  return updateRouteSegmentVertices(params.network, params.segmentId, (vertices) =>
+    vertices.filter((_, index) => index !== params.vertexIndex),
+  );
 }
 
 export function getRouteNeighbors(network: ManualRouteNetwork) {
@@ -387,7 +514,7 @@ export function totalRouteLengthSource(
   equipment: WorkbenchEquipment[],
 ) {
   return resolveRouteSegments(network, equipment).reduce(
-    (sum, segment) => sum + distanceBetween(segment.from, segment.to),
+    (sum, segment) => sum + routeSegmentHorizontalLengthSource(segment),
     0,
   );
 }
@@ -415,7 +542,7 @@ export function hasZeroLengthSegments(
 ) {
   return resolveRouteSegments(network, equipment).some(
     (segment) =>
-      distanceBetween(segment.from, segment.to) <= tolerance &&
+      routeSegmentHorizontalLengthSource(segment) <= tolerance &&
       Math.abs(pointZMeters(segment.from) - pointZMeters(segment.to)) <=
         Number.EPSILON,
   );
@@ -445,7 +572,18 @@ export function hasRouteCrossingsWithoutNode(
         continue;
       }
 
-      if (segmentsIntersect(first.from, first.to, second.from, second.to)) {
+      if (
+        routeSegmentPlanLegs(first).some((firstLeg) =>
+          routeSegmentPlanLegs(second).some((secondLeg) =>
+            segmentsIntersect(
+              firstLeg.from,
+              firstLeg.to,
+              secondLeg.from,
+              secondLeg.to,
+            ),
+          ),
+        )
+      ) {
         return true;
       }
     }
@@ -460,6 +598,7 @@ export function splitRouteSegmentAtPoint(params: {
     fromNodeId: string,
     toNodeId: string,
     origin: RouteSegment["origin"],
+    vertices?: Point2D[],
   ) => RouteSegment;
   equipment: WorkbenchEquipment[];
   network: ManualRouteNetwork;
@@ -504,7 +643,13 @@ export function splitRouteSegmentAtPoint(params: {
     };
   }
 
-  const projection = projectPointToSegment(params.point, fromPoint, toPoint);
+  const resolvedOriginal = {
+    ...original,
+    from: fromPoint,
+    path: resolveRouteSegmentPath(original, fromPoint, toPoint),
+    to: toPoint,
+  };
+  const projection = projectPointToRouteSegmentPath(params.point, resolvedOriginal);
   const endpointHit = nearestReusableEndpoint({
     clickedPoint: params.point,
     fromNode,
@@ -534,8 +679,8 @@ export function splitRouteSegmentAtPoint(params: {
 
   if (
     projection.distance > params.tolerance ||
-    projection.t <= 0 ||
-    projection.t >= 1
+    pointAlmostEqual(projection.point, fromPoint, params.tolerance) ||
+    pointAlmostEqual(projection.point, toPoint, params.tolerance)
   ) {
     return {
       ok: false,
@@ -579,7 +724,12 @@ export function splitRouteSegmentAtPoint(params: {
     };
   }
 
-  const node = params.createNode(projection.point);
+  const splitPoint = routeSegmentSplitPointWithZ({
+    point: projection.point,
+    resolvedSegment: resolvedOriginal,
+    sourceDistanceFromStart: projection.distanceFromStartSource,
+  });
+  const node = params.createNode(splitPoint);
 
   if (node.kind !== "route" || !node.position) {
     return {
@@ -596,9 +746,23 @@ export function splitRouteSegmentAtPoint(params: {
   }
 
   const replacementOrigin = original.origin ?? "manual";
+  const splitVertices = splitRouteSegmentVertices(
+    resolvedOriginal,
+    projection.point,
+  );
   const replacementSegments = [
-    params.createSegment(original.fromNodeId, node.id, replacementOrigin),
-    params.createSegment(node.id, original.toNodeId, replacementOrigin),
+    params.createSegment(
+      original.fromNodeId,
+      node.id,
+      replacementOrigin,
+      splitVertices.before,
+    ),
+    params.createSegment(
+      node.id,
+      original.toNodeId,
+      replacementOrigin,
+      splitVertices.after,
+    ),
   ];
   const nextNetwork = {
     nodes: [...params.network.nodes, node],
@@ -633,7 +797,7 @@ export function splitRouteSegmentAtPoint(params: {
     ok: true,
     network: nextNetwork,
     nodeId: node.id,
-    point: projection.point,
+    point: splitPoint,
   };
 }
 
@@ -836,6 +1000,155 @@ export function segmentKey(firstNodeId: string, secondNodeId: string) {
 
 export function distanceBetween(first: Point2D, second: Point2D) {
   return Math.hypot(first.x - second.x, first.y - second.y);
+}
+
+function routeSegmentVertices(segment: RouteSegment) {
+  return (segment.vertices ?? []).map(routeSegmentVertex);
+}
+
+function routeSegmentVertex(point: Point2D): Point2D {
+  return {
+    x: point.x,
+    y: point.y,
+  };
+}
+
+function updateRouteSegmentVertices(
+  network: ManualRouteNetwork,
+  segmentId: string,
+  updater: (vertices: Point2D[]) => Point2D[],
+): ManualRouteNetwork {
+  return {
+    nodes: network.nodes,
+    segments: network.segments.map((segment) => {
+      if (segment.id !== segmentId) {
+        return segment;
+      }
+
+      const vertices = updater(routeSegmentVertices(segment));
+      if (vertices.length > 0) {
+        return {
+          ...segment,
+          vertices,
+        };
+      }
+
+      const { vertices: _vertices, ...segmentWithoutVertices } = segment;
+
+      return segmentWithoutVertices;
+    }),
+  };
+}
+
+function clampVertexIndex(index: number, max: number) {
+  if (!Number.isFinite(index)) {
+    return max;
+  }
+
+  return Math.max(0, Math.min(max, Math.trunc(index)));
+}
+
+function splitRouteSegmentVertices(
+  segment: ResolvedRouteSegment,
+  splitPoint: Point2D,
+) {
+  const path = segment.path.length >= 2
+    ? segment.path
+    : resolveRouteSegmentPath(segment, segment.from, segment.to);
+  const splitIndex = nearestPathPointInsertionIndex(path, splitPoint);
+  const before = path
+    .slice(1, splitIndex)
+    .filter((point) => !pointAlmostEqual(point, splitPoint))
+    .map(routeSegmentVertex);
+  const after = path
+    .slice(splitIndex, -1)
+    .filter((point) => !pointAlmostEqual(point, splitPoint))
+    .map(routeSegmentVertex);
+
+  return {
+    after,
+    before,
+  };
+}
+
+function nearestPathPointInsertionIndex(path: Point2D[], point: Point2D) {
+  const exactIndex = path.findIndex((candidate) =>
+    pointAlmostEqual(candidate, point),
+  );
+
+  if (exactIndex >= 0) {
+    return exactIndex;
+  }
+
+  let distanceBeforeLeg = 0;
+  let nearest = {
+    distance: Number.POSITIVE_INFINITY,
+    distanceFromStart: 0,
+  };
+
+  for (let index = 0; index < path.length - 1; index += 1) {
+    const from = path[index] as Point2D;
+    const to = path[index + 1] as Point2D;
+    const legLength = distanceBetween(from, to);
+    const projection = projectPointToSegment(point, from, to);
+
+    if (projection.distance < nearest.distance) {
+      nearest = {
+        distance: projection.distance,
+        distanceFromStart: distanceBeforeLeg + legLength * projection.t,
+      };
+    }
+
+    distanceBeforeLeg += legLength;
+  }
+
+  let currentDistance = 0;
+
+  for (let index = 1; index < path.length; index += 1) {
+    const previous = path[index - 1] as Point2D;
+    const current = path[index] as Point2D;
+    currentDistance += distanceBetween(previous, current);
+
+    if (currentDistance > nearest.distanceFromStart) {
+      return index;
+    }
+  }
+
+  return Math.max(1, path.length - 1);
+}
+
+function routeSegmentSplitPointWithZ(params: {
+  point: Point2D;
+  resolvedSegment: ResolvedRouteSegment;
+  sourceDistanceFromStart: number;
+}): Point2D {
+  if (
+    !pointHasExplicitZ(params.resolvedSegment.from) &&
+    !pointHasExplicitZ(params.resolvedSegment.to)
+  ) {
+    return params.point;
+  }
+
+  const horizontalLength = routeSegmentHorizontalLengthSource(
+    params.resolvedSegment,
+  );
+  const ratio =
+    horizontalLength <= Number.EPSILON
+      ? 0
+      : Math.max(0, Math.min(1, params.sourceDistanceFromStart / horizontalLength));
+
+  return {
+    ...params.point,
+    z:
+      pointZMeters(params.resolvedSegment.from) +
+      (pointZMeters(params.resolvedSegment.to) -
+        pointZMeters(params.resolvedSegment.from)) *
+        ratio,
+  };
+}
+
+function pointHasExplicitZ(point: Point2D) {
+  return typeof point.z === "number" && Number.isFinite(point.z);
 }
 
 function nearestReusableEndpoint(params: {
