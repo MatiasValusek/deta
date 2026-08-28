@@ -59,6 +59,7 @@ export type TechnicalPhysicalAccessoryDiameter = {
 
 export type TechnicalPhysicalAccessoryRouteUse = {
   downstreamSegmentId?: string | null;
+  equivalentLengthMeters: number | null;
   routeId: string;
   segmentIds: string[];
   status: PipeSystemResolutionStatus | "inactive";
@@ -214,6 +215,7 @@ function addRouteAccessoryPieces(params: {
         nodeId: proposal?.nodeId ?? null,
         position: proposal?.position ?? null,
         routeUse: {
+          equivalentLengthMeters: contribution.equivalentLengthMetersPerUnit,
           routeId: contribution.routeId,
           segmentIds,
           status: contribution.status,
@@ -283,6 +285,7 @@ function addTransitionPieces(params: {
         position: proposal?.position ?? null,
         routeUse: {
           downstreamSegmentId: contribution.downstreamSegmentId,
+          equivalentLengthMeters: contribution.equivalentLengthMeters,
           routeId: contribution.routeId,
           segmentIds:
             contribution.upstreamSegmentId && contribution.downstreamSegmentId

@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { type WorkbenchEquipment } from "@/lib/equipment/types";
+import type {
+  PipeDiameterReference,
+  PipeSystem,
+} from "@/lib/calculation/pipeSystem";
 import {
   createDemandNormalizationIndex,
   formatEquipmentDemandWithNormalization,
@@ -30,9 +34,9 @@ import type {
   DiameterTransitionTechnicalReview,
 } from "@/lib/calculation/diameterTransitionProposals";
 import type {
-  ProfessionalDiameterAdoptionSegmentResult,
-  ProfessionalDiameterAdoptionSegmentStatus,
+  AdoptedDiameterDecision,
 } from "@/lib/calculation/professionalDiameterAdoption";
+import type { ManualRouteNetwork } from "@/lib/routing/types";
 import type {
   CompoundTurnTransitionPreview as CompoundTurnTransitionPreviewModel,
 } from "@/lib/calculation/compoundTurnTransitionResolution";
@@ -55,6 +59,22 @@ import {
   type TechnicalPhysicalAccessoryRouteUse,
 } from "@/lib/calculation/technicalPhysicalAccessories";
 import {
+  createTechnicalEquivalentAccessoryVerification,
+  type TechnicalEquivalentAccessorySegmentVerification,
+} from "@/lib/calculation/technicalEquivalentAccessoryVerification";
+import {
+  createTechnicalAdoptedDiameterValidation,
+  type TechnicalAdoptedDiameterSegmentValidation,
+  type TechnicalAdoptedDiameterValidation,
+} from "@/lib/calculation/technicalAdoptedDiameterValidation";
+import {
+  createTechnicalAxonometricView,
+  type TechnicalAxonometricAccessory,
+  type TechnicalAxonometricNode,
+  type TechnicalAxonometricSegment,
+  type TechnicalAxonometricView,
+} from "@/lib/calculation/technicalAxonometric";
+import {
   createTechnicalCalculationSheet,
   type TechnicalCalculationSheet,
   type TechnicalCalculationSheetRow,
@@ -67,6 +87,7 @@ import {
 } from "@/lib/calculation/technicalPdfDownload";
 
 type CalculationPanelProps = {
+  adoptedDiameterDecisions: AdoptedDiameterDecision[];
   accessoryProposals: AccessoryProposal[];
   accessoryProposalReviews: AccessoryProposalTechnicalReview[];
   diameterTransitionProposals: DiameterTransitionProposal[];
@@ -74,8 +95,11 @@ type CalculationPanelProps = {
   equipment: WorkbenchEquipment[];
   hasPendingProposal: boolean;
   isPlanActive: boolean;
+  pipeSystem: PipeSystem;
   planReady: boolean;
   result: TechnicalCalculationResult | null;
+  routeNetwork: ManualRouteNetwork;
+  scaleMetersPerSourceUnit: number | null;
   routeTransitionResolutions: Record<string, TechnicalRouteTransitionResolution>;
   onAdoptSegmentDiameter: (segmentId: string, diameterId: string | null) => void;
   onConfirmAccessoryProposal: (proposalId: string, candidateId: string) => void;
@@ -86,6 +110,7 @@ type CalculationPanelProps = {
 };
 
 export function CalculationPanel({
+  adoptedDiameterDecisions,
   accessoryProposals,
   accessoryProposalReviews,
   diameterTransitionProposals,
@@ -93,8 +118,11 @@ export function CalculationPanel({
   equipment,
   hasPendingProposal,
   isPlanActive,
+  pipeSystem,
   planReady,
   result,
+  routeNetwork,
+  scaleMetersPerSourceUnit,
   routeTransitionResolutions,
   onAdoptSegmentDiameter,
   onConfirmAccessoryProposal,
@@ -117,21 +145,6 @@ export function CalculationPanel({
       }),
     [equipment, result, routeTransitionResolutions],
   );
-  const materialTakeoff = useMemo(
-    () =>
-      createTechnicalMaterialTakeoff({
-        accessoryProposals,
-        diameterTransitionProposals,
-        result,
-        routeTransitionResolutions,
-      }),
-    [
-      accessoryProposals,
-      diameterTransitionProposals,
-      result,
-      routeTransitionResolutions,
-    ],
-  );
   const physicalAccessoryInventory = useMemo(
     () =>
       createTechnicalPhysicalAccessoryInventory({
@@ -145,6 +158,81 @@ export function CalculationPanel({
       diameterTransitionProposals,
       result,
       routeTransitionResolutions,
+    ],
+  );
+  const equivalentAccessoryVerificationBySegmentId = useMemo(
+    () =>
+      createTechnicalEquivalentAccessoryVerification({
+        inventory: physicalAccessoryInventory,
+        pipeSystem,
+        result,
+      }),
+    [physicalAccessoryInventory, pipeSystem, result],
+  );
+  const adoptedDiameterValidation = useMemo(
+    () =>
+      createTechnicalAdoptedDiameterValidation({
+        decisions: adoptedDiameterDecisions,
+        equivalentVerificationBySegmentId:
+          equivalentAccessoryVerificationBySegmentId,
+        pipeSystem,
+        result,
+      }),
+    [
+      adoptedDiameterDecisions,
+      equivalentAccessoryVerificationBySegmentId,
+      pipeSystem,
+      result,
+    ],
+  );
+  const adoptedDiameterValidationBySegmentId = useMemo<
+    Record<string, TechnicalAdoptedDiameterSegmentValidation>
+  >(
+    () =>
+      Object.fromEntries(
+        adoptedDiameterValidation.segments.map((segment) => [
+          segment.segmentId,
+          segment,
+        ]),
+      ),
+    [adoptedDiameterValidation],
+  );
+  const materialTakeoff = useMemo(
+    () =>
+      createTechnicalMaterialTakeoff({
+        accessoryProposals,
+        adoptedDiameterValidation,
+        diameterTransitionProposals,
+        physicalAccessoryInventory,
+        result,
+        routeTransitionResolutions,
+      }),
+    [
+      accessoryProposals,
+      adoptedDiameterValidation,
+      diameterTransitionProposals,
+      physicalAccessoryInventory,
+      result,
+      routeTransitionResolutions,
+    ],
+  );
+  const axonometricView = useMemo(
+    () =>
+      createTechnicalAxonometricView({
+        adoptedDiameterValidation,
+        equipment,
+        inventory: physicalAccessoryInventory,
+        network: routeNetwork,
+        result,
+        scaleMetersPerSourceUnit,
+      }),
+    [
+      adoptedDiameterValidation,
+      equipment,
+      physicalAccessoryInventory,
+      result,
+      routeNetwork,
+      scaleMetersPerSourceUnit,
     ],
   );
   const selectedSegment =
@@ -276,7 +364,10 @@ export function CalculationPanel({
 
       {result ? (
         <>
-          <CalculationSummary result={result} />
+          <CalculationSummary
+            adoptedDiameterValidation={adoptedDiameterValidation}
+            result={result}
+          />
           <CalculationIssues result={result} />
           <AccessoryProposalList
             proposals={accessoryProposals}
@@ -296,11 +387,17 @@ export function CalculationPanel({
             onReject={onRejectDiameterTransition}
           />
           <MaterialTakeoffSection takeoff={materialTakeoff} />
+          <TechnicalAxonometricSection view={axonometricView} />
           <PhysicalAccessoryInventorySection
             inventory={physicalAccessoryInventory}
             result={result}
           />
-          <CalculationSheetSection sheet={calculationSheet} />
+          <CalculationSheetSection
+            adoptedDiameterValidationBySegmentId={
+              adoptedDiameterValidationBySegmentId
+            }
+            sheet={calculationSheet}
+          />
           <SegmentList
             result={result}
             selectedSegmentId={selectedSegment?.segmentId ?? null}
@@ -308,6 +405,16 @@ export function CalculationPanel({
           />
           {selectedSegment ? (
             <SegmentDetail
+              adoptedDiameterValidation={
+                adoptedDiameterValidationBySegmentId[
+                  selectedSegment.segmentId
+                ] ?? null
+              }
+              equivalentAccessoryVerification={
+                equivalentAccessoryVerificationBySegmentId[
+                  selectedSegment.segmentId
+                ] ?? null
+              }
               equipment={equipment}
               physicalAccessoryInventory={physicalAccessoryInventory}
               result={result}
@@ -1129,7 +1236,13 @@ function proposalReviewReason(proposal: AccessoryProposal) {
   return proposal.reason;
 }
 
-function CalculationSummary({ result }: { result: TechnicalCalculationResult }) {
+function CalculationSummary({
+  adoptedDiameterValidation,
+  result,
+}: {
+  adoptedDiameterValidation: TechnicalAdoptedDiameterValidation;
+  result: TechnicalCalculationResult;
+}) {
   const totalFlow = formatTechnicalFlow(
     result.totals.accumulatedFlow,
     result.totals.accumulatedFlowUnit,
@@ -1144,7 +1257,6 @@ function CalculationSummary({ result }: { result: TechnicalCalculationResult }) 
   );
   const calculationLength = formatTotalCalculationLength(result);
   const transitionAwareSizing = result.transitionAwareNetworkSizing;
-  const adoption = result.professionalDiameterAdoption;
 
   return (
     <dl className="mt-3 grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 gap-y-1 text-xs">
@@ -1180,11 +1292,13 @@ function CalculationSummary({ result }: { result: TechnicalCalculationResult }) 
           </dd>
         </>
       ) : null}
-      {adoption && adoption.decisions.length > 0 ? (
+      {adoptedDiameterValidation.segments.length > 0 ? (
         <>
           <dt>Adopción diámetros</dt>
           <dd className="text-right">
-            {professionalAdoptionStatusLabel(adoption.status)}
+            {adoptedDiameterValidationStatusLabel(
+              adoptedDiameterValidation.status,
+            )}
           </dd>
         </>
       ) : null}
@@ -1235,35 +1349,71 @@ function MaterialTakeoffSection({
         Materiales
       </h3>
       {hasMaterials ? (
-        <ul className="space-y-1">
-          {takeoff.pipeItems.map((item) => (
-            <li
-              className="flex items-baseline justify-between gap-2"
-              key={item.diameterKey}
-            >
-              <span>{item.label}</span>
-              <span className="text-right font-mono">
-                {formatCalculationMeters(item.physicalLengthMeters)}
-              </span>
-            </li>
-          ))}
-          {takeoff.accessoryItems.map((item) => (
-            <li
-              className="flex items-baseline justify-between gap-2"
-              key={`${item.source}:${item.familyId}:${item.configurationKey}`}
-            >
-              <span>{item.label}</span>
-              <span className="text-right font-mono">
-                {formatMaterialQuantity(item.quantity)}
-              </span>
-            </li>
-          ))}
-        </ul>
+        <>
+          {takeoff.pipeItems.length > 0 ? (
+            <div>
+              <div className="text-[10px] font-semibold uppercase text-[var(--muted)]">
+                Caneria neta
+              </div>
+              <ul className="mt-1 space-y-1">
+                {takeoff.pipeItems.map((item) => (
+                  <li
+                    className="flex items-baseline justify-between gap-2"
+                    key={item.diameterKey}
+                  >
+                    <span>{item.label}</span>
+                    <span className="text-right font-mono">
+                      {formatCalculationMeters(item.physicalLengthMeters)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {takeoff.accessoryItems.length > 0 ? (
+            <div className={takeoff.pipeItems.length > 0 ? "mt-2" : ""}>
+              <div className="text-[10px] font-semibold uppercase text-[var(--muted)]">
+                Accesorios fisicos
+              </div>
+              <ul className="mt-1 space-y-1">
+                {takeoff.accessoryItems.map((item) => (
+                  <li
+                    className="flex items-baseline justify-between gap-2"
+                    key={`${item.source}:${item.familyId}:${item.configurationKey}`}
+                  >
+                    <span>{item.label}</span>
+                    <span className="text-right font-mono">
+                      {formatMaterialQuantity(item.quantity)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </>
       ) : (
         <div className="text-[var(--muted)]">
           Sin materiales computables.
         </div>
       )}
+      <dl className="mt-2 border-t border-[var(--line)] pt-2">
+        <div className="flex items-baseline justify-between gap-2">
+          <dt>Total neto caneria</dt>
+          <dd className="text-right font-mono">
+            {formatCalculationMeters(
+              takeoff.physicalMaterialQuantities.pipeLengthMeters,
+            )}
+          </dd>
+        </div>
+        <div className="mt-1 flex items-baseline justify-between gap-2">
+          <dt>Total accesorios</dt>
+          <dd className="text-right font-mono">
+            {formatMaterialQuantity(
+              takeoff.physicalMaterialQuantities.accessoryQuantity,
+            )}
+          </dd>
+        </div>
+      </dl>
       {takeoff.pendingSummary.total > 0 ? (
         <div className="mt-2 rounded border border-[#f1d28a] bg-[#fffaf0] px-2 py-1 text-[var(--warning)]">
           {formatMaterialPendingSummary(takeoff)}
@@ -1279,6 +1429,234 @@ function MaterialTakeoffSection({
         </ul>
       ) : null}
     </section>
+  );
+}
+
+function TechnicalAxonometricSection({
+  view,
+}: {
+  view: TechnicalAxonometricView;
+}) {
+  const hasGeometry =
+    view.nodes.some((node) => node.projected) ||
+    view.segments.some(
+      (segment) => segment.fromProjected && segment.toProjected,
+    );
+
+  return (
+    <section className="mt-3 rounded border border-[var(--line)] px-3 py-2 text-xs">
+      <div className="mb-2 flex items-baseline justify-between gap-2">
+        <h3 className="text-xs font-semibold uppercase text-[var(--muted)]">
+          Axonometrica tecnica
+        </h3>
+        <div className="text-[10px] text-[var(--muted)]">
+          {technicalAxonometricStatusLabel(view)}
+        </div>
+      </div>
+      {hasGeometry ? (
+        <div className="overflow-hidden rounded border border-[var(--line)] bg-[#fbfcfd]">
+          <svg
+            aria-label="Axonometrica tecnica"
+            className="h-[320px] w-full"
+            preserveAspectRatio="xMidYMid meet"
+            viewBox={`${view.viewBox.minX} ${view.viewBox.minY} ${view.viewBox.width} ${view.viewBox.height}`}
+          >
+            <g>
+              {view.segments.map((segment) => (
+                <TechnicalAxonometricSegmentLine
+                  key={segment.id}
+                  segment={segment}
+                />
+              ))}
+              {view.accessories.map((accessory) => (
+                <TechnicalAxonometricAccessoryMarker
+                  accessory={accessory}
+                  key={accessory.id}
+                />
+              ))}
+              {view.nodes.map((node) => (
+                <TechnicalAxonometricNodeMarker
+                  key={node.id}
+                  node={node}
+                />
+              ))}
+            </g>
+          </svg>
+        </div>
+      ) : (
+        <div className="rounded border border-[#f1d28a] bg-[#fffaf0] px-2 py-2 text-[var(--warning)]">
+          Axonometrica pendiente.
+        </div>
+      )}
+      {view.pendingItems.length > 0 ? (
+        <ul className="mt-2 space-y-1 text-[10px] text-[var(--muted)]">
+          {view.pendingItems.slice(0, 5).map((item) => (
+            <li key={item.id}>
+              {item.sourceId}: {item.message}
+            </li>
+          ))}
+          {view.pendingItems.length > 5 ? (
+            <li>+ {view.pendingItems.length - 5} pendientes</li>
+          ) : null}
+        </ul>
+      ) : null}
+    </section>
+  );
+}
+
+function TechnicalAxonometricSegmentLine({
+  segment,
+}: {
+  segment: TechnicalAxonometricSegment;
+}) {
+  if (!segment.fromProjected || !segment.toProjected) {
+    return null;
+  }
+
+  const label = technicalAxonometricSegmentLabel(segment);
+
+  return (
+    <g>
+      <line
+        stroke={technicalAxonometricSegmentStroke(segment)}
+        strokeDasharray={segment.status === "pending" ? "5 4" : undefined}
+        strokeLinecap="round"
+        strokeWidth={technicalAxonometricSegmentStrokeWidth(segment)}
+        x1={segment.fromProjected.x}
+        x2={segment.toProjected.x}
+        y1={segment.fromProjected.y}
+        y2={segment.toProjected.y}
+      />
+      {segment.labelPosition ? (
+        <text
+          fill="#263238"
+          fontSize="7.5"
+          stroke="#fbfcfd"
+          strokeWidth="2.5"
+          textAnchor="middle"
+          x={segment.labelPosition.x}
+          y={segment.labelPosition.y}
+        >
+          {label}
+        </text>
+      ) : null}
+      {segment.labelPosition ? (
+        <text
+          fill="#263238"
+          fontSize="7.5"
+          textAnchor="middle"
+          x={segment.labelPosition.x}
+          y={segment.labelPosition.y}
+        >
+          {label}
+        </text>
+      ) : null}
+    </g>
+  );
+}
+
+function TechnicalAxonometricNodeMarker({
+  node,
+}: {
+  node: TechnicalAxonometricNode;
+}) {
+  if (!node.projected) {
+    return null;
+  }
+
+  const fill =
+    node.kind === "supply"
+      ? "#111827"
+      : node.kind === "appliance"
+        ? "#ffffff"
+        : node.kind === "derivation"
+          ? "#e8f5f2"
+          : "#ffffff";
+  const stroke =
+    node.kind === "supply"
+      ? "#111827"
+      : node.kind === "appliance"
+        ? "#3b5bdb"
+        : "#0f766e";
+
+  return (
+    <g>
+      {node.kind === "derivation" ? (
+        <rect
+          fill={fill}
+          height="8"
+          stroke={stroke}
+          strokeWidth="1.4"
+          width="8"
+          x={node.projected.x - 4}
+          y={node.projected.y - 4}
+        />
+      ) : (
+        <circle
+          cx={node.projected.x}
+          cy={node.projected.y}
+          fill={fill}
+          r={node.kind === "supply" ? 4.5 : 4}
+          stroke={stroke}
+          strokeWidth="1.4"
+        />
+      )}
+      <text
+        fill={node.kind === "supply" ? "#111827" : "#263238"}
+        fontSize="8"
+        fontWeight={node.kind === "supply" ? "700" : "600"}
+        textAnchor="middle"
+        x={node.projected.x}
+        y={node.projected.y - 8}
+      >
+        {node.label}
+      </text>
+      {node.point?.zMeters !== null && node.point?.zMeters !== undefined ? (
+        <text
+          fill="#607d8b"
+          fontSize="6.5"
+          textAnchor="middle"
+          x={node.projected.x}
+          y={node.projected.y + 13}
+        >
+          z {formatSignedMeters(node.point.zMeters)}
+        </text>
+      ) : null}
+    </g>
+  );
+}
+
+function TechnicalAxonometricAccessoryMarker({
+  accessory,
+}: {
+  accessory: TechnicalAxonometricAccessory;
+}) {
+  if (!accessory.projected) {
+    return null;
+  }
+
+  return (
+    <g>
+      <path
+        d={`M ${accessory.projected.x - 4} ${accessory.projected.y} L ${
+          accessory.projected.x
+        } ${accessory.projected.y - 4} L ${accessory.projected.x + 4} ${
+          accessory.projected.y
+        } L ${accessory.projected.x} ${accessory.projected.y + 4} Z`}
+        fill={accessory.status === "resolved" ? "#fff7ed" : "#fffaf0"}
+        stroke={accessory.status === "resolved" ? "#c2410c" : "#b45309"}
+        strokeWidth="1.2"
+      />
+      <text
+        fill="#7c2d12"
+        fontSize="6.5"
+        textAnchor="middle"
+        x={accessory.projected.x}
+        y={accessory.projected.y + 13}
+      >
+        {accessory.label}
+      </text>
+    </g>
   );
 }
 
@@ -1336,8 +1714,13 @@ function PhysicalAccessoryInventorySection({
 }
 
 function CalculationSheetSection({
+  adoptedDiameterValidationBySegmentId,
   sheet,
 }: {
+  adoptedDiameterValidationBySegmentId: Record<
+    string,
+    TechnicalAdoptedDiameterSegmentValidation
+  >;
   sheet: TechnicalCalculationSheet;
 }) {
   if (sheet.rows.length === 0) {
@@ -1390,10 +1773,10 @@ function CalculationSheetSection({
                 Diam. provisional
               </th>
               <th className="w-24 border-b border-[var(--line)] px-2 py-1 text-right font-semibold">
-                Diam. adoptado
+                Diam. requerido
               </th>
               <th className="w-24 border-b border-[var(--line)] px-2 py-1 text-right font-semibold">
-                Diam. efectivo
+                Diam. adoptado
               </th>
               <th className="w-20 border-b border-[var(--line)] px-2 py-1 text-right font-semibold">
                 SIGAS
@@ -1408,7 +1791,13 @@ function CalculationSheetSection({
           </thead>
           <tbody>
             {sheet.rows.map((row) => (
-              <CalculationSheetRowView key={row.segmentId} row={row} />
+              <CalculationSheetRowView
+                adoptedDiameterValidation={
+                  adoptedDiameterValidationBySegmentId[row.segmentId] ?? null
+                }
+                key={row.segmentId}
+                row={row}
+              />
             ))}
           </tbody>
         </table>
@@ -1427,11 +1816,25 @@ function CalculationSheetSection({
 }
 
 function CalculationSheetRowView({
+  adoptedDiameterValidation,
   row,
 }: {
+  adoptedDiameterValidation: TechnicalAdoptedDiameterSegmentValidation | null;
   row: TechnicalCalculationSheetRow;
 }) {
-  const status = calculationSheetRowStatusLabel(row);
+  const hasInvalidAdoption =
+    adoptedDiameterValidation?.status === "invalid" ||
+    adoptedDiameterValidation?.status === "unsupported";
+  const status = hasInvalidAdoption
+    ? "Adopcion invalida"
+    : calculationSheetRowStatusLabel(row);
+  const requiredDiameter =
+    adoptedDiameterValidation?.requiredDiameter ?? row.effectiveDiameter;
+  const adoptedDiameter =
+    adoptedDiameterValidation?.adoptedDiameter ?? row.adoptedDiameter;
+  const statusTone = hasInvalidAdoption
+    ? "text-red-800"
+    : calculationSheetStatusTone(row.status);
 
   return (
     <tr className="border-t border-[var(--line)] align-top first:border-t-0">
@@ -1459,12 +1862,12 @@ function CalculationSheetRowView({
         {formatSheetDiameter(row.calculatedDiameter)}
       </td>
       <td className="px-2 py-1 text-right">
-        {row.adoptedDiameter
-          ? formatCompactDiameterReference(row.adoptedDiameter)
-          : "Sin adopcion"}
+        {formatDiameterReference(requiredDiameter)}
       </td>
       <td className="px-2 py-1 text-right">
-        {formatSheetDiameter(row.effectiveDiameter)}
+        {adoptedDiameter
+          ? formatCompactDiameterReference(adoptedDiameter)
+          : "Pendiente"}
       </td>
       <td className="px-2 py-1 text-right font-mono">
         {formatCalculationMeters(row.tabulatedLengthMeters, "Pendiente")}
@@ -1473,8 +1876,12 @@ function CalculationSheetRowView({
         {formatSheetFlow(row.capacityM3h)}
       </td>
       <td className="px-2 py-1">
-        <div className={calculationSheetStatusTone(row.status)}>{status}</div>
-        {row.observations[0] ? (
+        <div className={statusTone}>{status}</div>
+        {adoptedDiameterValidation?.reason ? (
+          <div className="mt-0.5 line-clamp-2 text-[9px] text-red-800">
+            {adoptedDiameterValidation.reason}
+          </div>
+        ) : row.observations[0] ? (
           <div className="mt-0.5 line-clamp-2 text-[9px] text-[var(--muted)]">
             {row.observations[0]}
           </div>
@@ -1539,6 +1946,8 @@ function SegmentList({
 }
 
 function SegmentDetail({
+  adoptedDiameterValidation,
+  equivalentAccessoryVerification,
   equipment,
   physicalAccessoryInventory,
   result,
@@ -1546,6 +1955,8 @@ function SegmentDetail({
   segment,
   onAdoptSegmentDiameter,
 }: {
+  adoptedDiameterValidation: TechnicalAdoptedDiameterSegmentValidation | null;
+  equivalentAccessoryVerification: TechnicalEquivalentAccessorySegmentVerification | null;
   equipment: WorkbenchEquipment[];
   physicalAccessoryInventory: TechnicalPhysicalAccessoryInventory;
   result: TechnicalCalculationResult;
@@ -1600,11 +2011,13 @@ function SegmentDetail({
         result={result}
         segment={segment}
       />
+      <EquivalentAccessoryVerificationDetail
+        verification={equivalentAccessoryVerification}
+      />
       <AccessoryList accessories={segment.accessories} />
       <NetworkSegmentSizing result={result} segment={segment} />
-      <ProfessionalDiameterAdoptionControl
-        result={result}
-        segment={segment}
+      <AdoptedDiameterValidationControl
+        validation={adoptedDiameterValidation}
         onAdoptSegmentDiameter={onAdoptSegmentDiameter}
       />
 
@@ -1628,6 +2041,62 @@ function SegmentDetail({
         )}
       </div>
     </section>
+  );
+}
+
+function EquivalentAccessoryVerificationDetail({
+  verification,
+}: {
+  verification: TechnicalEquivalentAccessorySegmentVerification | null;
+}) {
+  if (!verification) {
+    return null;
+  }
+
+  const tone =
+    verification.status === "resolved"
+      ? "border-[#badbcc] bg-[#f1faf4] text-[#1f6b45]"
+      : verification.status === "unsupported"
+        ? "border-red-200 bg-red-50 text-red-800"
+        : "border-[#f1d28a] bg-[#fffaf0] text-[var(--warning)]";
+  const explanation =
+    verification.status === "resolved"
+      ? verification.explanation ??
+        "Segunda consulta SIGAS con accesorios fisicos del recorrido."
+      : verification.reason ?? "Segunda verificacion pendiente.";
+
+  return (
+    <div className={`mt-2 rounded border px-2 py-2 ${tone}`}>
+      <div className="font-semibold">Segunda verificacion SIGAS</div>
+      <dl className="mt-1 grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 gap-y-1">
+        <dt>Longitud inicial</dt>
+        <dd className="text-right">
+          {formatCalculationMeters(
+            verification.calculationLengthMeters,
+            "Pendiente",
+          )}
+        </dd>
+        <dt>Accesorios equivalentes</dt>
+        <dd className="text-right">
+          {formatCalculationMeters(
+            verification.equivalentAccessoryLengthMeters,
+            "Pendiente",
+          )}
+        </dd>
+        <dt>Longitud total</dt>
+        <dd className="text-right">
+          {formatCalculationMeters(
+            verification.totalCalculationLengthMeters,
+            "Pendiente",
+          )}
+        </dd>
+        <dt>{"\u00d8"} requerido SIGAS</dt>
+        <dd className="text-right">
+          {formatDiameterReference(verification.requiredDiameter)}
+        </dd>
+      </dl>
+      <div className="mt-1 text-[10px]">{explanation}</div>
+    </div>
   );
 }
 
@@ -1793,109 +2262,89 @@ function NetworkSegmentSizing({
   );
 }
 
-function ProfessionalDiameterAdoptionControl({
-  result,
-  segment,
+function AdoptedDiameterValidationControl({
+  validation,
   onAdoptSegmentDiameter,
 }: {
-  result: TechnicalCalculationResult;
-  segment: TechnicalSegmentResult;
+  validation: TechnicalAdoptedDiameterSegmentValidation | null;
   onAdoptSegmentDiameter: (segmentId: string, diameterId: string | null) => void;
 }) {
-  const adoptionSegment = getProfessionalDiameterAdoptionSegment(
-    result,
-    segment.segmentId,
-  );
-
-  if (!adoptionSegment) {
+  if (!validation) {
     return null;
   }
 
   const selectedDiameterId =
-    adoptionSegment.decision &&
-    adoptionSegment.availableDiameters.some(
-      (diameter) => diameter.id === adoptionSegment.decision?.diameterId,
-    )
-      ? adoptionSegment.decision.diameterId
+    validation.decision && validation.adoptedDiameter
+      ? validation.adoptedDiameter.id
       : "";
-  const canSelect =
-    adoptionSegment.availableDiameters.length > 0 &&
-    adoptionSegment.calculatedDiameter !== null;
-  const sizing = adoptionSegment.validationSegment;
+  const canSelect = validation.selectableDiameters.length > 0;
+  const message =
+    validation.reason ??
+    validation.explanation ??
+    "Adopcion automatica del diametro requerido por SIGAS.";
 
   return (
     <div
-      className={`mt-2 rounded border px-2 py-2 ${professionalAdoptionTone(
-        adoptionSegment.status,
+      className={`mt-2 rounded border px-2 py-2 ${adoptedDiameterValidationTone(
+        validation.status,
       )}`}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="font-semibold text-[var(--muted)]">
-          Diámetro profesional
+          Diametro adoptado
         </div>
         <div className="text-right text-[10px] font-semibold uppercase">
-          {professionalAdoptionStatusLabel(adoptionSegment.status)}
+          {adoptedDiameterValidationStatusLabel(validation.status)}
         </div>
       </div>
       <dl className="mt-1 grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 gap-y-1">
-        <dt>Mínimo calculado</dt>
+        <dt>{"\u00d8"} provisional</dt>
         <dd className="text-right">
-          {formatDiameterSymbol(adoptionSegment.calculatedDiameter)}
+          {formatDiameterSymbol(validation.provisionalDiameter)}
         </dd>
-        <dt>Diámetro efectivo</dt>
+        <dt>{"\u00d8"} requerido SIGAS</dt>
         <dd className="text-right">
-          {formatDiameterSymbol(adoptionSegment.effectiveDiameter)}
+          {formatDiameterSymbol(validation.requiredDiameter)}
         </dd>
-        <dt>Caudal normalizado usado</dt>
+        <dt>{"\u00d8"} adoptado</dt>
         <dd className="text-right">
-          {formatTechnicalFlow(
-            sizing?.accumulatedFlow ?? segment.accumulatedFlow,
-            sizing?.accumulatedFlowUnit ?? segment.accumulatedFlowUnit,
-          )}
-        </dd>
-        <dt>Longitud efectiva</dt>
-        <dd className="text-right">
-          {formatCalculationMeters(
-            sizing?.transitionAwareSizingLengthMeters ?? null,
-            "Pendiente",
-          )}
+          {formatDiameterSymbol(validation.adoptedDiameter)}
         </dd>
       </dl>
       <label className="mt-2 block">
-        <span className="text-[var(--muted)]">Diámetro adoptado</span>
+        <span className="text-[var(--muted)]">Seleccion manual</span>
         <select
           className="mt-1 w-full rounded border border-[var(--line)] bg-white px-2 py-1 text-xs"
           disabled={!canSelect}
           value={selectedDiameterId}
           onChange={(event) =>
             onAdoptSegmentDiameter(
-              segment.segmentId,
+              validation.segmentId,
               event.target.value || null,
             )
           }
         >
-          <option value="">Sin override</option>
-          {adoptionSegment.availableDiameters.map((diameter) => (
+          <option value="">Por defecto: requerido</option>
+          {validation.selectableDiameters.map((diameter) => (
             <option key={diameter.id} value={diameter.id}>
               {formatDiameterSymbol(diameter)}
+              {diameterIsBelowRequired(diameter, validation)
+                ? " (menor al requerido)"
+                : ""}
             </option>
           ))}
         </select>
       </label>
-      {adoptionSegment.decision ? (
+      {validation.decision ? (
         <button
           className="mt-2 rounded border border-[var(--line)] bg-white px-2 py-1 text-xs hover:border-[var(--accent)]"
           type="button"
-          onClick={() => onAdoptSegmentDiameter(segment.segmentId, null)}
+          onClick={() => onAdoptSegmentDiameter(validation.segmentId, null)}
         >
-          Usar mínimo calculado
+          Usar requerido
         </button>
       ) : null}
-      {adoptionSegment.reason ? (
-        <div className="mt-1 text-[10px]">
-          {adoptionSegment.reason}
-        </div>
-      ) : null}
+      <div className="mt-1 text-[10px]">{message}</div>
     </div>
   );
 }
@@ -2622,6 +3071,78 @@ function accessorySummariesByType(
   );
 }
 
+function technicalAxonometricStatusLabel(view: TechnicalAxonometricView) {
+  if (view.status === "resolved") {
+    return `${view.segments.length} tramos`;
+  }
+
+  if (view.status === "pending") {
+    return `${view.pendingItems.length} pendientes`;
+  }
+
+  return "Pendiente";
+}
+
+function technicalAxonometricSegmentLabel(
+  segment: TechnicalAxonometricSegment,
+) {
+  const parts = [
+    segment.adoptedDiameterLabel,
+    formatCalculationMeters(segment.physicalLengthMeters, "long. pendiente"),
+  ];
+
+  if (
+    segment.zDeltaMeters !== null &&
+    Math.abs(segment.zDeltaMeters) > 0.000001
+  ) {
+    parts.push(`dz ${formatSignedMeters(segment.zDeltaMeters)}`);
+  }
+
+  return parts.join(" - ");
+}
+
+function technicalAxonometricSegmentStroke(
+  segment: TechnicalAxonometricSegment,
+) {
+  if (segment.status === "pending") {
+    return "#9aa6b2";
+  }
+
+  const external = segment.adoptedDiameter?.externalDiameterMillimeters ?? 0;
+
+  if (external >= 32) {
+    return "#0f766e";
+  }
+
+  if (external >= 25) {
+    return "#2563eb";
+  }
+
+  return "#455a64";
+}
+
+function technicalAxonometricSegmentStrokeWidth(
+  segment: TechnicalAxonometricSegment,
+) {
+  const external = segment.adoptedDiameter?.externalDiameterMillimeters ?? 20;
+
+  if (external >= 32) {
+    return 4.2;
+  }
+
+  if (external >= 25) {
+    return 3.2;
+  }
+
+  return 2.4;
+}
+
+function formatSignedMeters(value: number) {
+  const sign = value > 0 ? "+" : "";
+
+  return `${sign}${formatOptionalNumber(value) ?? value.toFixed(2)} m`;
+}
+
 function formatTotalCalculationLength(result: TechnicalCalculationResult) {
   if (result.totals.calculationLengthMeters !== null) {
     return formatCalculationMeters(result.totals.calculationLengthMeters);
@@ -2848,46 +3369,6 @@ function transitionTraversalKindLabel(
   return "recorrido pendiente";
 }
 
-function formatSegmentDiameter(
-  segment: TechnicalSegmentResult,
-  result: TechnicalCalculationResult,
-) {
-  const adoptionSegment = getProfessionalDiameterAdoptionSegment(
-    result,
-    segment.segmentId,
-  );
-
-  if (adoptionSegment?.decision && adoptionSegment.effectiveDiameter) {
-    return `${formatDiameterSymbol(adoptionSegment.effectiveDiameter)} efectivo`;
-  }
-
-  const transitionAwareSizing = getTransitionAwareSizingSegment(
-    result,
-    segment.segmentId,
-  );
-
-  if (
-    transitionAwareSizing?.status === "resolved" &&
-    transitionAwareSizing.finalDiameter
-  ) {
-    return formatDiameterReference(transitionAwareSizing.finalDiameter);
-  }
-
-  const sizing = getNetworkSizingSegment(result, segment.segmentId);
-
-  if (sizing?.status === "resolved" && sizing.calculatedDiameter) {
-    return formatDiameterReference(sizing.calculatedDiameter);
-  }
-
-  if (sizing) {
-    return sizing.status === "unsupported" ? "No soportado" : "Pendiente";
-  }
-
-  return segment.dimensioningResolution.status === "unsupported"
-    ? "No soportado"
-    : "Pendiente";
-}
-
 function getNetworkSizingSegment(
   result: TechnicalCalculationResult,
   segmentId: string,
@@ -2910,57 +3391,49 @@ function getTransitionAwareSizingSegment(
   );
 }
 
-function getProfessionalDiameterAdoptionSegment(
-  result: TechnicalCalculationResult,
-  segmentId: string,
+function adoptedDiameterValidationStatusLabel(
+  status: TechnicalAdoptedDiameterSegmentValidation["status"],
 ) {
-  return (
-    result.professionalDiameterAdoption?.segments.find(
-      (segment) => segment.segmentId === segmentId,
-    ) ?? null
-  );
-}
-
-function professionalAdoptionStatusLabel(
-  status:
-    | ProfessionalDiameterAdoptionSegmentStatus
-    | NonNullable<TechnicalCalculationResult["professionalDiameterAdoption"]>["status"],
-) {
-  if (status === "using_calculated") {
-    return "Usa mínimo calculado";
-  }
-
-  if (status === "validated") {
+  if (status === "valid") {
     return "Validada";
   }
 
-  if (status === "pending_validation") {
-    return "Adopción pendiente de validación";
-  }
-
-  if (status === "incompatible") {
-    return "Incompatible";
+  if (status === "invalid" || status === "unsupported") {
+    return "Invalida";
   }
 
   return "Pendiente";
 }
 
-function professionalAdoptionTone(
-  status: ProfessionalDiameterAdoptionSegmentStatus,
+function adoptedDiameterValidationTone(
+  status: TechnicalAdoptedDiameterSegmentValidation["status"],
 ) {
-  if (status === "validated" || status === "using_calculated") {
+  if (status === "valid") {
     return "border-[#badbcc] bg-[#f1faf4] text-[#1f6b45]";
   }
 
-  if (status === "incompatible") {
+  if (status === "invalid" || status === "unsupported") {
     return "border-red-200 bg-red-50 text-red-800";
   }
 
   return "border-[#f1d28a] bg-[#fffaf0] text-[var(--warning)]";
 }
 
+function diameterIsBelowRequired(
+  diameter: TechnicalAdoptedDiameterSegmentValidation["adoptedDiameter"],
+  validation: TechnicalAdoptedDiameterSegmentValidation,
+) {
+  const required = validation.requiredDiameter;
+
+  if (!diameter || !required) {
+    return false;
+  }
+
+  return diameterSortValue(diameter) < diameterSortValue(required);
+}
+
 function formatDiameterSymbol(
-  diameter: ProfessionalDiameterAdoptionSegmentResult["effectiveDiameter"],
+  diameter: PipeDiameterReference | null,
 ) {
   if (!diameter) {
     return "Pendiente";
@@ -2969,6 +3442,17 @@ function formatDiameterSymbol(
   const external = formatOptionalNumber(diameter.externalDiameterMillimeters);
 
   return external ? `Ø${external}` : diameter.label;
+}
+
+function diameterSortValue(diameter: {
+  externalDiameterMillimeters?: number;
+  internalDiameterMillimeters?: number;
+}) {
+  return (
+    diameter.externalDiameterMillimeters ??
+    diameter.internalDiameterMillimeters ??
+    Number.MAX_SAFE_INTEGER
+  );
 }
 
 function formatInternalDiameter(sizing: {

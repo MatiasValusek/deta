@@ -19,6 +19,16 @@ import type {
   TechnicalCalculationResult,
   TechnicalSegmentResult,
 } from "@/lib/calculation/technicalTree";
+import type {
+  TechnicalAdoptedDiameterValidation,
+  TechnicalAdoptedDiameterSegmentValidation,
+} from "@/lib/calculation/technicalAdoptedDiameterValidation";
+import {
+  technicalPhysicalAccessoryKindLabel,
+  type TechnicalPhysicalAccessory,
+  type TechnicalPhysicalAccessoryInventory,
+  type TechnicalPhysicalAccessoryKind,
+} from "@/lib/calculation/technicalPhysicalAccessories";
 
 export type TechnicalMaterialTakeoffStatus =
   | "pending"
@@ -34,7 +44,10 @@ export type TechnicalMaterialAccessoryKind =
   | "other"
   | "reduced_tee"
   | "reduction"
+  | "reducing_coupling"
+  | "rh_elbow"
   | "tee"
+  | "transition"
   | "valve";
 
 export type TechnicalMaterialPendingCategory =
@@ -139,7 +152,9 @@ type EffectiveDiameterResolution =
 
 export function createTechnicalMaterialTakeoff(params: {
   accessoryProposals?: AccessoryProposal[];
+  adoptedDiameterValidation?: TechnicalAdoptedDiameterValidation;
   diameterTransitionProposals?: DiameterTransitionProposal[];
+  physicalAccessoryInventory?: TechnicalPhysicalAccessoryInventory;
   result: TechnicalCalculationResult | null;
   routeTransitionResolutions?: Record<string, TechnicalRouteTransitionResolution>;
 }): TechnicalMaterialTakeoff {
@@ -154,16 +169,24 @@ export function createTechnicalMaterialTakeoff(params: {
     selectRouteTransitionResolutions(params.result);
   const pendingItems: TechnicalMaterialPendingItem[] = [];
   const pipeItems = createPipeItems({
+    adoptedDiameterValidation: params.adoptedDiameterValidation,
     pendingItems,
     result: params.result,
   });
-  const accessoryItems = createAccessoryItems({
-    accessoryProposals: params.accessoryProposals ?? [],
-    diameterTransitionProposals: params.diameterTransitionProposals ?? [],
-    pendingItems,
-    routeAccessoryResolutions,
-    routeTransitionResolutions,
-  });
+  const accessoryItems = params.physicalAccessoryInventory
+    ? createPhysicalInventoryAccessoryItems({
+        accessoryProposals: params.accessoryProposals ?? [],
+        diameterTransitionProposals: params.diameterTransitionProposals ?? [],
+        inventory: params.physicalAccessoryInventory,
+        pendingItems,
+      })
+    : createAccessoryItems({
+        accessoryProposals: params.accessoryProposals ?? [],
+        diameterTransitionProposals: params.diameterTransitionProposals ?? [],
+        pendingItems,
+        routeAccessoryResolutions,
+        routeTransitionResolutions,
+      });
   const dedupedPendingItems = dedupePendingItems(pendingItems);
 
   return {
@@ -203,23 +226,36 @@ export function createTechnicalMaterialTakeoff(params: {
 }
 
 function createPipeItems(params: {
+  adoptedDiameterValidation?: TechnicalAdoptedDiameterValidation;
   pendingItems: TechnicalMaterialPendingItem[];
   result: TechnicalCalculationResult;
 }) {
   const byDiameterKey = new Map<string, TechnicalMaterialPipeItem>();
+  const adoptedSegmentById = params.adoptedDiameterValidation
+    ? new Map(
+        params.adoptedDiameterValidation.segments.map((segment) => [
+          segment.segmentId,
+          segment,
+        ]),
+      )
+    : null;
 
   for (const segment of sortSegments(params.result.segments)) {
-    const diameterResolution = resolveEffectiveDiameterForSegment(
-      params.result,
-      segment,
-    );
+    const diameterResolution = adoptedSegmentById
+      ? resolveAdoptedDiameterForSegment(
+          adoptedSegmentById.get(segment.segmentId) ?? null,
+          segment,
+        )
+      : resolveEffectiveDiameterForSegment(params.result, segment);
 
     if (diameterResolution.status === "pending") {
       params.pendingItems.push({
         category: "adoption",
         code: "diameter_effective_validation_pending",
         countAsMaterial: false,
-        label: `Diametro efectivo pendiente en tramo ${segment.segmentId}`,
+        label: adoptedSegmentById
+          ? `Diametro adoptado pendiente en tramo ${segment.segmentId}`
+          : `Diametro efectivo pendiente en tramo ${segment.segmentId}`,
         reason: diameterResolution.reason,
         segmentId: segment.segmentId,
         sourceId: segment.segmentId,
@@ -288,6 +324,40 @@ function createAccessoryItems(params: {
     pendingItems: params.pendingItems,
     routeTransitionResolutions: params.routeTransitionResolutions,
   });
+  addPendingAccessoryProposals(params.accessoryProposals, params.pendingItems);
+  addPendingTransitionProposals(
+    params.diameterTransitionProposals,
+    params.pendingItems,
+  );
+
+  return [...byItemKey.values()].sort(compareAccessoryItems);
+}
+
+function createPhysicalInventoryAccessoryItems(params: {
+  accessoryProposals: AccessoryProposal[];
+  diameterTransitionProposals: DiameterTransitionProposal[];
+  inventory: TechnicalPhysicalAccessoryInventory;
+  pendingItems: TechnicalMaterialPendingItem[];
+}) {
+  const byItemKey = new Map<string, TechnicalMaterialAccessoryItem>();
+
+  for (const item of params.inventory.items) {
+    if (!physicalAccessoryKindIsSupported(item.kind)) {
+      addUnsupportedPhysicalAccessoryPendingItem(item, params.pendingItems);
+      continue;
+    }
+
+    const draft = physicalAccessoryDraft(item);
+
+    if (!draft) {
+      addPhysicalAccessoryMeasurePendingItem(item, params.pendingItems);
+      continue;
+    }
+
+    addAccessoryDraft(byItemKey, draft);
+  }
+
+  addPhysicalInventoryPendingItems(params.inventory, params.pendingItems);
   addPendingAccessoryProposals(params.accessoryProposals, params.pendingItems);
   addPendingTransitionProposals(
     params.diameterTransitionProposals,
@@ -576,6 +646,108 @@ function transitionAccessoryDraft(
   };
 }
 
+function physicalAccessoryDraft(
+  item: TechnicalPhysicalAccessory,
+): AccessoryDraft | null {
+  const accessoryKind = accessoryKindFromPhysicalAccessoryKind(item.kind);
+  const configurationKey = physicalAccessoryConfigurationKey(item);
+  const configurationLabel = physicalAccessoryConfigurationLabel(item);
+
+  if (!configurationKey) {
+    return null;
+  }
+
+  return {
+    accessoryKind,
+    catalogCode: item.catalogCode,
+    configurationKey,
+    familyId: item.catalogFamilyId ?? item.catalogCode ?? item.kind,
+    label: `${accessoryKindLabel(accessoryKind)} ${configurationLabel}`,
+    quantity: 1,
+    source: item.source,
+    sourceId: item.id,
+  };
+}
+
+function addUnsupportedPhysicalAccessoryPendingItem(
+  item: TechnicalPhysicalAccessory,
+  pendingItems: TechnicalMaterialPendingItem[],
+) {
+  pendingItems.push({
+    category: "accessory",
+    code: "route_accessory_unresolved",
+    countAsMaterial: false,
+    label: `${technicalPhysicalAccessoryKindLabel(item.kind)} pendiente`,
+    reason: "Tipo de accesorio fisico no soportado para computo final.",
+    segmentId: item.segmentIds[0],
+    sourceId: item.id,
+  });
+}
+
+function addPhysicalAccessoryMeasurePendingItem(
+  item: TechnicalPhysicalAccessory,
+  pendingItems: TechnicalMaterialPendingItem[],
+) {
+  const isTransition = item.source !== "route_accessory";
+
+  pendingItems.push({
+    category: isTransition ? "transition" : "accessory",
+    code: isTransition
+      ? pendingCodeForPhysicalAccessoryKind(item.kind)
+      : "route_accessory_unresolved",
+    countAsMaterial: false,
+    label: `${technicalPhysicalAccessoryKindLabel(item.kind)} pendiente`,
+    reason: "Falta medida resuelta para computar la pieza fisica.",
+    segmentId: item.segmentIds[0],
+    sourceId: item.id,
+    transitionId: isTransition ? item.sourceIds[0] : undefined,
+  });
+}
+
+function addPhysicalInventoryPendingItems(
+  inventory: TechnicalPhysicalAccessoryInventory,
+  pendingItems: TechnicalMaterialPendingItem[],
+) {
+  for (const item of inventory.pendingItems) {
+    const isTransition = physicalPendingItemIsTransition(item);
+
+    pendingItems.push({
+      category: isTransition ? "transition" : "accessory",
+      code: isTransition
+        ? pendingCodeForPhysicalAccessoryKind(item.kind)
+        : "route_accessory_unresolved",
+      countAsMaterial: false,
+      label: `${technicalPhysicalAccessoryKindLabel(item.kind)} pendiente`,
+      reason: item.reason,
+      segmentId: item.segmentIds[0],
+      sourceId: item.id,
+      transitionId: isTransition ? item.sourceId : undefined,
+    });
+  }
+}
+
+function resolveAdoptedDiameterForSegment(
+  adoptionSegment: TechnicalAdoptedDiameterSegmentValidation | null,
+  segment: TechnicalSegmentResult,
+): EffectiveDiameterResolution {
+  if (
+    adoptionSegment?.status === "valid" &&
+    adoptionSegment.adoptedDiameter
+  ) {
+    return {
+      diameter: adoptionSegment.adoptedDiameter,
+      status: "resolved",
+    };
+  }
+
+  return {
+    reason:
+      adoptionSegment?.reason ??
+      `Falta diametro adoptado validado en tramo ${segment.segmentId}.`,
+    status: "pending",
+  };
+}
+
 function resolveEffectiveDiameterForSegment(
   result: TechnicalCalculationResult,
   segment: TechnicalSegmentResult,
@@ -828,6 +1000,82 @@ function accessoryKindFromTransitionContribution(
   return "reduction";
 }
 
+function accessoryKindFromPhysicalAccessoryKind(
+  kind: TechnicalPhysicalAccessoryKind,
+): TechnicalMaterialAccessoryKind {
+  if (kind === "elbow_90") {
+    return "elbow";
+  }
+
+  if (kind === "rh_elbow") {
+    return "rh_elbow";
+  }
+
+  if (kind === "reduced_tee") {
+    return "reduced_tee";
+  }
+
+  if (kind === "reducing_coupling") {
+    return "reducing_coupling";
+  }
+
+  if (kind === "tee") {
+    return "tee";
+  }
+
+  if (kind === "transition") {
+    return "transition";
+  }
+
+  if (kind === "valve") {
+    return "valve";
+  }
+
+  return "other";
+}
+
+function physicalAccessoryKindIsSupported(
+  kind: TechnicalPhysicalAccessoryKind,
+) {
+  return (
+    kind === "elbow_90" ||
+    kind === "reduced_tee" ||
+    kind === "reducing_coupling" ||
+    kind === "rh_elbow" ||
+    kind === "tee" ||
+    kind === "transition" ||
+    kind === "valve"
+  );
+}
+
+function pendingCodeForPhysicalAccessoryKind(
+  kind: TechnicalPhysicalAccessoryKind,
+): TechnicalMaterialPendingItem["code"] {
+  if (kind === "reduced_tee") {
+    return "branch_transition_pending";
+  }
+
+  if (kind === "rh_elbow") {
+    return "compound_transition_pending";
+  }
+
+  return "diameter_transition_pending";
+}
+
+function physicalPendingItemIsTransition(item: {
+  id: string;
+  kind: TechnicalPhysicalAccessoryKind;
+  sourceId: string;
+}) {
+  return (
+    item.id.includes(":transition:") ||
+    item.sourceId.startsWith("transition:") ||
+    item.kind === "reduced_tee" ||
+    item.kind === "reducing_coupling" ||
+    item.kind === "transition"
+  );
+}
+
 function pendingCodeForTransitionKind(
   kind: DiameterTransitionKind,
   compoundComponent: TechnicalRouteTransitionContribution["compoundComponent"] | null,
@@ -881,6 +1129,41 @@ function transitionConfigurationLabel(
   return "configuracion pendiente";
 }
 
+function physicalAccessoryConfigurationKey(item: TechnicalPhysicalAccessory) {
+  return physicalAccessoryDiameterParts(item).join(">");
+}
+
+function physicalAccessoryConfigurationLabel(item: TechnicalPhysicalAccessory) {
+  const labelParts = physicalAccessoryDiameterLabels(item);
+
+  return labelParts.length > 0
+    ? labelParts.join(" a ")
+    : item.label;
+}
+
+function physicalAccessoryDiameterParts(item: TechnicalPhysicalAccessory) {
+  const parts = item.diameters
+    .map((entry) => entry.diameter)
+    .filter((diameter): diameter is PipeDiameterReference => Boolean(diameter))
+    .map(pipeDiameterKey);
+
+  return [...new Set(parts)].sort();
+}
+
+function physicalAccessoryDiameterLabels(item: TechnicalPhysicalAccessory) {
+  const byKey = new Map<string, string>();
+
+  for (const entry of item.diameters) {
+    if (entry.diameter) {
+      byKey.set(pipeDiameterKey(entry.diameter), formatDiameterSymbol(entry.diameter));
+    }
+  }
+
+  return [...byKey.entries()]
+    .sort(([first], [second]) => first.localeCompare(second))
+    .map(([, label]) => label);
+}
+
 function accessoryKindLabel(kind: TechnicalMaterialAccessoryKind) {
   if (kind === "elbow") {
     return "Codo";
@@ -898,8 +1181,20 @@ function accessoryKindLabel(kind: TechnicalMaterialAccessoryKind) {
     return "Cupla reduccion";
   }
 
+  if (kind === "reducing_coupling") {
+    return "Cupla reductora";
+  }
+
+  if (kind === "rh_elbow") {
+    return "Codo RH";
+  }
+
+  if (kind === "transition") {
+    return "Transicion";
+  }
+
   if (kind === "valve") {
-    return "Valvula";
+    return "Llave";
   }
 
   return "Accesorio";

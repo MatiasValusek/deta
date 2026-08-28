@@ -7,15 +7,26 @@ import {
 } from "@/lib/calculation/pipeSystems/sigas/sigasData";
 import type { TechnicalCalculationResult } from "@/lib/calculation/technicalTree";
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
-import type { ManualRouteNetwork, RouteNode } from "@/lib/routing/types";
+import type {
+  ManualRouteNetwork,
+  RouteAccessoryType,
+  RouteNode,
+} from "@/lib/routing/types";
 import {
   detectDiameterTransitionProposals,
   type DiameterTransitionDecision,
   type DiameterTransitionProposal,
 } from "./diameterTransitionProposals";
 import {
+  createTechnicalEquivalentAccessoryVerification,
+} from "./technicalEquivalentAccessoryVerification";
+import {
   createTechnicalPhysicalAccessoryInventory,
 } from "./technicalPhysicalAccessories";
+import type {
+  TechnicalRouteAccessoryContribution,
+  TechnicalRouteAccessoryResolution,
+} from "./technicalRouteAccessories";
 import {
   resolveTechnicalRouteTransitions,
   type TechnicalRouteTransitionRoute,
@@ -91,6 +102,11 @@ export function runTechnicalPhysicalAccessoryVerifications() {
         "through,turn_90",
       );
       assert(
+        tee.routeUses[0]?.equivalentLengthMeters !==
+          tee.routeUses[1]?.equivalentLengthMeters,
+        "La misma tee fisica debe conservar la perdida segun uso del recorrido.",
+      );
+      assert(
         (inventory.accessoryIdsByRouteId["route:through"] ?? []).includes(
           tee.id,
         ),
@@ -105,6 +121,56 @@ export function runTechnicalPhysicalAccessoryVerifications() {
           (inventory.accessoryIdsBySegmentId.s1 ?? []).includes(tee.id),
         "El tramo comun debe indexar reduccion y tee sin duplicarlas.",
       );
+    },
+  );
+
+  verify(
+    results,
+    "segunda verificacion SIGAS suma accesorios fisicos y sube 20 -> 25",
+    () => {
+      const verification = equivalentAccessoryVerificationCase({
+        accessoryCount: 2,
+        calculationLengthMeters: 10,
+        catalogFamilyId: "codo-normal-a-90",
+        diameter: diameter(20),
+        expectedTabulatedLengthMeters: 12,
+        flowM3h: 1.7,
+        routeId: "route:second-check-20",
+        segmentId: "s20",
+      });
+
+      assertEqual(
+        verification.requiredDiameter?.externalDiameterMillimeters,
+        25,
+      );
+      assertClose(verification.equivalentAccessoryLengthMeters, 1.906);
+      assertClose(verification.totalCalculationLengthMeters, 11.906);
+      assertEqual(verification.tabulatedLengthMeters, 12);
+    },
+  );
+
+  verify(
+    results,
+    "segunda verificacion SIGAS suma accesorios fisicos y sube 25 -> 32",
+    () => {
+      const verification = equivalentAccessoryVerificationCase({
+        accessoryCount: 3,
+        calculationLengthMeters: 10,
+        catalogFamilyId: "codo-normal-a-90",
+        diameter: diameter(25),
+        expectedTabulatedLengthMeters: 14,
+        flowM3h: 3.8,
+        routeId: "route:second-check-25",
+        segmentId: "s25",
+      });
+
+      assertEqual(
+        verification.requiredDiameter?.externalDiameterMillimeters,
+        32,
+      );
+      assertClose(verification.equivalentAccessoryLengthMeters, 2.568);
+      assertClose(verification.totalCalculationLengthMeters, 12.568);
+      assertEqual(verification.tabulatedLengthMeters, 14);
     },
   );
 
@@ -269,12 +335,190 @@ function routeNode(id: string, x: number, y: number): RouteNode {
   };
 }
 
-function calculationResultStub(): TechnicalCalculationResult {
+function calculationResultStub(
+  overrides: Partial<TechnicalCalculationResult> = {},
+): TechnicalCalculationResult {
   return {
     professionalDiameterAdoption: null,
     routeAccessoryResolutions: {},
+    segments: [],
     transitionAwareNetworkSizing: null,
+    ...overrides,
   } as unknown as TechnicalCalculationResult;
+}
+
+function equivalentAccessoryVerificationCase(params: {
+  accessoryCount: number;
+  calculationLengthMeters: number;
+  catalogFamilyId: string;
+  diameter: PipeDiameterReference;
+  expectedTabulatedLengthMeters: number;
+  flowM3h: number;
+  routeId: string;
+  segmentId: string;
+}) {
+  const result = calculationResultStub({
+    routeAccessoryResolutions: {
+      [params.routeId]: routeAccessoryResolution({
+        contributions: Array.from({ length: params.accessoryCount }, (_, index) =>
+          routeAccessoryContribution({
+            accessoryId: `elbow-${index + 1}`,
+            catalogFamilyId: params.catalogFamilyId,
+            diameter: params.diameter,
+            quantity: 12,
+            routeId: params.routeId,
+            segmentId: `${params.segmentId}:accessory-${index + 1}`,
+            type: "elbow",
+          }),
+        ),
+        routeId: params.routeId,
+      }),
+    },
+    segments: [
+      segmentForEquivalentVerification({
+        calculationLengthMeters: params.calculationLengthMeters,
+        diameter: params.diameter,
+        flowM3h: params.flowM3h,
+        routeId: params.routeId,
+        segmentId: params.segmentId,
+        segmentIds: Array.from(
+          { length: params.accessoryCount },
+          (_, index) => `${params.segmentId}:accessory-${index + 1}`,
+        ),
+      }),
+    ],
+  });
+  const inventory = createTechnicalPhysicalAccessoryInventory({ result });
+  const verification = createTechnicalEquivalentAccessoryVerification({
+    inventory,
+    pipeSystem: SIGAS_PIPE_SYSTEM,
+    result,
+  })[params.segmentId];
+
+  assert(verification, "No se creo la segunda verificacion del tramo.");
+  assertEqual(verification.status, "resolved");
+  assertEqual(
+    verification.tabulatedLengthMeters,
+    params.expectedTabulatedLengthMeters,
+  );
+  assertEqual(verification.uses.length, params.accessoryCount);
+  return verification;
+}
+
+function routeAccessoryResolution(params: {
+  contributions: TechnicalRouteAccessoryContribution[];
+  routeId: string;
+}): TechnicalRouteAccessoryResolution {
+  const total = params.contributions.reduce(
+    (sum, contribution) =>
+      sum + (contribution.equivalentLengthMetersPerUnit ?? 0),
+    0,
+  );
+
+  return {
+    contributions: params.contributions,
+    duplicateAccessoryKeys: [],
+    governingRouteAccessoryEquivalentLengthMeters: total,
+    reasons: [],
+    routeId: params.routeId,
+    sizingLengthMeters: 10 + total,
+    status: "resolved",
+  };
+}
+
+function routeAccessoryContribution(params: {
+  accessoryId: string;
+  catalogFamilyId: string;
+  diameter: PipeDiameterReference;
+  quantity: number;
+  routeId: string;
+  segmentId: string;
+  type: RouteAccessoryType;
+}): TechnicalRouteAccessoryContribution {
+  const equivalentLengthResolution =
+    SIGAS_PIPE_SYSTEM.resolveAccessoryEquivalentLength({
+      accessory: {
+        catalogFamilyId: params.catalogFamilyId,
+        id: params.accessoryId,
+        quantity: params.quantity,
+        type: params.type,
+      },
+      pipe: {
+        diameter: params.diameter,
+      },
+      segment: {
+        accumulatedFlow: 1,
+        accumulatedFlowUnit: "m3_h",
+        drawingLength: 1,
+        id: params.segmentId,
+        physicalLengthMeters: 1,
+      },
+    });
+
+  assert(
+    equivalentLengthResolution.status === "resolved",
+    "No se pudo resolver el accesorio SIGAS de la fixture.",
+  );
+
+  return {
+    accessoryId: params.accessoryId,
+    catalogCode: recordStringValue(
+      equivalentLengthResolution.data,
+      "catalogCode",
+    ),
+    catalogFamilyId: params.catalogFamilyId,
+    diameter: params.diameter,
+    equivalentLengthMetersPerUnit: equivalentLengthResolution.value,
+    equivalentLengthResolution,
+    equivalentLengthSource: "pipe_system",
+    ownerSegmentId: params.segmentId,
+    quantity: params.quantity,
+    routeId: params.routeId,
+    status: "resolved",
+    totalEquivalentLengthMeters:
+      equivalentLengthResolution.value * params.quantity,
+    type: params.type,
+  };
+}
+
+function segmentForEquivalentVerification(params: {
+  calculationLengthMeters: number;
+  diameter: PipeDiameterReference;
+  flowM3h: number;
+  routeId: string;
+  segmentId: string;
+  segmentIds: string[];
+}) {
+  return {
+    accumulatedFlow: params.flowM3h,
+    accumulatedFlowUnit: "m3_h",
+    calculatedDiameter: params.diameter,
+    calculationLengthMeters: params.calculationLengthMeters,
+    governingRoutePhysicalLengthMeters: params.calculationLengthMeters,
+    governingRouteResolution: {
+      explanation: "fixture",
+      status: "resolved",
+      value: {
+        nodeIds: [],
+        physicalLengthMeters: params.calculationLengthMeters,
+        routeId: params.routeId,
+        segmentIds: params.segmentIds,
+        terminalEquipmentId: "terminal",
+        terminalNodeId: "terminal",
+        tiedRouteIds: [params.routeId],
+      },
+    },
+    provisionalDiameter: params.diameter,
+    routeSizingBasis: {
+      governingRouteAccessoryEquivalentLengthMeters: 0,
+      governingRoutePhysicalLengthMeters: params.calculationLengthMeters,
+      reasons: [],
+      routeAccessoryResolutionId: params.routeId,
+      sizingLengthMeters: params.calculationLengthMeters,
+      status: "resolved",
+    },
+    segmentId: params.segmentId,
+  } as unknown as TechnicalCalculationResult["segments"][number];
 }
 
 function diameter(externalDiameterMillimeters: number): PipeDiameterReference {
@@ -321,10 +565,30 @@ function assertEqual(actual: unknown, expected: unknown, message?: string) {
   );
 }
 
+function assertClose(
+  actual: number | null | undefined,
+  expected: number,
+  epsilon = 1e-9,
+) {
+  assert(
+    typeof actual === "number" && Math.abs(actual - expected) <= epsilon,
+    `Expected ${expected}, got ${String(actual)}`,
+  );
+}
+
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) {
     throw new Error(message);
   }
+}
+
+function recordStringValue(
+  record: Record<string, unknown> | undefined,
+  key: string,
+) {
+  const value = record?.[key];
+
+  return typeof value === "string" ? value : undefined;
 }
 
 declare const require: { main: unknown } | undefined;

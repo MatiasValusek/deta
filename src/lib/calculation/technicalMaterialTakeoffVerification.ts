@@ -18,6 +18,12 @@ import {
   type TechnicalMaterialTakeoff,
 } from "./technicalMaterialTakeoff";
 import type {
+  TechnicalAdoptedDiameterValidation,
+} from "./technicalAdoptedDiameterValidation";
+import type {
+  TechnicalPhysicalAccessoryInventory,
+} from "./technicalPhysicalAccessories";
+import type {
   TechnicalCalculationResult,
   TechnicalSegmentResult,
 } from "./technicalTree";
@@ -301,16 +307,42 @@ export function runTechnicalMaterialTakeoffVerifications() {
     },
   );
 
+  verify(
+    results,
+    "Caso 14 - 10.5G tee compartida cuenta una vez y canos por adoptado",
+    () => {
+      const takeoff = createTakeoff({
+        adoptedDiameterValidation: adoptedValidation({
+          s20: D20,
+          s25: D25,
+          s32: D32,
+        }),
+        diameters: { s20: D32, s25: D32, s32: D20 },
+        lengths: { s20: 2.25, s25: 3.5, s32: 4.75 },
+        physicalAccessoryInventory: sharedTeeInventory(),
+      });
+
+      assertPipeLength(takeoff, D20, 2.25);
+      assertPipeLength(takeoff, D25, 3.5);
+      assertPipeLength(takeoff, D32, 4.75);
+      assertAccessoryQuantity(takeoff, "tee", "family-tee", 1);
+      assertEqual(takeoff.physicalMaterialQuantities.accessoryQuantity, 1);
+      assertClose(takeoff.physicalMaterialQuantities.pipeLengthMeters, 10.5);
+    },
+  );
+
   return results;
 }
 
 function createTakeoff(params: {
   accessoryProposals?: AccessoryProposal[];
   adoptionDiameters?: Record<string, PipeDiameterReference>;
+  adoptedDiameterValidation?: TechnicalAdoptedDiameterValidation;
   diameters: Record<string, PipeDiameterReference>;
   diameterTransitionProposals?: DiameterTransitionProposal[];
   lengths: Record<string, number | null>;
   pendingAdoptionSegmentIds?: string[];
+  physicalAccessoryInventory?: TechnicalPhysicalAccessoryInventory;
   routeAccessoryResolutions?: Record<string, TechnicalRouteAccessoryResolution>;
   routeTransitionResolutions?: Record<string, TechnicalRouteTransitionResolution>;
   sizingLengths?: Record<string, number | null>;
@@ -319,7 +351,9 @@ function createTakeoff(params: {
 
   return createTechnicalMaterialTakeoff({
     accessoryProposals: params.accessoryProposals,
+    adoptedDiameterValidation: params.adoptedDiameterValidation,
     diameterTransitionProposals: params.diameterTransitionProposals,
+    physicalAccessoryInventory: params.physicalAccessoryInventory,
     result,
     routeTransitionResolutions: params.routeTransitionResolutions,
   });
@@ -659,6 +693,93 @@ function transitionProposal(params: {
     state: params.state,
     upstreamDiameter: { diameter: D32, role: "upstream", segmentId: "s1" },
     upstreamSegmentId: "s1",
+  };
+}
+
+function adoptedValidation(
+  adoptedDiameters: Record<string, PipeDiameterReference>,
+): TechnicalAdoptedDiameterValidation {
+  const segments = Object.keys(adoptedDiameters)
+    .sort()
+    .map((segmentId) => {
+      const diameter = adoptedDiameters[segmentId] ?? null;
+
+      assert(diameter, `Falta diametro adoptado ${segmentId}.`);
+
+      return {
+        adoptedDiameter: diameter,
+        availableDiameters: [D20, D25, D32],
+        decision: null,
+        explanation: "fixture 10.5G",
+        provisionalDiameter: D20,
+        reason: null,
+        requiredDiameter: diameter,
+        selectableDiameters: [diameter],
+        segmentId,
+        source: "required_default" as const,
+        status: "valid" as const,
+      };
+    });
+
+  return {
+    invalidSegmentCount: 0,
+    segments,
+    status: "valid",
+    unresolvedSegmentCount: 0,
+  };
+}
+
+function sharedTeeInventory(): TechnicalPhysicalAccessoryInventory {
+  return {
+    accessoryIdsByRouteId: {
+      "route:a": ["physical-tee-shared"],
+      "route:b": ["physical-tee-shared"],
+      "route:c": ["physical-tee-shared"],
+    },
+    accessoryIdsBySegmentId: {
+      s20: ["physical-tee-shared"],
+      s25: ["physical-tee-shared"],
+      s32: ["physical-tee-shared"],
+    },
+    items: [
+      {
+        catalogCode: "tee-25-code",
+        catalogFamilyId: "family-tee",
+        diameters: [
+          {
+            diameter: D25,
+            role: "single",
+            segmentId: "s25",
+          },
+        ],
+        id: "physical-tee-shared",
+        kind: "tee",
+        label: "Tee",
+        nodeId: "shared-node",
+        position: { x: 0, y: 0 },
+        routeUses: [
+          physicalRouteUse("route:a", ["s32", "s25"]),
+          physicalRouteUse("route:b", ["s25", "s20"]),
+          physicalRouteUse("route:c", ["s32", "s20"]),
+        ],
+        segmentIds: ["s20", "s25", "s32"],
+        source: "route_accessory",
+        sourceIds: ["s25:tee-shared"],
+        status: "resolved",
+      },
+    ],
+    pendingItems: [],
+    status: "resolved",
+  };
+}
+
+function physicalRouteUse(routeId: string, segmentIds: string[]) {
+  return {
+    equivalentLengthMeters: 0.5,
+    routeId,
+    segmentIds,
+    status: "resolved" as const,
+    traversalKind: null,
   };
 }
 

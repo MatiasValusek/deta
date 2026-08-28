@@ -816,7 +816,6 @@ export function DxfWorkbench() {
     () =>
       planBase
         ? calculateTechnicalTree({
-            adoptedDiameterDecisions: planBase.adoptedDiameterDecisions,
             diameterTransitionDecisions: planBase.diameterTransitionDecisions,
             equipment: planBase.equipment,
             minSegmentLengthSource: MIN_SECTION_LINK_LENGTH,
@@ -829,18 +828,13 @@ export function DxfWorkbench() {
     [planBase],
   );
   const finalDiameterBySegmentId = useMemo(() => {
-    const adoptedEffectiveDiameters =
-      technicalCalculationResult?.professionalDiameterAdoption
-        ?.effectiveDiameterBySegmentId ?? {};
     const finalDiameters =
-      Object.keys(adoptedEffectiveDiameters).length > 0
-        ? adoptedEffectiveDiameters
-        : technicalCalculationResult?.transitionAwareNetworkSizing?.status ===
-            "resolved"
-          ? technicalCalculationResult.transitionAwareNetworkSizing
-              .finalDiameterBySegmentId
-          : technicalCalculationResult?.networkSizing?.finalDiameterBySegmentId ??
-            {};
+      technicalCalculationResult?.transitionAwareNetworkSizing?.status ===
+      "resolved"
+        ? technicalCalculationResult.transitionAwareNetworkSizing
+            .finalDiameterBySegmentId
+        : technicalCalculationResult?.networkSizing?.finalDiameterBySegmentId ??
+          {};
 
     return new Map<string, PipeDiameterReference>(
       Object.entries(finalDiameters),
@@ -1017,17 +1011,6 @@ export function DxfWorkbench() {
   const routeTransitionResolutions = useMemo(() => {
     if (!technicalCalculationResult) {
       return {};
-    }
-
-    const professionalAdoption =
-      technicalCalculationResult.professionalDiameterAdoption;
-
-    if (
-      professionalAdoption &&
-      professionalAdoption.decisions.length > 0 &&
-      Object.keys(professionalAdoption.routeTransitionResolutions).length > 0
-    ) {
-      return professionalAdoption.routeTransitionResolutions;
     }
 
     if (
@@ -3819,17 +3802,16 @@ export function DxfWorkbench() {
       return;
     }
 
-    const adoptionSegment =
-      technicalCalculationResult?.professionalDiameterAdoption?.segments.find(
-        (segment) => segment.segmentId === segmentId,
-      ) ?? null;
+    const availableDiametersResolution = SIGAS_PIPE_SYSTEM.getAvailableDiameters();
     const allowedDiameterIds = new Set(
-      adoptionSegment?.availableDiameters.map((diameter) => diameter.id) ?? [],
+      availableDiametersResolution.status === "resolved"
+        ? availableDiametersResolution.value.map((diameter) => diameter.id)
+        : [],
     );
 
     if (!allowedDiameterIds.has(diameterId)) {
       setRouteError(
-        "El diametro adoptado debe ser igual o mayor al minimo calculado.",
+        "El diametro adoptado debe pertenecer al catalogo SIGAS.",
       );
       return;
     }
@@ -4802,6 +4784,7 @@ export function DxfWorkbench() {
       disabledReason: planOnlyDisabledReason,
       content: (
         <CalculationPanel
+          adoptedDiameterDecisions={planBase?.adoptedDiameterDecisions ?? []}
           accessoryProposals={routeAccessoryProposals}
           accessoryProposalReviews={routeAccessoryProposalReviews}
           diameterTransitionProposals={diameterTransitionProposals}
@@ -4809,8 +4792,11 @@ export function DxfWorkbench() {
           equipment={planEquipment}
           hasPendingProposal={Boolean(routeProposal)}
           isPlanActive={activeBase?.type === "plan"}
+          pipeSystem={SIGAS_PIPE_SYSTEM}
           planReady={Boolean(planBase)}
           result={technicalCalculationResult}
+          routeNetwork={planBase?.routeNetwork ?? createEmptyRouteNetwork()}
+          scaleMetersPerSourceUnit={calibrationScaleMetersPerSourceUnit(planBase)}
           routeTransitionResolutions={routeTransitionResolutions}
           onAdoptSegmentDiameter={handleAdoptSegmentDiameter}
           onConfirmAccessoryProposal={handleConfirmAccessoryProposal}
