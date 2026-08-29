@@ -1,11 +1,15 @@
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
 import type {
+  DrawingPrimitive,
   DrawingVisualMetadata,
   NormalizedDrawing,
   Point2D,
 } from "@/lib/geometry/types";
 import type { ClassificationIndex } from "@/lib/semantic/types";
-import { resolveEquipmentPhysicalPlacement } from "./wallAnchoring";
+import {
+  resolveEquipmentPhysicalPlacement,
+  resolveEquipmentPhysicalPlacementAlternatives,
+} from "./wallAnchoring";
 
 export type WallAnchoringVerificationResult = {
   name: string;
@@ -13,6 +17,11 @@ export type WallAnchoringVerificationResult = {
 };
 
 const EPSILON = 0.000001;
+
+type FixtureLayer = Pick<
+  NormalizedDrawing["layers"][number],
+  "name" | "visible"
+>;
 
 export function runWallAnchoringVerifications() {
   const results: WallAnchoringVerificationResult[] = [];
@@ -72,6 +81,128 @@ export function runWallAnchoringVerifications() {
     assertPoint(placement.bodyPoint, { x: 2, y: 2, z: 0.85 });
   });
 
+  verify(results, "10.8B1 click cerca de pared visible usa escala fisica", () => {
+    const placement = resolveEquipmentPhysicalPlacement({
+      classificationIndex: {},
+      drawing: fixtureDrawing({
+        bounds: {
+          minX: 0,
+          minY: 0,
+          maxX: 10,
+          maxY: 70,
+        },
+        layers: [
+          fixtureLayer("hidden-walls", false),
+          fixtureLayer("visible-walls", true),
+        ],
+        entities: [
+          fixtureLine(
+            "wall:hidden",
+            "hidden-walls",
+            { x: 0, y: 64 },
+            { x: 10, y: 64 },
+          ),
+          fixtureLine(
+            "wall:visible",
+            "visible-walls",
+            { x: 0, y: 30 },
+            { x: 10, y: 30 },
+          ),
+        ],
+      }),
+      heightMeters: 0.85,
+      point: { x: 5, y: 65 },
+      role: "appliance",
+      scaleMetersPerSourceUnit: 0.01,
+      source: "dxf",
+    });
+
+    assert(placement.wallAnchor, "Falta wallAnchor.");
+    assertEqual(placement.wallAnchor.status, "anchored");
+    assertEqual(placement.wallAnchor.referenceId, "wall:visible:wall:0");
+    assertClose(placement.wallAnchor.distanceSource, 35);
+    assertPoint(placement.connectionPoint, { x: 5, y: 30, z: 0.85 });
+  });
+
+  verify(results, "10.8B1 dos paredes similares ofrecen dos opciones", () => {
+    const alternatives = resolveEquipmentPhysicalPlacementAlternatives({
+      classificationIndex: wallClassificationIndex("wall:a", "wall:b"),
+      drawing: fixtureDrawing({
+        entities: [
+          fixtureLine("wall:a", "walls", { x: 0, y: 0 }, { x: 5, y: 0 }),
+          fixtureLine("wall:b", "walls", { x: 0, y: 0.18 }, { x: 5, y: 0.18 }),
+        ],
+      }),
+      heightMeters: 0.85,
+      point: { x: 2, y: 0.08 },
+      role: "appliance",
+      scaleMetersPerSourceUnit: 1,
+      snapToleranceSource: 0.5,
+      source: "dxf",
+    });
+
+    assertEqual(alternatives.length, 2);
+    assertEqual(alternatives[0].wallAnchor.referenceId, "wall:a:wall:0");
+    assertEqual(alternatives[1].wallAnchor.referenceId, "wall:b:wall:0");
+  });
+
+  verify(results, "10.8B1 pared no competitiva no ofrece segunda opcion", () => {
+    const alternatives = resolveEquipmentPhysicalPlacementAlternatives({
+      classificationIndex: wallClassificationIndex("wall:a", "wall:b"),
+      drawing: fixtureDrawing({
+        entities: [
+          fixtureLine("wall:a", "walls", { x: 0, y: 0 }, { x: 5, y: 0 }),
+          fixtureLine("wall:b", "walls", { x: 0, y: 0.7 }, { x: 5, y: 0.7 }),
+        ],
+      }),
+      heightMeters: 0.85,
+      point: { x: 2, y: 0.08 },
+      role: "appliance",
+      scaleMetersPerSourceUnit: 1,
+      snapToleranceSource: 0.8,
+      source: "dxf",
+    });
+
+    assertEqual(alternatives.length, 1);
+    assertEqual(alternatives[0].wallAnchor.referenceId, "wall:a:wall:0");
+  });
+
+  verify(results, "10.8B1 click directo sobre linea sin senal usa fallback", () => {
+    const drawing = fixtureDrawing({
+      layers: [fixtureLayer("0", true)],
+      entities: [
+        fixtureLine("raw:line", "0", { x: 0, y: 0 }, { x: 5, y: 0 }),
+      ],
+    });
+    const near = resolveEquipmentPhysicalPlacement({
+      classificationIndex: {},
+      drawing,
+      heightMeters: 0.85,
+      point: { x: 2, y: 0.2 },
+      role: "appliance",
+      scaleMetersPerSourceUnit: 1,
+      snapToleranceSource: 0.5,
+      source: "dxf",
+    });
+    const direct = resolveEquipmentPhysicalPlacement({
+      classificationIndex: {},
+      drawing,
+      heightMeters: 0.85,
+      point: { x: 2, y: 0.04 },
+      role: "appliance",
+      scaleMetersPerSourceUnit: 1,
+      snapToleranceSource: 0.5,
+      source: "dxf",
+    });
+
+    assert(near.wallAnchor, "Falta wallAnchor pendiente.");
+    assertEqual(near.wallAnchor.status, "pending");
+    assert(direct.wallAnchor, "Falta wallAnchor directo.");
+    assertEqual(direct.wallAnchor.status, "anchored");
+    assertEqual(direct.wallAnchor.referenceId, "raw:line:wall:0");
+    assertClose(direct.wallAnchor.distanceSource, 0.04);
+  });
+
   return results;
 }
 
@@ -94,18 +225,38 @@ function fixtureStove(
 }
 
 function fixtureClassificationIndex(): ClassificationIndex {
-  return {
-    "wall:1": {
-      assignmentId: "classification:wall",
+  return wallClassificationIndex("wall:1");
+}
+
+function wallClassificationIndex(...entityIds: string[]): ClassificationIndex {
+  const index: ClassificationIndex = {};
+
+  for (const entityId of entityIds) {
+    index[entityId] = {
+      assignmentId: `classification:${entityId}`,
       category: "reference_wall",
       origin: "manual",
       rule: "fixture",
       status: "confirmed",
-    },
-  };
+    };
+  }
+
+  return index;
 }
 
-function fixtureDrawing(): NormalizedDrawing {
+function fixtureDrawing(
+  params: {
+    bounds?: NormalizedDrawing["bounds"];
+    entities?: DrawingPrimitive[];
+    layers?: FixtureLayer[];
+  } = {},
+): NormalizedDrawing {
+  const entities =
+    params.entities ?? [
+      fixtureLine("wall:1", "walls", { x: 0, y: 0 }, { x: 5, y: 0 }),
+    ];
+  const layers = params.layers ?? [fixtureLayer("walls", true)];
+
   return {
     fileName: "wall-anchor-fixture.dxf",
     units: {
@@ -113,31 +264,17 @@ function fixtureDrawing(): NormalizedDrawing {
       label: null,
       source: "missing",
     },
-    layers: [
-      {
-        id: "layer:walls",
-        name: "walls",
-        visible: true,
-        color: null,
-        colorIndex: null,
-        trueColor: null,
-        trueColorValue: null,
-      },
-    ],
-    entities: [
-      {
-        id: "wall:1",
-        kind: "line",
-        layer: "walls",
-        sourceType: "LINE",
-        sourcePath: "ENTITIES",
-        color: null,
-        visual: visualMetadata("walls", "LINE"),
-        start: { x: 0, y: 0 },
-        end: { x: 5, y: 0 },
-      },
-    ],
-    bounds: {
+    layers: layers.map((layer, index) => ({
+      id: `layer:${index}`,
+      name: layer.name,
+      visible: layer.visible,
+      color: null,
+      colorIndex: null,
+      trueColor: null,
+      trueColorValue: null,
+    })),
+    entities,
+    bounds: params.bounds ?? {
       minX: 0,
       minY: 0,
       maxX: 5,
@@ -145,13 +282,36 @@ function fixtureDrawing(): NormalizedDrawing {
     },
     headerBounds: null,
     rawEntityCounts: {
-      ENTITIES: { LINE: 1 },
+      ENTITIES: { LINE: entities.length },
       BLOCKS: {},
     },
-    normalizedCounts: { line: 1 },
+    normalizedCounts: { line: entities.length },
     supportedSourceTypes: ["LINE"],
     ignoredEntities: [],
     warnings: [],
+  };
+}
+
+function fixtureLayer(name: string, visible: boolean): FixtureLayer {
+  return { name, visible };
+}
+
+function fixtureLine(
+  id: string,
+  layer: string,
+  start: Point2D,
+  end: Point2D,
+): DrawingPrimitive {
+  return {
+    id,
+    kind: "line",
+    layer,
+    sourceType: "LINE",
+    sourcePath: "ENTITIES",
+    color: null,
+    visual: visualMetadata(layer, "LINE"),
+    start,
+    end,
   };
 }
 
