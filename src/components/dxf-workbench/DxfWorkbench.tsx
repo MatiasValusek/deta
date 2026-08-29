@@ -226,6 +226,11 @@ import {
   type PersistedWorkbenchBase,
   type PersistedWorkbenchProject,
 } from "@/lib/workbench/persistence";
+import {
+  createPlanStageReadiness,
+  type PlanStageBaseReadiness,
+  type PlanStageReadiness,
+} from "@/lib/workbench/planStageFlow";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { DxfViewer } from "./DxfViewer";
 import { EquipmentPanel } from "./EquipmentPanel";
@@ -267,6 +272,13 @@ export type LayerVisibility = Record<string, boolean>;
 type WorkbenchSource = "dxf" | "pdf";
 type WorkbenchBaseType = "plan" | "section";
 type BaseFilePurpose = WorkbenchBaseType | "replace-active";
+type MainWorkflowStageId =
+  | "plan"
+  | "equipment"
+  | "route"
+  | "review"
+  | "calculate"
+  | "deliver";
 
 type SectionLinkDraft = {
   editingLinkId: string | null;
@@ -360,6 +372,39 @@ const MIN_SECTION_LINK_LENGTH = 0.0001;
 const DEFAULT_REFERENCE_ELEVATION_INPUT = "0,00";
 const DEFAULT_DEMAND_UNIT: DemandUnit = "kcal_h";
 const DEFAULT_ROUTE_PROPOSAL_MARGIN_INPUT = "0,10";
+const MAIN_WORKFLOW_STAGES: Array<{
+  id: MainWorkflowStageId;
+  label: string;
+}> = [
+  { id: "plan", label: "Plano" },
+  { id: "equipment", label: "Artefactos" },
+  { id: "route", label: "Recorrido" },
+  { id: "review", label: "Revisar" },
+  { id: "calculate", label: "Calcular" },
+  { id: "deliver", label: "Entregar" },
+];
+const MAIN_WORKFLOW_PANEL_SECTIONS: Record<
+  MainWorkflowStageId,
+  RightPanelSectionId[]
+> = {
+  calculate: ["calculation"],
+  deliver: ["calculation"],
+  equipment: ["equipment"],
+  plan: ["geometry", "scale"],
+  review: ["obstacles"],
+  route: ["route"],
+};
+const MAIN_WORKFLOW_DEFAULT_PANEL: Record<
+  MainWorkflowStageId,
+  RightPanelSectionId
+> = {
+  calculate: "calculation",
+  deliver: "calculation",
+  equipment: "equipment",
+  plan: "geometry",
+  review: "obstacles",
+  route: "route",
+};
 
 export function DxfWorkbench() {
   const [bases, setBases] = useState<WorkbenchBase[]>([]);
@@ -391,6 +436,8 @@ export function DxfWorkbench() {
     useState<PhysicalRouteSnapOptions>(DEFAULT_PHYSICAL_ROUTE_SNAP_OPTIONS);
   const [activeRightPanelSection, setActiveRightPanelSection] =
     useState<RightPanelSectionId>("geometry");
+  const [activeMainStage, setActiveMainStage] =
+    useState<MainWorkflowStageId>("plan");
   const [highlightedSectionLinkId, setHighlightedSectionLinkId] =
     useState<string | null>(null);
   const [highlightedRegistrationLinkId, setHighlightedRegistrationLinkId] =
@@ -1240,6 +1287,14 @@ export function DxfWorkbench() {
       ),
     [bases],
   );
+  const planStageReadiness = useMemo(
+    () =>
+      createPlanStageReadiness({
+        bases,
+        sectionPlanLinks,
+      }),
+    [bases, sectionPlanLinks],
+  );
   const activeSectionLink = useMemo(() => {
     if (activeBase?.type !== "section") {
       return null;
@@ -1589,6 +1644,7 @@ export function DxfWorkbench() {
       }
 
       setActiveBaseId(nextBase.id);
+      setActiveMainStage("plan");
       setActiveRightPanelSection("geometry");
       setCursor(null);
 
@@ -1687,6 +1743,68 @@ export function DxfWorkbench() {
     setCursor(null);
   }
 
+  function handleMainWorkflowStageChange(stage: MainWorkflowStageId) {
+    if (stage !== "plan" && !planStageReadiness.canContinueToEquipment) {
+      return;
+    }
+
+    setActiveMainStage(stage);
+    setActiveRightPanelSection(MAIN_WORKFLOW_DEFAULT_PANEL[stage]);
+
+    if (stage !== "plan" && planBase) {
+      handleActivateBase(planBase.id);
+    }
+  }
+
+  function handleOpenPlanStageScale(baseId: string | null) {
+    if (!baseId) {
+      return;
+    }
+
+    setActiveMainStage("plan");
+    setActiveRightPanelSection("scale");
+    handleActivateBase(baseId);
+  }
+
+  function handlePlanStageSectionAction(sectionBaseId: string | null) {
+    if (!sectionBaseId) {
+      return;
+    }
+
+    const section = bases.find(
+      (base) => base.id === sectionBaseId && base.type === "section",
+    );
+
+    if (!section) {
+      return;
+    }
+
+    if (!calibrationScaleMetersPerSourceUnit(section)) {
+      handleOpenPlanStageScale(section.id);
+      return;
+    }
+
+    const link =
+      sectionPlanLinks.find((item) => item.sectionBaseId === section.id) ??
+      null;
+
+    if (!link || !link.registration) {
+      if (!link) {
+        handleStartSectionLink(section.id);
+        return;
+      }
+
+      handleStartSectionRegistration(link);
+      return;
+    }
+
+    handleStartSectionRegistration(link, true);
+  }
+
+  function handlePlanStageContinue() {
+    handleMainWorkflowStageChange("equipment");
+  }
+
   function handleRemoveActiveBase() {
     if (!activeBase) {
       return;
@@ -1783,6 +1901,7 @@ export function DxfWorkbench() {
     setRouteProposal(null);
     setRouteProposalMode(null);
     setRouteProposalMarginInput(DEFAULT_ROUTE_PROPOSAL_MARGIN_INPUT);
+    setActiveMainStage("plan");
     setActiveRightPanelSection("geometry");
     setHighlightedSectionLinkId(null);
     setHighlightedRegistrationLinkId(null);
@@ -5283,7 +5402,7 @@ export function DxfWorkbench() {
   const rightPanelSections: RightPanelSection[] = [
     {
       id: "geometry",
-      title: "Preparar geometria",
+      title: "Plano",
       summary: geometrySummary,
       hasActiveTool: geometryHasActiveTool,
       content: activeBase ? (
@@ -5340,7 +5459,7 @@ export function DxfWorkbench() {
     },
     {
       id: "equipment",
-      title: "Equipos",
+      title: "Artefactos",
       summary: equipmentSummary,
       disabled: !isPlanSectionAvailable,
       disabledReason: planOnlyDisabledReason,
@@ -5389,7 +5508,7 @@ export function DxfWorkbench() {
     },
     {
       id: "route",
-      title: "Trazado",
+      title: "Recorrido",
       summary: routeSummaryText,
       disabled: !isPlanSectionAvailable,
       disabledReason: planOnlyDisabledReason,
@@ -5446,7 +5565,7 @@ export function DxfWorkbench() {
     },
     {
       id: "calculation",
-      title: "Cálculo",
+      title: "Calcular",
       summary: calculationSummaryText,
       disabled: !isPlanSectionAvailable,
       disabledReason: planOnlyDisabledReason,
@@ -5477,7 +5596,7 @@ export function DxfWorkbench() {
     },
     {
       id: "obstacles",
-      title: "Obstaculos",
+      title: "Revisar",
       summary: obstaclesSummaryText,
       disabled: !activeBase,
       disabledReason: "Sin base activa",
@@ -5533,6 +5652,13 @@ export function DxfWorkbench() {
       ),
     },
   ];
+  const activeWorkflowStage =
+    activeMainStage === "plan" || planStageReadiness.canContinueToEquipment
+      ? activeMainStage
+      : "plan";
+  const activeStagePanelSections = rightPanelSections.filter((section) =>
+    MAIN_WORKFLOW_PANEL_SECTIONS[activeWorkflowStage].includes(section.id),
+  );
 
   return (
     <main className="flex h-screen overflow-hidden flex-col bg-[var(--background)] text-[var(--foreground)]">
@@ -5541,7 +5667,7 @@ export function DxfWorkbench() {
           <div>
             <h1 className="text-xl font-semibold tracking-normal">deta</h1>
             <p className="mt-1 text-sm text-[var(--muted)]">
-              Bases - Geometria - Equipos - Trazado - Cálculo - Revisar - Entregar
+              Plano - Artefactos - Recorrido - Revisar - Calcular - Entregar
             </p>
           </div>
 
@@ -5563,6 +5689,34 @@ export function DxfWorkbench() {
             </button>
           </div>
         </div>
+        <nav
+          aria-label="Flujo principal"
+          className="mt-3 flex min-w-0 flex-wrap items-center gap-1"
+        >
+          {MAIN_WORKFLOW_STAGES.map((stage) => {
+            const isActive = stage.id === activeWorkflowStage;
+            const isLocked =
+              stage.id !== "plan" &&
+              !planStageReadiness.canContinueToEquipment;
+
+            return (
+              <button
+                aria-current={isActive ? "step" : undefined}
+                className={`rounded border px-3 py-1.5 text-xs font-medium transition ${
+                  isActive
+                    ? "border-[var(--accent)] bg-[var(--accent)] text-white"
+                    : "border-[var(--line)] bg-white hover:border-[var(--accent)]"
+                } disabled:cursor-not-allowed disabled:bg-[#f5f6f7] disabled:text-[var(--muted)]`}
+                disabled={isLocked}
+                key={stage.id}
+                type="button"
+                onClick={() => handleMainWorkflowStageChange(stage.id)}
+              >
+                {stage.label}
+              </button>
+            );
+          })}
+        </nav>
       </header>
 
       <input
@@ -6152,16 +6306,208 @@ export function DxfWorkbench() {
           </div>
         </section>
 
-        <aside className="min-h-0 overflow-hidden border-l border-[var(--line)] bg-white">
-          <RightPanelSections
-            activeSectionId={activeRightPanelSection}
-            sections={rightPanelSections}
-            onActiveSectionChange={setActiveRightPanelSection}
-          />
+        <aside className="flex min-h-0 flex-col overflow-hidden border-l border-[var(--line)] bg-white">
+          {activeWorkflowStage === "plan" ? (
+            <PlanStagePanel
+              isImporting={isImporting}
+              readiness={planStageReadiness}
+              onAddPlan={() => planInputRef.current?.click()}
+              onAddSection={() => sectionInputRef.current?.click()}
+              onContinue={handlePlanStageContinue}
+              onOpenScale={handleOpenPlanStageScale}
+              onSectionAction={handlePlanStageSectionAction}
+            />
+          ) : null}
+          <div className="min-h-0 flex-1 overflow-hidden">
+            <RightPanelSections
+              activeSectionId={activeRightPanelSection}
+              sections={activeStagePanelSections}
+              onActiveSectionChange={setActiveRightPanelSection}
+            />
+          </div>
         </aside>
       </section>
     </main>
   );
+}
+
+function PlanStagePanel({
+  isImporting,
+  readiness,
+  onAddPlan,
+  onAddSection,
+  onContinue,
+  onOpenScale,
+  onSectionAction,
+}: {
+  isImporting: boolean;
+  readiness: PlanStageReadiness;
+  onAddPlan: () => void;
+  onAddSection: () => void;
+  onContinue: () => void;
+  onOpenScale: (baseId: string | null) => void;
+  onSectionAction: (baseId: string | null) => void;
+}) {
+  return (
+    <section
+      className="shrink-0 border-b border-[var(--line)] bg-white p-3 text-xs"
+      data-plan-stage-flow="true"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold">Plano</h2>
+          <p className="mt-1 text-[var(--muted)]">
+            Planta, escala y corte opcional.
+          </p>
+        </div>
+        <span
+          className={`shrink-0 rounded border px-2 py-1 font-medium ${planStageStatusClassName(
+            readiness.canContinueToEquipment ? "ready" : "pending",
+          )}`}
+        >
+          {readiness.canContinueToEquipment ? "lista" : "pendiente"}
+        </span>
+      </div>
+
+      <div className="mt-3 space-y-2">
+        <PlanStageBaseRow
+          actionLabel={planStagePlanActionLabel(readiness.plan)}
+          item={readiness.plan}
+          onAction={() =>
+            readiness.plan.status === "missing"
+              ? onAddPlan()
+              : onOpenScale(readiness.plan.baseId)
+          }
+        />
+        {readiness.sections.length > 0 ? (
+          readiness.sections.map((section) => (
+            <PlanStageBaseRow
+              actionLabel={planStageSectionActionLabel(section)}
+              item={section}
+              key={section.baseId ?? section.title}
+              onAction={() => onSectionAction(section.baseId)}
+            />
+          ))
+        ) : (
+          <PlanStageBaseRow
+            actionLabel="Agregar Corte"
+            item={{
+              baseId: null,
+              reason: "Opcional",
+              status: "missing",
+              title: "Corte",
+              type: "section",
+            }}
+            onAction={onAddSection}
+          />
+        )}
+      </div>
+
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <button
+          className="rounded border border-[var(--line)] bg-white px-2 py-1 font-medium hover:border-[var(--accent)] disabled:cursor-not-allowed disabled:bg-[#f5f6f7] disabled:text-[var(--muted)]"
+          disabled={isImporting}
+          type="button"
+          onClick={onAddPlan}
+        >
+          Cargar Planta
+        </button>
+        <button
+          className="rounded border border-[var(--line)] bg-white px-2 py-1 font-medium hover:border-[var(--accent)] disabled:cursor-not-allowed disabled:bg-[#f5f6f7] disabled:text-[var(--muted)]"
+          disabled={isImporting}
+          type="button"
+          onClick={onAddSection}
+        >
+          Agregar Corte
+        </button>
+      </div>
+
+      {readiness.canContinueToEquipment ? (
+        <button
+          className="mt-3 w-full rounded border border-[var(--accent)] bg-[var(--accent)] px-3 py-2 font-semibold text-white hover:bg-[var(--accent-strong)]"
+          type="button"
+          onClick={onContinue}
+        >
+          Continuar a Artefactos
+        </button>
+      ) : (
+        <p className="mt-3 rounded border border-[#ecd5ad] bg-[#fff9ec] px-2 py-1 text-[var(--warning)]">
+          Siguiente: {readiness.nextAction}
+        </p>
+      )}
+    </section>
+  );
+}
+
+function PlanStageBaseRow({
+  actionLabel,
+  item,
+  onAction,
+}: {
+  actionLabel: string;
+  item: PlanStageBaseReadiness;
+  onAction: () => void;
+}) {
+  return (
+    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded border border-[var(--line)] px-2 py-2">
+      <div className="min-w-0">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="min-w-0 truncate font-semibold">{item.title}</span>
+          <span
+            className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium ${planStageStatusClassName(
+              item.status,
+            )}`}
+          >
+            {planStageStatusLabel(item.status)}
+          </span>
+        </div>
+        <div className="mt-1 truncate text-[var(--muted)]">{item.reason}</div>
+      </div>
+      <button
+        className="rounded border border-[var(--line)] bg-white px-2 py-1 font-medium hover:border-[var(--accent)]"
+        type="button"
+        onClick={onAction}
+      >
+        {actionLabel}
+      </button>
+    </div>
+  );
+}
+
+function planStagePlanActionLabel(item: PlanStageBaseReadiness) {
+  if (item.status === "missing") {
+    return "Cargar";
+  }
+
+  return item.status === "ready" ? "Ver escala" : item.reason;
+}
+
+function planStageSectionActionLabel(item: PlanStageBaseReadiness) {
+  if (item.status === "ready") {
+    return "Ver alineacion";
+  }
+
+  return item.reason;
+}
+
+function planStageStatusLabel(status: PlanStageBaseReadiness["status"]) {
+  if (status === "ready") {
+    return "lista";
+  }
+
+  return status === "pending" ? "pendiente" : "faltante";
+}
+
+function planStageStatusClassName(status: PlanStageBaseReadiness["status"]) {
+  if (status === "ready") {
+    return "border-[#b7dfc2] bg-[#effaf1] text-[#24713a]";
+  }
+
+  if (status === "pending") {
+    return "border-[#ecd5ad] bg-[#fff9ec] text-[var(--warning)]";
+  }
+
+  return "border-[var(--line)] bg-[#f5f6f7] text-[var(--muted)]";
 }
 
 async function createBaseFromFile(params: {
