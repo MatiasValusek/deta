@@ -66,6 +66,14 @@ const PRESET_CASES: PresetCase[] = [
     type: "instant_water_heater",
     x: 5,
   },
+  {
+    demandValue: 8500,
+    expectedHeightMeters: 1.6,
+    id: "storage-water-heater",
+    name: "Termotanque",
+    type: "storage_water_heater",
+    x: 5.5,
+  },
 ];
 
 export function runPhysicalPresetPlacementVerifications() {

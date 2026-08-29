@@ -666,6 +666,8 @@ export function DxfWorkbench() {
       equipmentDraft.connectionPoint &&
       parseConnectionHeightInput(equipmentDraft.connectionHeightInput).ok &&
       (equipmentDraft.role !== "appliance" ||
+        draftHasConfirmedWallSupport(equipmentDraft)) &&
+      (equipmentDraft.role !== "appliance" ||
         parseTerminalLateralOffsetInput(
           equipmentDraft.terminalLateralOffsetInput,
         ).ok),
@@ -6450,6 +6452,20 @@ function validateEquipmentDraft(
         })
       : undefined;
 
+  if (
+    draft.role === "appliance" &&
+    !equipmentWallSupportIsConfirmed({
+      bodyPoint,
+      connectionPoint,
+      wallAnchor,
+    })
+  ) {
+    return {
+      ok: false,
+      message: "Elegi una pared valida para apoyar el artefacto.",
+    };
+  }
+
   return {
     ok: true,
     bodyPoint,
@@ -6459,6 +6475,38 @@ function validateEquipmentDraft(
     terminalConfig: terminal.terminalConfig,
     wallAnchor,
   };
+}
+
+function draftHasConfirmedWallSupport(draft: EquipmentDraft) {
+  if (!draft.connectionPoint || !draft.wallAnchor) {
+    return false;
+  }
+
+  return equipmentWallSupportIsConfirmed({
+    bodyPoint: draft.bodyPoint ?? draft.connectionPoint,
+    connectionPoint: draft.connectionPoint,
+    wallAnchor: draft.wallAnchor,
+  });
+}
+
+function equipmentWallSupportIsConfirmed(params: {
+  bodyPoint?: Point2D;
+  connectionPoint: Point2D;
+  wallAnchor?: EquipmentWallAnchor;
+}) {
+  const wallPoint =
+    params.wallAnchor?.status === "anchored"
+      ? params.wallAnchor.wallPoint
+      : null;
+
+  if (!params.bodyPoint || !wallPoint) {
+    return false;
+  }
+
+  return (
+    routeDistanceBetween(params.bodyPoint, wallPoint) <= 0.000001 &&
+    routeDistanceBetween(params.connectionPoint, wallPoint) <= 0.000001
+  );
 }
 
 function validateDraftTerminalConfig(

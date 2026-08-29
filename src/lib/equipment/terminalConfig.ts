@@ -38,7 +38,7 @@ const TERMINAL_PROFILES_BY_TYPE: Record<EquipmentType, TerminalProfileDefinition
   other: terminalProfile("generic_terminal", 0, true),
   oven: terminalProfile("oven_wall_valve", 0.6, true),
   space_heater: terminalProfile("space_heater_wall_valve", 0.3, true),
-  storage_water_heater: terminalProfile("storage_heater_wall_rh", 1.2, true),
+  storage_water_heater: terminalProfile("storage_heater_wall_rh", 1.6, true),
   stove: terminalProfile("stove_wall_valve", 1.1, true),
 };
 

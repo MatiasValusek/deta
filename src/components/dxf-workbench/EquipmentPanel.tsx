@@ -410,7 +410,9 @@ function DraftEditor({
             ? "Marcá en la Planta el punto de salida del medidor/regulador"
             : "Marcá en la Planta el punto de conexión de gas"
           : hasPoint
-            ? "Punto de conexión definido"
+            ? !isSupply && draft.wallAnchor?.status !== "anchored"
+              ? "Elegi una pared valida para apoyar el artefacto"
+              : "Punto de conexión definido"
             : "Sin punto de conexión"}
       </p>
 

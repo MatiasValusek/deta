@@ -221,6 +221,23 @@ export function createSectionRouteProjection(params: {
     sectionScaleMetersPerSourceUnit,
     toleranceRatio,
   });
+
+  if (
+    resolvedSegments.length > 0 &&
+    segments.length === 0 &&
+    accessories.length === 0 &&
+    equipment.length === 0 &&
+    pendingItems.length === 0
+  ) {
+    pendingItems.push({
+      id: "section-route:outside-section",
+      reason:
+        "La red confirmada queda fuera del alcance o tolerancia del corte calibrado.",
+      sourceId: link.id,
+      sourceType: "link",
+    });
+  }
+
   const hasPending =
     pendingItems.length > 0 ||
     segments.some((segment) => segment.status === "pending") ||
