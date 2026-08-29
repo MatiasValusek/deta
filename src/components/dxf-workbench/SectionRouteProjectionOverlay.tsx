@@ -34,6 +34,11 @@ export function SectionRouteProjectionOverlay({
 
   return (
     <g className="section-route-projection-overlay">
+      {projection.status === "pending" &&
+      projection.segments.length === 0 &&
+      projection.pendingItems.length > 0 ? (
+        <ProjectionBlockedNotice reason={projection.pendingItems[0]?.reason} />
+      ) : null}
       {projection.segments.map((segment) => (
         <ProjectedSegment
           key={segment.id}
@@ -59,6 +64,31 @@ export function SectionRouteProjectionOverlay({
           onHeightTargetSelect={onHeightTargetSelect}
         />
       ))}
+    </g>
+  );
+}
+
+function ProjectionBlockedNotice({ reason }: { reason: string | undefined }) {
+  return (
+    <g
+      data-section-route-projection-blocked="true"
+      pointerEvents="none"
+      transform="translate(18 28)"
+    >
+      <rect
+        fill="#fffbeb"
+        height="42"
+        rx="4"
+        stroke="#d97706"
+        strokeWidth="1.5"
+        width="300"
+      />
+      <text fill="#92400e" fontSize="11" fontWeight="700" x="10" y="17">
+        Proyeccion fisica bloqueada
+      </text>
+      <text fill="#92400e" fontSize="10" x="10" y="32">
+        {clipLabel(reason ?? "Falta escala o correspondencia del corte.", 48)}
+      </text>
     </g>
   );
 }
@@ -437,4 +467,10 @@ function offsetPoint(point: Point2D, x: number, y: number): Point2D {
 
 function formatElevation(value: number) {
   return `${value >= 0 ? "+" : ""}${value.toFixed(2)} m`;
+}
+
+function clipLabel(value: string, maxLength: number) {
+  return value.length > maxLength
+    ? `${value.slice(0, Math.max(0, maxLength - 3))}...`
+    : value;
 }

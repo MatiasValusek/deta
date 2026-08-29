@@ -36,7 +36,7 @@ export type TerminalSectionProjectionVerificationResult = {
 };
 
 const EPSILON = 0.000001;
-const INITIAL_TERMINAL_HEIGHT_METERS = 0.25;
+const INITIAL_TERMINAL_HEIGHT_METERS = 1.1;
 const UPDATED_TERMINAL_HEIGHT_METERS = 1.65;
 const PLAN_SCALE_METERS_PER_SOURCE_UNIT = 1;
 const SECTION_SCALE_METERS_PER_SOURCE_UNIT = 0.1;
@@ -172,7 +172,7 @@ function fixtureEquipment(terminalHeightMeters: number): WorkbenchEquipment[] {
       type: "meter_regulator",
     },
     {
-      bodyPoint: { x: 2, y: 0.35, z: terminalHeightMeters },
+      bodyPoint: { x: 2, y: 0, z: terminalHeightMeters },
       connectionPoint: { x: 2, y: 0, z: terminalHeightMeters },
       demandUnit: "kcal_h",
       demandValue: 8500,
@@ -343,16 +343,10 @@ function assertTerminalProjection(
   assertEqual(stove.anchorStatus, "anchored");
   assertClose(stove.zMeters, terminalHeightMeters);
   assertPoint(stove.planPoint, { x: 2, y: 0, z: terminalHeightMeters });
-  assertPoint(stove.bodyPlanPoint, { x: 2, y: 0.35, z: terminalHeightMeters });
+  assertPoint(stove.bodyPlanPoint, { x: 2, y: 0, z: terminalHeightMeters });
   assertPoint(stove.sectionPoint, { x: 140, y: expectedSectionY });
   assertPoint(stove.bodySectionPoint, { x: 140, y: expectedSectionY });
-  assert(
-    Math.hypot(
-      stove.bodyPlanPoint.x - stove.planPoint.x,
-      stove.bodyPlanPoint.y - stove.planPoint.y,
-    ) > EPSILON,
-    "El punto de conexion no debe coincidir con el centro del simbolo.",
-  );
+  assertPoint(stove.bodyPlanPoint, stove.planPoint);
 
   const valve = projectedAccessory(fixture.projection, "valve");
   const terminal = projectedAccessory(fixture.projection, "rh_elbow");
@@ -392,7 +386,7 @@ function assertHeightEditUpdatedSameNetwork(
   });
   assertPoint(stove.bodyPoint, {
     x: 2,
-    y: 0.35,
+    y: 0,
     z: UPDATED_TERMINAL_HEIGHT_METERS,
   });
   assertPoint(stove.wallAnchor?.wallPoint, {
@@ -409,7 +403,7 @@ function assertHeightEditUpdatedSameNetwork(
       beforeBranch,
       PLAN_SCALE_METERS_PER_SOURCE_UNIT,
     ),
-    1.75,
+    2.6,
   );
   assertClose(
     routeSegmentPhysicalLengthMeters(

@@ -11,13 +11,18 @@ import type {
 } from "@/lib/geometry/types";
 import { applyConfirmedEquipmentTerminalConnection } from "@/lib/routing/terminalConnection";
 import type { ManualRouteNetwork } from "@/lib/routing/types";
+import {
+  createSectionRouteProjection,
+  type SectionRouteProjection,
+  type SectionRouteProjectionLink,
+} from "@/lib/sections/routeProjection";
 import type { ClassificationIndex } from "@/lib/semantic/types";
 import {
   confirmEquipmentTerminalConfig,
   createSuggestedEquipmentTerminalConfig,
 } from "./terminalConfig";
 import type { EquipmentType, WorkbenchEquipment } from "./types";
-import { APPLIANCE_WALL_OFFSET_METERS, resolveEquipmentPhysicalPlacement } from "./wallAnchoring";
+import { resolveEquipmentPhysicalPlacement } from "./wallAnchoring";
 
 export type PhysicalPresetPlacementVerificationResult = {
   name: string;
@@ -35,6 +40,7 @@ type PresetCase = {
 
 const EPSILON = 0.000001;
 const SCALE_METERS_PER_SOURCE_UNIT = 1;
+const SECTION_SCALE_METERS_PER_SOURCE_UNIT = 0.1;
 const PRESET_CASES: PresetCase[] = [
   {
     demandValue: 8500,
@@ -74,6 +80,7 @@ export function runPhysicalPresetPlacementVerifications() {
 
         assertPhysicalPlacement(preset, placed.appliance);
         assertTerminalConnection(preset, placed);
+        assertCalibratedSectionProjection(preset, placed);
       }
     },
   );
@@ -168,6 +175,26 @@ function placedPresetEquipment(preset: PresetCase) {
     physicalAccessoryInventory: inventory,
     result,
   });
+  const sectionProjection = createSectionRouteProjection({
+    adoptedDiameterValidation,
+    equipment,
+    inventory,
+    link: sectionProjectionLink(),
+    network: terminalUpdate.network,
+    result,
+    sectionScaleMetersPerSourceUnit: SECTION_SCALE_METERS_PER_SOURCE_UNIT,
+    toleranceSource: EPSILON,
+  });
+  const routeOnlySectionProjection = createSectionRouteProjection({
+    adoptedDiameterValidation,
+    equipment,
+    inventory: null,
+    link: sectionProjectionLink(),
+    network: terminalUpdate.network,
+    result,
+    sectionScaleMetersPerSourceUnit: SECTION_SCALE_METERS_PER_SOURCE_UNIT,
+    toleranceSource: EPSILON,
+  });
 
   return {
     appliance,
@@ -176,6 +203,8 @@ function placedPresetEquipment(preset: PresetCase) {
     materialTakeoff,
     network: terminalUpdate.network,
     result,
+    routeOnlySectionProjection,
+    sectionProjection,
   };
 }
 
@@ -238,13 +267,14 @@ function assertPhysicalPlacement(
   });
   assertPoint(appliance.bodyPoint, {
     x: preset.x,
-    y: APPLIANCE_WALL_OFFSET_METERS,
+    y: 0,
     z: preset.expectedHeightMeters,
   });
   assertPoint(appliance.wallAnchor.wallPoint, appliance.connectionPoint);
   assert(
-    distanceBetween(appliance.connectionPoint, appliance.bodyPoint) > EPSILON,
-    "El punto fisico de gas debe estar separado del centro visual.",
+    distanceBetween(appliance.bodyPoint, appliance.wallAnchor.wallPoint) <=
+      EPSILON,
+    "El cuerpo debe quedar apoyado sobre la pared confirmada.",
   );
 }
 
@@ -281,6 +311,101 @@ function assertTerminalConnection(
   assertUnique(
     fixture.inventory.items.flatMap((item) => item.sourceIds),
   );
+}
+
+function assertCalibratedSectionProjection(
+  preset: PresetCase,
+  fixture: ReturnType<typeof placedPresetEquipment>,
+) {
+  assertPresetSectionProjection(preset, fixture.sectionProjection);
+  assertPresetSectionProjection(preset, fixture.routeOnlySectionProjection);
+  assertMissingScaleBlocksSectionProjection(fixture);
+}
+
+function assertPresetSectionProjection(
+  preset: PresetCase,
+  projection: SectionRouteProjection,
+) {
+  const expectedY =
+    200 + preset.expectedHeightMeters / SECTION_SCALE_METERS_PER_SOURCE_UNIT;
+  const branch =
+    projection.segments.find(
+      (segment) => segment.segmentId === `D-${preset.id}-N`,
+    ) ?? null;
+  const appliance =
+    projection.equipment.find((item) => item.equipmentId === preset.id) ??
+    null;
+  const valve =
+    projection.accessories.find((item) => item.kind === "valve") ?? null;
+  const terminal =
+    projection.accessories.find((item) => item.kind === "rh_elbow") ?? null;
+
+  assertEqual(projection.status, "resolved");
+  assert(branch, "Falta rama terminal proyectada en corte.");
+  assertEqual(
+    branch.points.map((point) => point.source).join(","),
+    "node,vertical,connection",
+  );
+  assertClose(branch.points[1]?.elevationMeters, preset.expectedHeightMeters);
+  assertClose(branch.points[1]?.sectionPoint.y, expectedY);
+  assertClose(branch.points[2]?.elevationMeters, preset.expectedHeightMeters);
+  assertClose(branch.points[2]?.sectionPoint.y, expectedY);
+  assert(appliance, "Falta artefacto proyectado en corte.");
+  assertEqual(appliance.anchorStatus, "anchored");
+  assertClose(appliance.zMeters, preset.expectedHeightMeters);
+  assertPoint(appliance.planPoint, {
+    x: preset.x,
+    y: 0,
+    z: preset.expectedHeightMeters,
+  });
+  assertPoint(appliance.bodyPlanPoint, {
+    x: preset.x,
+    y: 0,
+    z: preset.expectedHeightMeters,
+  });
+  assertPoint(appliance.sectionPoint, {
+    x: 100 + (preset.x / 6) * 60,
+    y: expectedY,
+  });
+  assert(valve, "Falta llave proyectada en corte.");
+  assert(terminal, "Falta terminal/RH proyectado en corte.");
+  assertClose(valve.sectionPoint?.y, expectedY);
+  assertClose(terminal.sectionPoint?.y, expectedY);
+  assertEqual(projection.accessories.length, 2);
+}
+
+function assertMissingScaleBlocksSectionProjection(
+  fixture: ReturnType<typeof placedPresetEquipment>,
+) {
+  const blocked = createSectionRouteProjection({
+    equipment: fixture.equipment,
+    inventory: fixture.inventory,
+    link: sectionProjectionLink(),
+    network: fixture.network,
+    result: fixture.result,
+    sectionScaleMetersPerSourceUnit: null,
+    toleranceSource: EPSILON,
+  });
+
+  assertEqual(blocked.status, "pending");
+  assertEqual(blocked.pendingItems[0]?.id, "section-route:section-scale");
+  assertEqual(blocked.equipment.length, 0);
+  assertEqual(blocked.accessories.length, 0);
+  assertEqual(blocked.segments.length, 0);
+}
+
+function sectionProjectionLink(): SectionRouteProjectionLink {
+  return {
+    id: "section:preset-fixture",
+    planEnd: { x: 6, y: -1 },
+    planStart: { x: 0, y: -1 },
+    registration: {
+      positiveZSide: "left",
+      referenceElevationMeters: 0,
+      sectionEnd: { x: 160, y: 200 },
+      sectionStart: { x: 100, y: 200 },
+    },
+  };
 }
 
 function fixtureClassificationIndex(): ClassificationIndex {

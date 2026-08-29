@@ -27,7 +27,7 @@ type WallSegment = {
   to: Point2D;
 };
 
-export const APPLIANCE_WALL_OFFSET_METERS = 0.35;
+export const APPLIANCE_WALL_OFFSET_METERS = 0;
 export const DEFAULT_WALL_SNAP_TOLERANCE_SOURCE = 0.35;
 
 export function resolveEquipmentPhysicalPlacement(params: {
@@ -72,19 +72,9 @@ export function resolveEquipmentPhysicalPlacement(params: {
     };
   }
 
-  const normal = wallNormal(wall.segment.from, wall.segment.to, point);
-  const offsetSource = wallOffsetSource(
-    params.scaleMetersPerSourceUnit ?? null,
-    tolerance,
-  );
   const connectionPoint = withZ(wall.point, params.heightMeters);
-  const bodyPoint = withZ(
-    {
-      x: wall.point.x + normal.x * offsetSource,
-      y: wall.point.y + normal.y * offsetSource,
-    },
-    params.heightMeters,
-  );
+  const bodyPoint = connectionPoint;
+  const normal = wallNormal(wall.segment.from, wall.segment.to, point);
 
   return {
     bodyPoint,
@@ -324,15 +314,6 @@ function wallNormal(from: Point2D, to: Point2D, point: Point2D): Point2D {
 
 function wallOrientation(from: Point2D, to: Point2D) {
   return Math.atan2(to.y - from.y, to.x - from.x);
-}
-
-function wallOffsetSource(
-  scaleMetersPerSourceUnit: number | null,
-  tolerance: number,
-) {
-  return scaleMetersPerSourceUnit && scaleMetersPerSourceUnit > 0
-    ? APPLIANCE_WALL_OFFSET_METERS / scaleMetersPerSourceUnit
-    : Math.max(tolerance * 0.8, 0.01);
 }
 
 function pendingWallAnchor(

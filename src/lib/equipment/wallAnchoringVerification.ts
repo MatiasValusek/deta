@@ -19,7 +19,7 @@ export function runWallAnchoringVerifications() {
 
   verify(
     results,
-    "10.7A cocina junto a pared queda anclada con punto de conexion separado",
+    "10.7A cocina junto a pared queda anclada y apoyada",
     () => {
       const drawing = fixtureDrawing();
       const classificationIndex = fixtureClassificationIndex();
@@ -42,10 +42,10 @@ export function runWallAnchoringVerifications() {
       assertClose(equipment.wallAnchor.orientationRadians, 0);
       assertClose(equipment.wallAnchor.distanceSource, 0.18);
       assertPoint(equipment.connectionPoint, { x: 2, y: 0, z: 0.85 });
-      assertPoint(equipment.bodyPoint, { x: 2, y: 0.35, z: 0.85 });
+      assertPoint(equipment.bodyPoint, { x: 2, y: 0, z: 0.85 });
       assert(
-        !samePoint(equipment.connectionPoint, equipment.bodyPoint),
-        "El punto de conexion no debe coincidir con el centro visual.",
+        samePoint(equipment.wallAnchor.wallPoint, equipment.bodyPoint),
+        "El cuerpo debe quedar apoyado sobre la pared confirmada.",
       );
       assert(
         equipment.connectionPoint === placement.connectionPoint,

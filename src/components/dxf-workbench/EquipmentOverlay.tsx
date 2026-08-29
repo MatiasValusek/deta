@@ -58,6 +58,11 @@ export function EquipmentOverlay({
             return (
               <EquipmentMarker
                 bodyPoint={sourceToScreen(bodyPoint)}
+                bodyNormal={equipmentBodyNormalOffset({
+                  anchor: item.wallAnchor,
+                  sourcePoint: bodyPoint,
+                  sourceToScreen,
+                })}
                 connectionPoint={sourceToScreen(item.connectionPoint)}
                 equipment={item}
                 isHovered={item.id === hoveredEquipmentId}
@@ -94,6 +99,7 @@ export function EquipmentOverlay({
 
 function EquipmentMarker({
   bodyPoint,
+  bodyNormal,
   connectionPoint,
   equipment,
   isHovered,
@@ -106,6 +112,7 @@ function EquipmentMarker({
   wallReference,
 }: {
   bodyPoint: Point2D;
+  bodyNormal: Point2D | null;
   connectionPoint: Point2D;
   equipment: WorkbenchEquipment;
   isHovered: boolean;
@@ -196,6 +203,7 @@ function EquipmentMarker({
       />
       <WallReferenceMarker reference={wallReference} />
       <MarkerSymbol
+        bodyNormal={bodyNormal}
         code={equipmentCode(equipment.type)}
         connectionOffset={connectionOffset}
         highlighted={highlighted}
@@ -204,6 +212,7 @@ function EquipmentMarker({
       />
       {equipment.role === "appliance" ? (
         <GasConnectionMarker
+          bodyNormal={bodyNormal}
           highlighted={highlighted}
           offset={connectionOffset}
           pending={hasPendingAnchor}
@@ -315,6 +324,11 @@ function DraftEquipmentMarker({
         })}
       />
       <MarkerSymbol
+        bodyNormal={equipmentBodyNormalOffset({
+          anchor: draft.wallAnchor,
+          sourcePoint,
+          sourceToScreen,
+        })}
         code={equipmentCode(draft.type)}
         connectionOffset={connectionOffset}
         highlighted
@@ -323,6 +337,11 @@ function DraftEquipmentMarker({
       />
       {draft.role === "appliance" ? (
         <GasConnectionMarker
+          bodyNormal={equipmentBodyNormalOffset({
+            anchor: draft.wallAnchor,
+            sourcePoint,
+            sourceToScreen,
+          })}
           highlighted
           offset={connectionOffset}
           pending={hasPendingAnchor}
@@ -368,16 +387,20 @@ function WallReferenceMarker({
 }
 
 function GasConnectionMarker({
+  bodyNormal,
   highlighted,
   offset,
   pending,
 }: {
+  bodyNormal: Point2D | null;
   highlighted: boolean;
   offset: Point2D;
   pending: boolean;
 }) {
   const color = pending ? "#f59e0b" : "#111827";
   const isSeparate = Math.hypot(offset.x, offset.y) > 0.5;
+  const arrivalVector = bodyNormal ?? applianceBodyNormal(null, offset);
+  const arrivalStart = scalePoint(arrivalVector, 18);
 
   return (
     <g data-equipment-connection-point="true" pointerEvents="all">
@@ -393,7 +416,19 @@ function GasConnectionMarker({
           y1="0"
           y2={offset.y}
         />
-      ) : null}
+      ) : (
+        <line
+          data-equipment-terminal-arrival="true"
+          stroke={pending ? "#f59e0b" : "#6d28d9"}
+          strokeDasharray={pending ? "4 3" : undefined}
+          strokeLinecap="round"
+          strokeWidth={highlighted ? "2" : "1.5"}
+          x1={arrivalStart.x}
+          x2="0"
+          y1={arrivalStart.y}
+          y2="0"
+        />
+      )}
       <rect
         fill="#ffffff"
         height={highlighted ? "9" : "7"}
@@ -411,12 +446,14 @@ function GasConnectionMarker({
 }
 
 function MarkerSymbol({
+  bodyNormal,
   code,
   connectionOffset,
   highlighted,
   pending,
   role,
 }: {
+  bodyNormal: Point2D | null;
   code: string;
   connectionOffset: Point2D;
   highlighted: boolean;
@@ -427,7 +464,19 @@ function MarkerSymbol({
   const fill = role === "supply" ? "#fff7ed" : "#f5f3ff";
   const warning = pending ? "#f59e0b" : stroke;
   const symbolStroke = highlighted ? 2.6 : 2;
-  const applianceRotation = applianceRotationDegrees(connectionOffset);
+  const normal = applianceBodyNormal(bodyNormal, connectionOffset);
+  const tangent = {
+    x: -normal.y,
+    y: normal.x,
+  };
+  const bodyWidth = 34;
+  const bodyDepth = 24;
+  const wallLeft = scalePoint(tangent, -bodyWidth / 2);
+  const wallRight = scalePoint(tangent, bodyWidth / 2);
+  const frontRight = addPoints(wallRight, scalePoint(normal, bodyDepth));
+  const frontLeft = addPoints(wallLeft, scalePoint(normal, bodyDepth));
+  const firstRib = addPoints(scalePoint(normal, bodyDepth * 0.35), scalePoint(tangent, -11));
+  const secondRib = addPoints(scalePoint(normal, bodyDepth * 0.7), scalePoint(tangent, -11));
 
   return (
     <>
@@ -444,35 +493,31 @@ function MarkerSymbol({
           y="-13.5"
         />
       ) : (
-        <g transform={`rotate(${applianceRotation})`}>
-          <rect
+        <g>
+          <polygon
+            points={polygonPoints([wallLeft, wallRight, frontRight, frontLeft])}
             fill={fill}
-            height="24"
-            rx="3"
             stroke={warning}
             strokeDasharray={pending ? "4 3" : undefined}
             strokeWidth={symbolStroke}
-            width="34"
-            x="-17"
-            y="-12"
           />
           <line
             stroke="#111827"
             strokeLinecap="round"
             strokeWidth="1.2"
-            x1="-11"
-            x2="11"
-            y1="-5"
-            y2="-5"
+            x1={firstRib.x}
+            x2={firstRib.x + tangent.x * 22}
+            y1={firstRib.y}
+            y2={firstRib.y + tangent.y * 22}
           />
           <line
             stroke="#111827"
             strokeLinecap="round"
             strokeWidth="1.2"
-            x1="-11"
-            x2="11"
-            y1="5"
-            y2="5"
+            x1={secondRib.x}
+            x2={secondRib.x + tangent.x * 22}
+            y1={secondRib.y}
+            y2={secondRib.y + tangent.y * 22}
           />
         </g>
       )}
@@ -488,7 +533,8 @@ function MarkerSymbol({
         fontWeight="800"
         pointerEvents="none"
         textAnchor="middle"
-        y="-21"
+        y={role === "appliance" ? normal.y * (bodyDepth + 10) - 2 : -21}
+        x={role === "appliance" ? normal.x * (bodyDepth + 10) : 0}
       >
         {code}
       </text>
@@ -496,18 +542,82 @@ function MarkerSymbol({
   );
 }
 
-function applianceRotationDegrees(connectionOffset: Point2D) {
-  if (Math.hypot(connectionOffset.x, connectionOffset.y) <= 0.5) {
-    return 0;
-  }
-
-  return (Math.atan2(connectionOffset.y, connectionOffset.x) * 180) / Math.PI + 90;
-}
-
 type EquipmentWallReferenceOffset = {
   from: Point2D;
   to: Point2D;
 };
+
+function equipmentBodyNormalOffset(params: {
+  anchor: EquipmentWallAnchor | null | undefined;
+  sourcePoint: Point2D | null | undefined;
+  sourceToScreen: (point: Point2D) => Point2D;
+}): Point2D | null {
+  if (
+    params.anchor?.status !== "anchored" ||
+    !params.anchor.normal ||
+    !params.sourcePoint
+  ) {
+    return null;
+  }
+
+  const origin = params.sourceToScreen(params.sourcePoint);
+  const normalPoint = params.sourceToScreen({
+    x: params.sourcePoint.x + params.anchor.normal.x,
+    y: params.sourcePoint.y + params.anchor.normal.y,
+  });
+
+  return normalizePoint({
+    x: normalPoint.x - origin.x,
+    y: normalPoint.y - origin.y,
+  });
+}
+
+function applianceBodyNormal(
+  bodyNormal: Point2D | null,
+  connectionOffset: Point2D,
+) {
+  if (bodyNormal) {
+    return bodyNormal;
+  }
+
+  if (Math.hypot(connectionOffset.x, connectionOffset.y) > 0.5) {
+    return normalizePoint({
+      x: -connectionOffset.x,
+      y: -connectionOffset.y,
+    });
+  }
+
+  return { x: 0, y: -1 };
+}
+
+function normalizePoint(point: Point2D): Point2D {
+  const length = Math.hypot(point.x, point.y);
+
+  return length > Number.EPSILON
+    ? {
+        x: point.x / length,
+        y: point.y / length,
+      }
+    : { x: 0, y: -1 };
+}
+
+function addPoints(first: Point2D, second: Point2D): Point2D {
+  return {
+    x: first.x + second.x,
+    y: first.y + second.y,
+  };
+}
+
+function scalePoint(point: Point2D, scale: number): Point2D {
+  return {
+    x: point.x * scale,
+    y: point.y * scale,
+  };
+}
+
+function polygonPoints(points: Point2D[]) {
+  return points.map((point) => `${point.x},${point.y}`).join(" ");
+}
 
 function equipmentWallReferenceOffset(params: {
   anchor: EquipmentWallAnchor | null | undefined;

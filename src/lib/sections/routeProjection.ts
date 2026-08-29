@@ -20,6 +20,7 @@ import {
 import type {
   ManualRouteNetwork,
   ResolvedRouteSegment,
+  RouteSegmentAccessory,
   RouteNode,
 } from "@/lib/routing/types";
 import {
@@ -169,7 +170,7 @@ export function createSectionRouteProjection(params: {
   const relevantSegmentIds = new Set(
     segments.map((segment) => segment.segmentId),
   );
-  const accessories = (params.inventory?.items ?? [])
+  const inventoryAccessories = (params.inventory?.items ?? [])
     .map((item) =>
       createProjectedAccessory({
         item,
@@ -185,8 +186,33 @@ export function createSectionRouteProjection(params: {
       (
         item,
       ): item is SectionRouteProjectedAccessory => item !== null,
+    );
+  const projectedAccessoryIds = new Set(
+    inventoryAccessories.map((accessory) => accessory.id),
+  );
+  const routeAccessories = resolvedSegments
+    .filter((segment) => relevantSegmentIds.has(segment.id))
+    .flatMap((segment) =>
+      (segment.accessories ?? []).map((accessory) =>
+        createProjectedRouteAccessory({
+          accessory,
+          link,
+          pendingItems,
+          projectedAccessoryIds,
+          sectionScaleMetersPerSourceUnit,
+          segment,
+          toleranceRatio,
+        }),
+      ),
     )
-    .sort((first, second) => first.id.localeCompare(second.id));
+    .filter(
+      (
+        item,
+      ): item is SectionRouteProjectedAccessory => item !== null,
+    );
+  const accessories = [...inventoryAccessories, ...routeAccessories].sort(
+    (first, second) => first.id.localeCompare(second.id),
+  );
   const equipment = createProjectedEquipment({
     equipment: params.equipment,
     link,
@@ -380,6 +406,97 @@ function createProjectedAccessory(params: {
     sectionPoint: projected.sectionPoint,
     segmentIds: params.item.segmentIds,
     sourceIds: params.item.sourceIds,
+    status: pendingReason ? "pending" : "resolved",
+  };
+}
+
+function createProjectedRouteAccessory(params: {
+  accessory: RouteSegmentAccessory;
+  link: SectionRouteProjectionLink & { registration: SectionRegistration };
+  pendingItems: SectionRouteProjectionPendingItem[];
+  projectedAccessoryIds: Set<string>;
+  sectionScaleMetersPerSourceUnit: number;
+  segment: ResolvedRouteSegment;
+  toleranceRatio: number;
+}): SectionRouteProjectedAccessory | null {
+  const id = routeAccessoryProjectionId(
+    params.segment.id,
+    params.accessory.id,
+  );
+
+  if (params.projectedAccessoryIds.has(id)) {
+    return null;
+  }
+
+  const terminalKind = terminalRouteSegmentAccessoryKind(params.accessory);
+
+  if (!terminalKind) {
+    return null;
+  }
+
+  const planPoint = terminalRouteSegmentAccessoryPlanPoint({
+    accessoryKind: terminalKind,
+    segment: params.segment,
+  });
+
+  if (!planPoint || !hasExplicitZ(planPoint)) {
+    const reason = "Falta posicion confirmada del accesorio fisico.";
+    params.pendingItems.push({
+      id: `section-route:accessory:${id}`,
+      reason,
+      sourceId: id,
+      sourceType: "accessory",
+    });
+
+    return {
+      id,
+      kind: routeSegmentAccessoryPhysicalKind(params.accessory),
+      label: routeSegmentAccessoryLabel(params.accessory),
+      pendingReason: reason,
+      planPoint: null,
+      routeUseCount: 0,
+      sectionPoint: null,
+      segmentIds: [params.segment.id],
+      sourceIds: [`${params.segment.id}:${params.accessory.id}`],
+      status: "pending",
+    };
+  }
+
+  const projected = projectPlanPointToSection({
+    elevationMeters: explicitZMeters(planPoint) as number,
+    planEnd: params.link.planEnd,
+    planPoint,
+    planStart: params.link.planStart,
+    registration: params.link.registration,
+    sectionScaleMetersPerSourceUnit: params.sectionScaleMetersPerSourceUnit,
+  });
+  const outsideRegisteredSpan = !tWithinSectionSpan(
+    projected.t,
+    params.toleranceRatio,
+  );
+  const pendingReason = outsideRegisteredSpan
+    ? "El accesorio queda fuera de los extremos registrados del corte."
+    : null;
+
+  if (pendingReason) {
+    params.pendingItems.push({
+      id: `section-route:accessory:${id}`,
+      reason: pendingReason,
+      sourceId: id,
+      sourceType: "accessory",
+    });
+  }
+
+  return {
+    id,
+    kind: routeSegmentAccessoryPhysicalKind(params.accessory),
+    label: routeSegmentAccessoryLabel(params.accessory),
+    pendingReason,
+    planPoint,
+    routeUseCount: 0,
+    sectionPoint: projected.sectionPoint,
+    segmentIds: [params.segment.id],
+    sourceIds: [`${params.segment.id}:${params.accessory.id}`],
     status: pendingReason ? "pending" : "resolved",
   };
 }
@@ -775,6 +892,22 @@ function terminalRouteAccessoryPlanPoint(params: {
   return point ? { ...point } : null;
 }
 
+function terminalRouteSegmentAccessoryPlanPoint(params: {
+  accessoryKind: "terminal" | "valve";
+  segment: ResolvedRouteSegment;
+}): Point2D | null {
+  if (params.segment.path.length < 2) {
+    return null;
+  }
+
+  const point =
+    params.accessoryKind === "terminal"
+      ? params.segment.path[params.segment.path.length - 1]
+      : params.segment.path[Math.max(0, params.segment.path.length - 2)];
+
+  return point ? { ...point } : null;
+}
+
 function terminalRouteAccessoryKind(
   item: TechnicalPhysicalAccessory,
 ): "terminal" | "valve" | null {
@@ -802,6 +935,67 @@ function terminalRouteAccessoryKind(
   return null;
 }
 
+function terminalRouteSegmentAccessoryKind(
+  accessory: RouteSegmentAccessory,
+): "terminal" | "valve" | null {
+  if (!accessory.id.startsWith("route-terminal:")) {
+    return null;
+  }
+
+  if (accessory.id.endsWith(":terminal")) {
+    return "terminal";
+  }
+
+  if (accessory.id.endsWith(":valve")) {
+    return "valve";
+  }
+
+  return null;
+}
+
+function routeAccessoryProjectionId(segmentId: string, accessoryId: string) {
+  return `physical-accessory:route:${segmentId}:${accessoryId}`;
+}
+
+function routeSegmentAccessoryPhysicalKind(
+  accessory: RouteSegmentAccessory,
+): TechnicalPhysicalAccessoryKind {
+  if (accessory.type === "valve") {
+    return "valve";
+  }
+
+  if (
+    accessory.type === "elbow" &&
+    isRhElbowLabel(accessory.catalogFamilyId ?? accessory.catalogCode ?? "")
+  ) {
+    return "rh_elbow";
+  }
+
+  if (accessory.type === "elbow") {
+    return "elbow_90";
+  }
+
+  if (accessory.type === "tee") {
+    return "tee";
+  }
+
+  return "other";
+}
+
+function routeSegmentAccessoryLabel(accessory: RouteSegmentAccessory) {
+  const kind = routeSegmentAccessoryPhysicalKind(accessory);
+
+  if (kind === "valve") {
+    return "Llave";
+  }
+
+  if (kind === "rh_elbow") {
+    return "RH";
+  }
+
+  return accessory.catalogCode ?? accessory.catalogFamilyId ?? "Accesorio";
+}
+
 function accessoryLabel(item: TechnicalPhysicalAccessory) {
   if (item.kind === "valve") {
     return "Llave";
@@ -812,6 +1006,16 @@ function accessoryLabel(item: TechnicalPhysicalAccessory) {
   }
 
   return item.label;
+}
+
+function isRhElbowLabel(label: string) {
+  const normalized = label.toLocaleLowerCase("es-AR");
+
+  return (
+    normalized.includes("rosca hembra") ||
+    normalized.includes("rh") ||
+    normalized.includes("hembra")
+  );
 }
 
 function formatDiameterSymbol(diameter: PipeDiameterReference | null) {
