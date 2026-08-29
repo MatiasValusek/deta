@@ -29,6 +29,7 @@ export type TerminalConnectionVerificationResult = {
 
 const EPSILON = 0.000001;
 const SCALE_METERS_PER_SOURCE_UNIT = 1;
+const STOVE_PRESET_HEIGHT_METERS = 1.1;
 
 export function runTerminalConnectionVerifications() {
   const results: TerminalConnectionVerificationResult[] = [];
@@ -138,8 +139,8 @@ function fixtureEquipment(): WorkbenchEquipment[] {
       type: "meter_regulator",
     },
     {
-      bodyPoint: { x: 2, y: 0.35, z: 0.25 },
-      connectionPoint: { x: 2, y: 0, z: 0.25 },
+      bodyPoint: { x: 2, y: 0.35, z: STOVE_PRESET_HEIGHT_METERS },
+      connectionPoint: { x: 2, y: 0, z: STOVE_PRESET_HEIGHT_METERS },
       demandUnit: "kcal_h",
       demandValue: 8500,
       id: "stove",
@@ -158,7 +159,7 @@ function fixtureEquipment(): WorkbenchEquipment[] {
         referenceKind: "reference_wall",
         source: "dxf",
         status: "anchored",
-        wallPoint: { x: 2, y: 0, z: 0.25 },
+        wallPoint: { x: 2, y: 0, z: STOVE_PRESET_HEIGHT_METERS },
       },
     },
   ];
@@ -217,15 +218,15 @@ function assertTerminalGeometry(
   assert(terminal, "No se resolvio el segmento terminal.");
   assertEqual(terminalSegment.vertices?.length, 2);
   assertPoint(terminal.path[0], { x: 2.5, y: -1, z: 0 });
-  assertPoint(terminal.path[1], { x: 2.5, y: -1, z: 0.25 });
-  assertPoint(terminal.path[2], { x: 2.5, y: 0, z: 0.25 });
-  assertPoint(terminal.path[3], { x: 2, y: 0, z: 0.25 });
+  assertPoint(terminal.path[1], { x: 2.5, y: -1, z: STOVE_PRESET_HEIGHT_METERS });
+  assertPoint(terminal.path[2], { x: 2.5, y: 0, z: STOVE_PRESET_HEIGHT_METERS });
+  assertPoint(terminal.path[3], { x: 2, y: 0, z: STOVE_PRESET_HEIGHT_METERS });
   assertClose(
     routeSegmentPhysicalLengthMeters(
       terminal,
       SCALE_METERS_PER_SOURCE_UNIT,
     ),
-    1.75,
+    2.6,
   );
   assertEqual(terminalSegment.accessories?.length, 2);
   assertEqual(

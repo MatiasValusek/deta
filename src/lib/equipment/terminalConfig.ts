@@ -33,13 +33,13 @@ const TERMINAL_PROFILE_LABELS: Record<EquipmentTerminalProfile, string> = {
 const TERMINAL_PROFILES_BY_TYPE: Record<EquipmentType, TerminalProfileDefinition> = {
   boiler: terminalProfile("boiler_wall_rh", 1.5, true),
   gas_dryer: terminalProfile("dryer_wall_valve", 0.8, true),
-  instant_water_heater: terminalProfile("heater_wall_rh", 1.65, true),
+  instant_water_heater: terminalProfile("heater_wall_rh", 1.6, true),
   meter_regulator: terminalProfile("generic_terminal", 0, false),
   other: terminalProfile("generic_terminal", 0, true),
   oven: terminalProfile("oven_wall_valve", 0.6, true),
-  space_heater: terminalProfile("space_heater_wall_valve", 0.25, true),
+  space_heater: terminalProfile("space_heater_wall_valve", 0.3, true),
   storage_water_heater: terminalProfile("storage_heater_wall_rh", 1.2, true),
-  stove: terminalProfile("stove_wall_valve", 0.25, true),
+  stove: terminalProfile("stove_wall_valve", 1.1, true),
 };
 
 export function createSuggestedEquipmentTerminalConfig(

@@ -4,6 +4,7 @@ import {
   equipmentCode,
   hasPendingDemand,
   type EquipmentDraft,
+  type EquipmentWallAnchor,
   type WorkbenchEquipment,
 } from "@/lib/equipment/types";
 import type { RouteDraft, RouteIntentDraft } from "@/lib/routing/types";
@@ -72,6 +73,11 @@ export function EquipmentOverlay({
                 isSelected={item.id === selectedEquipmentId}
                 key={item.id}
                 routeHitTolerance={routeHitTolerance}
+                wallReference={equipmentWallReferenceOffset({
+                  anchor: item.wallAnchor,
+                  bodyScreenPoint: sourceToScreen(bodyPoint),
+                  sourceToScreen,
+                })}
                 onHoverEquipment={onHoverEquipment}
                 onRouteEquipmentPoint={onRouteEquipmentPoint}
                 onSelectEquipment={onSelectEquipment}
@@ -97,6 +103,7 @@ function EquipmentMarker({
   onHoverEquipment,
   onRouteEquipmentPoint,
   onSelectEquipment,
+  wallReference,
 }: {
   bodyPoint: Point2D;
   connectionPoint: Point2D;
@@ -112,6 +119,7 @@ function EquipmentMarker({
     equipmentId?: string,
   ) => void;
   onSelectEquipment: (equipmentId: string) => void;
+  wallReference: EquipmentWallReferenceOffset | null;
 }) {
   const [isLocalHovered, setIsLocalHovered] = useState(false);
   const highlighted = isHovered || isSelected || isLocalHovered;
@@ -186,8 +194,10 @@ function EquipmentMarker({
         pointerEvents={isInteractive ? "all" : "none"}
         r={EQUIPMENT_HITBOX_SIZE / 2}
       />
+      <WallReferenceMarker reference={wallReference} />
       <MarkerSymbol
         code={equipmentCode(equipment.type)}
+        connectionOffset={connectionOffset}
         highlighted={highlighted}
         pending={pending}
         role={equipment.role}
@@ -276,15 +286,37 @@ function DraftEquipmentMarker({
       pointerEvents="none"
       transform={`translate(${point.x} ${point.y})`}
     >
-      <circle
-        fill="#ffffff"
-        r="20"
-        stroke={draft.role === "supply" ? "#b45309" : "#6d28d9"}
-        strokeDasharray="4 3"
-        strokeWidth="1.7"
+      {draft.role === "supply" ? (
+        <circle
+          fill="#ffffff"
+          r="20"
+          stroke="#b45309"
+          strokeDasharray="4 3"
+          strokeWidth="1.7"
+        />
+      ) : (
+        <rect
+          fill="#ffffff"
+          height="32"
+          rx="3"
+          stroke="#6d28d9"
+          strokeDasharray="4 3"
+          strokeWidth="1.7"
+          width="40"
+          x="-20"
+          y="-16"
+        />
+      )}
+      <WallReferenceMarker
+        reference={equipmentWallReferenceOffset({
+          anchor: draft.wallAnchor,
+          bodyScreenPoint: point,
+          sourceToScreen,
+        })}
       />
       <MarkerSymbol
         code={equipmentCode(draft.type)}
+        connectionOffset={connectionOffset}
         highlighted
         pending={pending}
         role={draft.role}
@@ -296,6 +328,41 @@ function DraftEquipmentMarker({
           pending={hasPendingAnchor}
         />
       ) : null}
+    </g>
+  );
+}
+
+function WallReferenceMarker({
+  reference,
+}: {
+  reference: EquipmentWallReferenceOffset | null;
+}) {
+  if (!reference) {
+    return null;
+  }
+
+  return (
+    <g data-equipment-wall-reference="true" pointerEvents="none">
+      <line
+        stroke="#0f766e"
+        strokeLinecap="round"
+        strokeOpacity="0.85"
+        strokeWidth="3"
+        x1={reference.from.x}
+        x2={reference.to.x}
+        y1={reference.from.y}
+        y2={reference.to.y}
+      />
+      <line
+        stroke="#ffffff"
+        strokeLinecap="round"
+        strokeOpacity="0.8"
+        strokeWidth="1"
+        x1={reference.from.x}
+        x2={reference.to.x}
+        y1={reference.from.y}
+        y2={reference.to.y}
+      />
     </g>
   );
 }
@@ -316,37 +383,42 @@ function GasConnectionMarker({
     <g data-equipment-connection-point="true" pointerEvents="all">
       {isSeparate ? (
         <line
+          data-equipment-terminal-arrival="true"
           stroke={pending ? "#f59e0b" : "#6d28d9"}
-          strokeDasharray={pending ? "4 3" : "2 3"}
+          strokeDasharray={pending ? "4 3" : undefined}
           strokeLinecap="round"
-          strokeWidth={highlighted ? "1.8" : "1.3"}
+          strokeWidth={highlighted ? "2.2" : "1.6"}
           x1="0"
           x2={offset.x}
           y1="0"
           y2={offset.y}
         />
       ) : null}
-      <circle
-        cx={offset.x}
-        cy={offset.y}
+      <rect
         fill="#ffffff"
-        r={highlighted ? "5" : "4"}
+        height={highlighted ? "9" : "7"}
         stroke={color}
         strokeDasharray={pending ? "3 2" : undefined}
         strokeWidth="1.8"
+        transform={`translate(${offset.x} ${offset.y}) rotate(45)`}
+        width={highlighted ? "9" : "7"}
+        x={highlighted ? "-4.5" : "-3.5"}
+        y={highlighted ? "-4.5" : "-3.5"}
       />
-      <circle cx={offset.x} cy={offset.y} fill={color} r="1.7" />
+      <circle cx={offset.x} cy={offset.y} fill={color} r="1.6" />
     </g>
   );
 }
 
 function MarkerSymbol({
   code,
+  connectionOffset,
   highlighted,
   pending,
   role,
 }: {
   code: string;
+  connectionOffset: Point2D;
   highlighted: boolean;
   pending: boolean;
   role: "supply" | "appliance";
@@ -355,6 +427,7 @@ function MarkerSymbol({
   const fill = role === "supply" ? "#fff7ed" : "#f5f3ff";
   const warning = pending ? "#f59e0b" : stroke;
   const symbolStroke = highlighted ? 2.6 : 2;
+  const applianceRotation = applianceRotationDegrees(connectionOffset);
 
   return (
     <>
@@ -371,32 +444,38 @@ function MarkerSymbol({
           y="-13.5"
         />
       ) : (
-        <circle
-          fill={fill}
-          r="17"
-          stroke={warning}
-          strokeDasharray={pending ? "4 3" : undefined}
-          strokeWidth={symbolStroke}
-        />
+        <g transform={`rotate(${applianceRotation})`}>
+          <rect
+            fill={fill}
+            height="24"
+            rx="3"
+            stroke={warning}
+            strokeDasharray={pending ? "4 3" : undefined}
+            strokeWidth={symbolStroke}
+            width="34"
+            x="-17"
+            y="-12"
+          />
+          <line
+            stroke="#111827"
+            strokeLinecap="round"
+            strokeWidth="1.2"
+            x1="-11"
+            x2="11"
+            y1="-5"
+            y2="-5"
+          />
+          <line
+            stroke="#111827"
+            strokeLinecap="round"
+            strokeWidth="1.2"
+            x1="-11"
+            x2="11"
+            y1="5"
+            y2="5"
+          />
+        </g>
       )}
-      <line
-        stroke="#111827"
-        strokeLinecap="round"
-        strokeWidth="1.4"
-        x1="-5"
-        x2="5"
-        y1="0"
-        y2="0"
-      />
-      <line
-        stroke="#111827"
-        strokeLinecap="round"
-        strokeWidth="1.4"
-        x1="0"
-        x2="0"
-        y1="-5"
-        y2="5"
-      />
       <circle
         data-equipment-body-point="true"
         fill="#111827"
@@ -415,6 +494,61 @@ function MarkerSymbol({
       </text>
     </>
   );
+}
+
+function applianceRotationDegrees(connectionOffset: Point2D) {
+  if (Math.hypot(connectionOffset.x, connectionOffset.y) <= 0.5) {
+    return 0;
+  }
+
+  return (Math.atan2(connectionOffset.y, connectionOffset.x) * 180) / Math.PI + 90;
+}
+
+type EquipmentWallReferenceOffset = {
+  from: Point2D;
+  to: Point2D;
+};
+
+function equipmentWallReferenceOffset(params: {
+  anchor: EquipmentWallAnchor | null | undefined;
+  bodyScreenPoint: Point2D;
+  sourceToScreen: (point: Point2D) => Point2D;
+}): EquipmentWallReferenceOffset | null {
+  if (
+    params.anchor?.status !== "anchored" ||
+    !params.anchor.wallPoint ||
+    params.anchor.orientationRadians === null ||
+    params.anchor.orientationRadians === undefined ||
+    !Number.isFinite(params.anchor.orientationRadians)
+  ) {
+    return null;
+  }
+
+  const halfLengthSource = Math.max(params.anchor.distanceSource ?? 0, 0.35);
+  const tangent = {
+    x: Math.cos(params.anchor.orientationRadians),
+    y: Math.sin(params.anchor.orientationRadians),
+  };
+  const wallPoint = params.anchor.wallPoint;
+  const from = params.sourceToScreen({
+    x: wallPoint.x - tangent.x * halfLengthSource,
+    y: wallPoint.y - tangent.y * halfLengthSource,
+  });
+  const to = params.sourceToScreen({
+    x: wallPoint.x + tangent.x * halfLengthSource,
+    y: wallPoint.y + tangent.y * halfLengthSource,
+  });
+
+  return {
+    from: {
+      x: from.x - params.bodyScreenPoint.x,
+      y: from.y - params.bodyScreenPoint.y,
+    },
+    to: {
+      x: to.x - params.bodyScreenPoint.x,
+      y: to.y - params.bodyScreenPoint.y,
+    },
+  };
 }
 
 function equipmentAnchorIsPending(equipment: WorkbenchEquipment) {
