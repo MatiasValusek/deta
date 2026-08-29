@@ -1,4 +1,5 @@
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
+import { terminalEndHeightMeters } from "@/lib/equipment/terminalConfig";
 import type { Point2D } from "@/lib/geometry/types";
 import { pointZMeters } from "@/lib/geometry/height";
 import {
@@ -83,10 +84,10 @@ export function applyConfirmedEquipmentTerminalConnection(params: {
     return offsetSource;
   }
 
-  const connectionPoint = withZ(
-    equipment.connectionPoint,
-    terminalConfig.connectionHeightMeters,
-  );
+  const topHeightMeters = terminalConfig.connectionHeightMeters;
+  const endHeightMeters =
+    terminalEndHeightMeters(terminalConfig) ?? topHeightMeters;
+  const connectionPoint = withZ(equipment.connectionPoint, endHeightMeters);
   const tangent = terminalTangent(equipment);
   const signedOffset =
     terminalConfig.outletSide === "left"
@@ -99,12 +100,21 @@ export function applyConfirmedEquipmentTerminalConnection(params: {
       x: connectionPoint.x + tangent.x * signedOffset,
       y: connectionPoint.y + tangent.y * signedOffset,
     },
-    terminalConfig.connectionHeightMeters,
+    topHeightMeters,
+  );
+  const topConnectionPoint = withZ(
+    {
+      x: connectionPoint.x,
+      y: connectionPoint.y,
+    },
+    topHeightMeters,
   );
   const vertices = terminalBranchVertices({
     connectionPoint,
     originPoint: branch.originPoint,
     terminalApproachPoint,
+    topConnectionPoint,
+    topHeightMeters,
   });
   const terminalAccessories = terminalRouteAccessories({
     equipmentId: equipment.id,
@@ -258,23 +268,31 @@ function terminalBranchVertices(params: {
   connectionPoint: Point2D;
   originPoint: Point2D;
   terminalApproachPoint: Point2D;
+  topConnectionPoint: Point2D;
+  topHeightMeters: number;
 }) {
-  const heightMeters = pointZMeters(params.connectionPoint);
   const vertices: Point2D[] = [];
   const verticalPoint = withZ(
     {
       x: params.originPoint.x,
       y: params.originPoint.y,
     },
-    heightMeters,
+    params.topHeightMeters,
   );
 
-  if (Math.abs(pointZMeters(params.originPoint) - heightMeters) > EPSILON) {
+  if (
+    Math.abs(pointZMeters(params.originPoint) - params.topHeightMeters) >
+    EPSILON
+  ) {
     vertices.push(verticalPoint);
   }
 
   if (!sameXY(verticalPoint, params.terminalApproachPoint)) {
     vertices.push(stripRedundantZ(params.terminalApproachPoint));
+  }
+
+  if (!samePoint(params.terminalApproachPoint, params.topConnectionPoint)) {
+    vertices.push(stripRedundantZ(params.topConnectionPoint));
   }
 
   return dedupeConsecutiveVertices(

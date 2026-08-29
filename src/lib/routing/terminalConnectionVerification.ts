@@ -7,6 +7,7 @@ import { calculateTechnicalTree } from "@/lib/calculation/technicalTree";
 import {
   confirmEquipmentTerminalConfig,
   createSuggestedEquipmentTerminalConfig,
+  terminalEndHeightMeters,
 } from "@/lib/equipment/terminalConfig";
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
 import type { Point2D } from "@/lib/geometry/types";
@@ -30,6 +31,7 @@ export type TerminalConnectionVerificationResult = {
 const EPSILON = 0.000001;
 const SCALE_METERS_PER_SOURCE_UNIT = 1;
 const STOVE_PRESET_HEIGHT_METERS = 1.1;
+const STOVE_TERMINAL_END_HEIGHT_METERS = 0.9;
 
 export function runTerminalConnectionVerifications() {
   const results: TerminalConnectionVerificationResult[] = [];
@@ -127,6 +129,8 @@ function fixtureEquipment(): WorkbenchEquipment[] {
     lateralOffsetMeters: 0.5,
     outletSide: "right",
   });
+  const terminalEndHeight =
+    terminalEndHeightMeters(terminalConfig) ?? STOVE_PRESET_HEIGHT_METERS;
 
   return [
     {
@@ -139,8 +143,8 @@ function fixtureEquipment(): WorkbenchEquipment[] {
       type: "meter_regulator",
     },
     {
-      bodyPoint: { x: 2, y: 0.35, z: STOVE_PRESET_HEIGHT_METERS },
-      connectionPoint: { x: 2, y: 0, z: STOVE_PRESET_HEIGHT_METERS },
+      bodyPoint: { x: 2, y: 0.35, z: terminalEndHeight },
+      connectionPoint: { x: 2, y: 0, z: terminalEndHeight },
       demandUnit: "kcal_h",
       demandValue: 8500,
       id: "stove",
@@ -159,7 +163,7 @@ function fixtureEquipment(): WorkbenchEquipment[] {
         referenceKind: "reference_wall",
         source: "dxf",
         status: "anchored",
-        wallPoint: { x: 2, y: 0, z: STOVE_PRESET_HEIGHT_METERS },
+        wallPoint: { x: 2, y: 0, z: terminalEndHeight },
       },
     },
   ];
@@ -216,17 +220,18 @@ function assertTerminalGeometry(
 
   assert(terminalSegment, "Falta segmento terminal.");
   assert(terminal, "No se resolvio el segmento terminal.");
-  assertEqual(terminalSegment.vertices?.length, 2);
+  assertEqual(terminalSegment.vertices?.length, 3);
   assertPoint(terminal.path[0], { x: 2.5, y: -1, z: 0 });
   assertPoint(terminal.path[1], { x: 2.5, y: -1, z: STOVE_PRESET_HEIGHT_METERS });
   assertPoint(terminal.path[2], { x: 2.5, y: 0, z: STOVE_PRESET_HEIGHT_METERS });
   assertPoint(terminal.path[3], { x: 2, y: 0, z: STOVE_PRESET_HEIGHT_METERS });
+  assertPoint(terminal.path[4], { x: 2, y: 0, z: STOVE_TERMINAL_END_HEIGHT_METERS });
   assertClose(
     routeSegmentPhysicalLengthMeters(
       terminal,
       SCALE_METERS_PER_SOURCE_UNIT,
     ),
-    2.6,
+    2.8,
   );
   assertEqual(terminalSegment.accessories?.length, 2);
   assertEqual(

@@ -845,6 +845,8 @@ function isOptionalEquipmentTerminalConfig(value: unknown) {
       value.outletSide === "left" ||
       value.outletSide === "right") &&
     isBoolean(value.requiresShutoffValve) &&
+    (value.verticalDropMeters === undefined ||
+      isFiniteNumber(value.verticalDropMeters)) &&
     (value.terminalProfile === "boiler_wall_rh" ||
       value.terminalProfile === "dryer_wall_valve" ||
       value.terminalProfile === "generic_terminal" ||

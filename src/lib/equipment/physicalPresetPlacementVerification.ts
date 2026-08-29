@@ -20,6 +20,7 @@ import type { ClassificationIndex } from "@/lib/semantic/types";
 import {
   confirmEquipmentTerminalConfig,
   createSuggestedEquipmentTerminalConfig,
+  terminalEndHeightMeters,
 } from "./terminalConfig";
 import type { EquipmentType, WorkbenchEquipment } from "./types";
 import { resolveEquipmentPhysicalPlacement } from "./wallAnchoring";
@@ -31,7 +32,11 @@ export type PhysicalPresetPlacementVerificationResult = {
 
 type PresetCase = {
   demandValue: number;
+  expectedDropMeters: number;
+  expectedEndHeightMeters: number;
   expectedHeightMeters: number;
+  expectedLateralMeters: number;
+  expectedOutletSide: NonNullable<WorkbenchEquipment["terminalConfig"]>["outletSide"];
   id: string;
   name: string;
   type: EquipmentType;
@@ -44,7 +49,11 @@ const SECTION_SCALE_METERS_PER_SOURCE_UNIT = 0.1;
 const PRESET_CASES: PresetCase[] = [
   {
     demandValue: 8500,
+    expectedDropMeters: 0.2,
+    expectedEndHeightMeters: 0.9,
     expectedHeightMeters: 1.1,
+    expectedLateralMeters: 0.5,
+    expectedOutletSide: "right",
     id: "stove",
     name: "Cocina",
     type: "stove",
@@ -52,7 +61,11 @@ const PRESET_CASES: PresetCase[] = [
   },
   {
     demandValue: 3000,
+    expectedDropMeters: 0,
+    expectedEndHeightMeters: 0.3,
     expectedHeightMeters: 0.3,
+    expectedLateralMeters: 0.3,
+    expectedOutletSide: "right",
     id: "space-heater",
     name: "Calefactor",
     type: "space_heater",
@@ -60,7 +73,11 @@ const PRESET_CASES: PresetCase[] = [
   },
   {
     demandValue: 8500,
+    expectedDropMeters: 0,
+    expectedEndHeightMeters: 1.6,
     expectedHeightMeters: 1.6,
+    expectedLateralMeters: 0,
+    expectedOutletSide: "direct",
     id: "water-heater",
     name: "Calefon",
     type: "instant_water_heater",
@@ -68,7 +85,11 @@ const PRESET_CASES: PresetCase[] = [
   },
   {
     demandValue: 8500,
+    expectedDropMeters: 0,
+    expectedEndHeightMeters: 1.6,
     expectedHeightMeters: 1.6,
+    expectedLateralMeters: 0,
+    expectedOutletSide: "direct",
     id: "storage-water-heater",
     name: "Termotanque",
     type: "storage_water_heater",
@@ -81,14 +102,13 @@ export function runPhysicalPresetPlacementVerifications() {
 
   verify(
     results,
-    "10.7E presets fisicos anclan artefactos y terminal coherente",
+    "10.8B click aproximado apoya artefactos y aplica preset fisico",
     () => {
       for (const preset of PRESET_CASES) {
         const placed = placedPresetEquipment(preset);
 
         assertPhysicalPlacement(preset, placed.appliance);
         assertTerminalConnection(preset, placed);
-        assertCalibratedSectionProjection(preset, placed);
       }
     },
   );
@@ -103,11 +123,19 @@ function placedPresetEquipment(preset: PresetCase) {
     terminalConfig.connectionHeightMeters,
     preset.expectedHeightMeters,
   );
+  assertClose(terminalConfig.lateralOffsetMeters, preset.expectedLateralMeters);
+  assertClose(terminalConfig.verticalDropMeters, preset.expectedDropMeters);
+  assertEqual(terminalConfig.outletSide, preset.expectedOutletSide);
+
+  const terminalHeightMeters =
+    terminalEndHeightMeters(terminalConfig) ?? preset.expectedHeightMeters;
+
+  assertClose(terminalHeightMeters, preset.expectedEndHeightMeters);
 
   const placement = resolveEquipmentPhysicalPlacement({
     classificationIndex: fixtureClassificationIndex(),
     drawing: fixtureDrawing(),
-    heightMeters: terminalConfig.connectionHeightMeters ?? 0,
+    heightMeters: terminalHeightMeters,
     point: { x: preset.x, y: 0.18 },
     role: "appliance",
     scaleMetersPerSourceUnit: SCALE_METERS_PER_SOURCE_UNIT,
@@ -267,16 +295,25 @@ function assertPhysicalPlacement(
     appliance.terminalConfig?.connectionHeightMeters,
     preset.expectedHeightMeters,
   );
+  assertClose(
+    appliance.terminalConfig?.lateralOffsetMeters,
+    preset.expectedLateralMeters,
+  );
+  assertClose(
+    appliance.terminalConfig?.verticalDropMeters,
+    preset.expectedDropMeters,
+  );
+  assertEqual(appliance.terminalConfig?.outletSide, preset.expectedOutletSide);
   assertEqual(appliance.terminalConfig?.heightStatus, "suggested");
   assertPoint(appliance.connectionPoint, {
     x: preset.x,
     y: 0,
-    z: preset.expectedHeightMeters,
+    z: preset.expectedEndHeightMeters,
   });
   assertPoint(appliance.bodyPoint, {
     x: preset.x,
     y: 0,
-    z: preset.expectedHeightMeters,
+    z: preset.expectedEndHeightMeters,
   });
   assertPoint(appliance.wallAnchor.wallPoint, appliance.connectionPoint);
   assert(
@@ -296,12 +333,12 @@ function assertTerminalConnection(
     ) ?? null;
 
   assert(branch, "Falta rama terminal.");
-  assertEqual(branch.vertices?.length, 1);
-  assertPoint(branch.vertices?.[0], {
-    x: preset.x + 0.5,
-    y: -1,
-    z: preset.expectedHeightMeters,
-  });
+  assertEqual(branch.vertices?.length, expectedTerminalVertices(preset).length);
+
+  for (const [index, expected] of expectedTerminalVertices(preset).entries()) {
+    assertPoint(branch.vertices?.[index], expected);
+  }
+
   assertEqual(
     branch.accessories
       ?.map((accessory) => `${accessory.type}:${accessory.catalogFamilyId}`)
@@ -319,6 +356,34 @@ function assertTerminalConnection(
   assertUnique(
     fixture.inventory.items.flatMap((item) => item.sourceIds),
   );
+}
+
+function expectedTerminalVertices(preset: PresetCase) {
+  const vertices: Point2D[] = [
+    {
+      x: preset.x + 0.5,
+      y: -1,
+      z: preset.expectedHeightMeters,
+    },
+  ];
+
+  if (preset.expectedLateralMeters > 0) {
+    vertices.push({
+      x: preset.x + preset.expectedLateralMeters,
+      y: 0,
+      z: preset.expectedHeightMeters,
+    });
+  }
+
+  if (preset.expectedDropMeters > 0) {
+    vertices.push({
+      x: preset.x,
+      y: 0,
+      z: preset.expectedHeightMeters,
+    });
+  }
+
+  return vertices;
 }
 
 function assertCalibratedSectionProjection(

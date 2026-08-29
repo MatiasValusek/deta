@@ -4,6 +4,7 @@ import { pointZMeters } from "@/lib/geometry/height";
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
 import {
   buildEquipmentIndex,
+  findTerminalStartNodeByEquipment,
   getRouteNodeDegree,
   resolveRouteNodePosition,
   resolveRouteSegments,
@@ -260,6 +261,7 @@ export function RouteOverlay({
         <RouteDraftPreview
           draft={draft}
           equipment={equipment}
+          network={network}
           sourceToScreen={sourceToScreen}
         />
       ) : null}
@@ -1023,10 +1025,12 @@ function RouteNodeMarker({
 function RouteDraftPreview({
   draft,
   equipment,
+  network,
   sourceToScreen,
 }: {
   draft: RouteDraft;
   equipment: WorkbenchEquipment[];
+  network: ManualRouteNetwork;
   sourceToScreen: (point: Point2D) => Point2D;
 }) {
   const points: Point2D[] = [];
@@ -1039,8 +1043,7 @@ function RouteDraftPreview({
 
   const target =
     draft.step === "review" && draft.targetEquipmentId
-      ? equipment.find((item) => item.id === draft.targetEquipmentId)
-          ?.connectionPoint ?? null
+      ? routeDraftTargetPoint(draft.targetEquipmentId, equipment, network)
       : null;
 
   if (target) {
@@ -1089,4 +1092,18 @@ function RouteDraftPreview({
       ))}
     </g>
   );
+}
+
+function routeDraftTargetPoint(
+  equipmentId: string,
+  equipment: WorkbenchEquipment[],
+  network: ManualRouteNetwork,
+) {
+  const target = equipment.find((item) => item.id === equipmentId) ?? null;
+  const terminalStartNode = findTerminalStartNodeByEquipment(network, equipmentId);
+  const terminalStartPoint = terminalStartNode
+    ? resolveRouteNodePosition(terminalStartNode, buildEquipmentIndex(equipment))
+    : null;
+
+  return terminalStartPoint ?? target?.connectionPoint ?? null;
 }

@@ -29,6 +29,20 @@ export function routeEquipmentNodeId(planBaseId: string, equipmentId: string) {
   return `route-node:${planBaseId}:equipment:${equipmentId}`;
 }
 
+export function routeEquipmentTerminalStartNodeId(
+  planBaseId: string,
+  equipmentId: string,
+) {
+  return `route-node:${planBaseId}:equipment-terminal-start:${equipmentId}`;
+}
+
+export function routeEquipmentTerminalSegmentId(
+  planBaseId: string,
+  equipmentId: string,
+) {
+  return `route-segment:${planBaseId}:equipment-terminal:${equipmentId}`;
+}
+
 export function buildEquipmentIndex(equipment: WorkbenchEquipment[]) {
   return new Map(equipment.map((item) => [item.id, item]));
 }
@@ -336,6 +350,61 @@ export function findRouteNodeByEquipment(
   equipmentId: string,
 ) {
   return network.nodes.find((node) => node.equipmentId === equipmentId) ?? null;
+}
+
+export function findTerminalStartNodeByEquipment(
+  network: ManualRouteNetwork,
+  equipmentId: string,
+) {
+  const applianceNode = findRouteNodeByEquipment(network, equipmentId);
+
+  if (!applianceNode || applianceNode.kind !== "appliance") {
+    return null;
+  }
+
+  const neighbors = getRouteNeighbors(network).get(applianceNode.id);
+
+  if (!neighbors || neighbors.size === 0) {
+    return null;
+  }
+
+  const terminalSegment =
+    network.segments.find(
+      (segment) =>
+        isEquipmentTerminalSegment(segment, equipmentId) &&
+        (segment.fromNodeId === applianceNode.id ||
+          segment.toNodeId === applianceNode.id),
+    ) ?? null;
+  const terminalNeighborId = terminalSegment
+    ? terminalSegment.fromNodeId === applianceNode.id
+      ? terminalSegment.toNodeId
+      : terminalSegment.fromNodeId
+    : null;
+  const terminalNeighbor = terminalNeighborId
+    ? network.nodes.find((node) => node.id === terminalNeighborId) ?? null
+    : null;
+
+  if (terminalNeighbor?.kind === "route") {
+    return terminalNeighbor;
+  }
+
+  const routeNeighbors = [...neighbors]
+    .map((nodeId) => network.nodes.find((node) => node.id === nodeId) ?? null)
+    .filter((node): node is RouteNode => node?.kind === "route")
+    .sort((first, second) => first.id.localeCompare(second.id));
+
+  return routeNeighbors[0] ?? null;
+}
+
+export function isEquipmentTerminalSegment(
+  segment: RouteSegment,
+  equipmentId?: string,
+) {
+  if (!segment.id.includes(":equipment-terminal:")) {
+    return false;
+  }
+
+  return equipmentId ? segment.id.endsWith(`:${equipmentId}`) : true;
 }
 
 export function getConnectedApplianceEquipmentIds(

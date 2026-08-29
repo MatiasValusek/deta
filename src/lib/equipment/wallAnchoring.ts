@@ -10,12 +10,19 @@ import type {
   EquipmentRole,
   EquipmentWallAnchor,
   EquipmentWallReferenceKind,
+  EquipmentWallPlacementAlternative,
 } from "./types";
 
 export type EquipmentPhysicalPlacement = {
   bodyPoint: Point2D;
   connectionPoint: Point2D;
   wallAnchor: EquipmentWallAnchor | null;
+};
+
+type EquipmentWallHit = {
+  distance: number;
+  point: Point2D;
+  segment: WallSegment;
 };
 
 type WallSegment = {
@@ -54,17 +61,12 @@ export function resolveEquipmentPhysicalPlacement(params: {
 
   const tolerance =
     params.snapToleranceSource ?? DEFAULT_WALL_SNAP_TOLERANCE_SOURCE;
-  const wall = findNearestEquipmentWall({
-    classificationIndex: params.classificationIndex ?? {},
-    constraints: params.constraints ?? [],
-    drawing: params.drawing ?? null,
-    pageNumber: params.pageNumber ?? null,
-    point,
-    source: params.source,
-    tolerance,
+  const [placement] = resolveEquipmentPhysicalPlacementAlternatives({
+    ...params,
+    snapToleranceSource: tolerance,
   });
 
-  if (!wall) {
+  if (!placement) {
     return {
       bodyPoint: point,
       connectionPoint: point,
@@ -72,28 +74,38 @@ export function resolveEquipmentPhysicalPlacement(params: {
     };
   }
 
-  const connectionPoint = withZ(wall.point, params.heightMeters);
-  const bodyPoint = connectionPoint;
-  const normal = wallNormal(wall.segment.from, wall.segment.to, point);
+  return placement;
+}
 
-  return {
-    bodyPoint,
-    connectionPoint,
-    wallAnchor: {
-      distanceSource: wall.distance,
-      normal,
-      orientationRadians: wallOrientation(
-        wall.segment.from,
-        wall.segment.to,
-      ),
-      pageNumber: wall.segment.pageNumber,
-      referenceId: wall.segment.id,
-      referenceKind: wall.segment.kind,
-      source: wall.segment.source,
-      status: "anchored",
-      wallPoint: connectionPoint,
-    },
-  };
+export function resolveEquipmentPhysicalPlacementAlternatives(params: {
+  classificationIndex?: ClassificationIndex;
+  constraints?: ManualConstraint[];
+  drawing?: NormalizedDrawing | null;
+  heightMeters: number;
+  pageNumber?: number | null;
+  point: Point2D;
+  role: EquipmentRole;
+  scaleMetersPerSourceUnit?: number | null;
+  snapToleranceSource?: number;
+  source: "dxf" | "pdf";
+}): EquipmentWallPlacementAlternative[] {
+  if (params.role !== "appliance") {
+    return [];
+  }
+
+  const point = withZ(params.point, params.heightMeters);
+  const tolerance =
+    params.snapToleranceSource ?? DEFAULT_WALL_SNAP_TOLERANCE_SOURCE;
+
+  return findNearestEquipmentWalls({
+    classificationIndex: params.classificationIndex ?? {},
+    constraints: params.constraints ?? [],
+    drawing: params.drawing ?? null,
+    pageNumber: params.pageNumber ?? null,
+    point,
+    source: params.source,
+    tolerance,
+  }).map((wall) => anchoredPlacementFromWall(wall, point, params.heightMeters));
 }
 
 export function withEquipmentWallAnchorZ(
@@ -117,7 +129,7 @@ export function createPendingEquipmentWallAnchor(params: {
   return pendingWallAnchor(params.source, params.pageNumber ?? null);
 }
 
-function findNearestEquipmentWall(params: {
+function findNearestEquipmentWalls(params: {
   classificationIndex: ClassificationIndex;
   constraints: ManualConstraint[];
   drawing: NormalizedDrawing | null;
@@ -125,7 +137,7 @@ function findNearestEquipmentWall(params: {
   point: Point2D;
   source: "dxf" | "pdf";
   tolerance: number;
-}) {
+}): EquipmentWallHit[] {
   return wallSegments({
     classificationIndex: params.classificationIndex,
     constraints: params.constraints,
@@ -151,7 +163,36 @@ function findNearestEquipmentWall(params: {
       (first, second) =>
         first.distance - second.distance ||
         first.segment.id.localeCompare(second.segment.id),
-    )[0] ?? null;
+    );
+}
+
+function anchoredPlacementFromWall(
+  wall: EquipmentWallHit,
+  sourcePoint: Point2D,
+  heightMeters: number,
+): EquipmentWallPlacementAlternative {
+  const connectionPoint = withZ(wall.point, heightMeters);
+  const bodyPoint = connectionPoint;
+  const normal = wallNormal(wall.segment.from, wall.segment.to, sourcePoint);
+
+  return {
+    bodyPoint,
+    connectionPoint,
+    wallAnchor: {
+      distanceSource: wall.distance,
+      normal,
+      orientationRadians: wallOrientation(
+        wall.segment.from,
+        wall.segment.to,
+      ),
+      pageNumber: wall.segment.pageNumber,
+      referenceId: wall.segment.id,
+      referenceKind: wall.segment.kind,
+      source: wall.segment.source,
+      status: "anchored",
+      wallPoint: connectionPoint,
+    },
+  };
 }
 
 function wallSegments(params: {

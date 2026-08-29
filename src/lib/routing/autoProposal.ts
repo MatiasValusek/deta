@@ -12,6 +12,7 @@ import {
   applianceNodesAreTerminal,
   detectRouteCycle,
   distanceBetween,
+  findTerminalStartNodeByEquipment,
   findRouteNodeByEquipment,
   getConnectedApplianceEquipmentIds,
   getDerivationNodeIds,
@@ -316,7 +317,7 @@ function findPathFromTreeToEquipment(
   equipment: WorkbenchEquipment,
   preferredBranchEquipmentIds: string[] = [],
 ): { path: Point2D[]; routeLengthSource: number; turnCount: number } | null {
-  const target = equipment.connectionPoint;
+  const target = routeTargetPointForEquipment(network, input.equipment, equipment);
 
   if (pointViolatesRestrictions(target, input.restrictions, 0)) {
     return null;
@@ -523,8 +524,13 @@ function appendAutomaticPathToNetwork(
   const path = simplifyOrthogonalPath(rawPath);
   const first = path[0];
   const last = path[path.length - 1];
+  const targetPoint = routeTargetPointForEquipment(
+    network,
+    input.equipment,
+    equipment,
+  );
 
-  if (!first || !last || !pointAlmostEqual(last, equipment.connectionPoint)) {
+  if (!first || !last || !pointAlmostEqual(last, targetPoint)) {
     return {
       ok: false,
       message: "La propuesta no conserva el punto exacto del artefacto.",
@@ -547,9 +553,19 @@ function appendAutomaticPathToNetwork(
   nodes = attachment.nodes;
   segments = attachment.segments;
 
-  const targetNodeId = routeEquipmentNodeId(input.planBaseId, equipment.id);
+  const targetNodeId = routeTargetNodeIdForEquipment(
+    input,
+    {
+      nodes,
+      segments,
+    },
+    equipment,
+  );
 
-  if (!nodes.some((node) => node.id === targetNodeId)) {
+  if (
+    targetNodeId === routeEquipmentNodeId(input.planBaseId, equipment.id) &&
+    !nodes.some((node) => node.id === targetNodeId)
+  ) {
     nodes.push({
       equipmentId: equipment.id,
       id: targetNodeId,
@@ -803,11 +819,26 @@ function collectTreeKeys(
 ) {
   const keys = new Set<string>();
   const equipmentById = new Map(equipment.map((item) => [item.id, item]));
-  const resolvedSegments = resolveRouteSegments(network, equipment);
+  const supply = equipment.find((item) => item.role === "supply") ?? null;
+  const supplyNode = supply ? findRouteNodeByEquipment(network, supply.id) : null;
+  const resolvedSegments = resolveRouteSegments(network, equipment).filter(
+    (segment) =>
+      !supplyNode ||
+      (hasRoutePath(network, supplyNode.id, segment.fromNodeId) &&
+        hasRoutePath(network, supplyNode.id, segment.toNodeId)),
+  );
   const appliancePointKeys = collectApplianceNodePointKeys(network, equipmentById);
 
   for (const node of network.nodes) {
     if (node.kind === "appliance") {
+      continue;
+    }
+
+    if (
+      supplyNode &&
+      node.id !== supplyNode.id &&
+      !hasRoutePath(network, supplyNode.id, node.id)
+    ) {
       continue;
     }
 
@@ -835,6 +866,38 @@ function collectTreeKeys(
   }
 
   return keys;
+}
+
+function routeTargetPointForEquipment(
+  network: ManualRouteNetwork,
+  equipment: WorkbenchEquipment[],
+  appliance: WorkbenchEquipment,
+) {
+  const terminalStartNode = findTerminalStartNodeByEquipment(
+    network,
+    appliance.id,
+  );
+  const terminalStartPoint = terminalStartNode
+    ? resolveRouteNodePosition(
+        terminalStartNode,
+        new Map(equipment.map((item) => [item.id, item])),
+      )
+    : null;
+
+  return terminalStartPoint ?? appliance.connectionPoint;
+}
+
+function routeTargetNodeIdForEquipment(
+  input: GenerateAutomaticRouteProposalInput,
+  network: ManualRouteNetwork,
+  appliance: WorkbenchEquipment,
+) {
+  const terminalStartNode = findTerminalStartNodeByEquipment(
+    network,
+    appliance.id,
+  );
+
+  return terminalStartNode?.id ?? routeEquipmentNodeId(input.planBaseId, appliance.id);
 }
 
 function collectPreferredBranchTreeKeys(
@@ -1076,7 +1139,34 @@ function routeNetworkConnectedToSupply(
   return network.nodes.every(
     (node) =>
       getRouteNodeDegree(network, node.id) === 0 ||
-      hasRoutePath(network, supplyNode.id, node.id),
+      hasRoutePath(network, supplyNode.id, node.id) ||
+      routeNodeIsStandaloneTerminal(network, node),
+  );
+}
+
+function routeNodeIsStandaloneTerminal(
+  network: ManualRouteNetwork,
+  node: RouteNode,
+) {
+  const incidentSegments = network.segments.filter(
+    (segment) =>
+      segment.fromNodeId === node.id || segment.toNodeId === node.id,
+  );
+
+  if (incidentSegments.length !== 1) {
+    return false;
+  }
+
+  const incident = incidentSegments[0];
+  const neighborId =
+    incident.fromNodeId === node.id ? incident.toNodeId : incident.fromNodeId;
+  const neighbor = network.nodes.find((candidate) => candidate.id === neighborId);
+
+  return (
+    Boolean(neighbor) &&
+    getRouteNodeDegree(network, neighborId) === 1 &&
+    ((node.kind === "appliance" && neighbor?.kind === "route") ||
+      (node.kind === "route" && neighbor?.kind === "appliance"))
   );
 }
 

@@ -37,9 +37,16 @@ const TERMINAL_PROFILES_BY_TYPE: Record<EquipmentType, TerminalProfileDefinition
   meter_regulator: terminalProfile("generic_terminal", 0, false),
   other: terminalProfile("generic_terminal", 0, true),
   oven: terminalProfile("oven_wall_valve", 0.6, true),
-  space_heater: terminalProfile("space_heater_wall_valve", 0.3, true),
+  space_heater: terminalProfile("space_heater_wall_valve", 0.3, true, {
+    lateralOffsetMeters: 0.3,
+    outletSide: "right",
+  }),
   storage_water_heater: terminalProfile("storage_heater_wall_rh", 1.6, true),
-  stove: terminalProfile("stove_wall_valve", 1.1, true),
+  stove: terminalProfile("stove_wall_valve", 1.1, true, {
+    lateralOffsetMeters: 0.5,
+    outletSide: "right",
+    verticalDropMeters: 0.2,
+  }),
 };
 
 export function createSuggestedEquipmentTerminalConfig(
@@ -54,6 +61,7 @@ export function createSuggestedEquipmentTerminalConfig(
     outletSide: profile.outletSide,
     requiresShutoffValve: profile.requiresShutoffValve,
     terminalProfile: profile.terminalProfile,
+    verticalDropMeters: profile.verticalDropMeters,
   };
 }
 
@@ -77,6 +85,25 @@ export function confirmEquipmentTerminalConfig(
     heightStatus:
       config.connectionHeightMeters === null ? "pending" : "confirmed",
   };
+}
+
+export function terminalEndHeightMeters(
+  config: EquipmentTerminalConfig,
+): number | null {
+  if (config.connectionHeightMeters === null) {
+    return null;
+  }
+
+  return Math.max(
+    0,
+    config.connectionHeightMeters - terminalVerticalDropMeters(config),
+  );
+}
+
+export function terminalVerticalDropMeters(config: EquipmentTerminalConfig) {
+  return Number.isFinite(config.verticalDropMeters)
+    ? Math.max(0, config.verticalDropMeters)
+    : 0;
 }
 
 export function parseTerminalLateralOffsetInput(
@@ -128,14 +155,23 @@ function terminalProfile(
   terminalProfile: EquipmentTerminalProfile,
   connectionHeightMeters: number,
   requiresShutoffValve: boolean,
+  options: {
+    lateralOffsetMeters?: number;
+    outletSide?: EquipmentTerminalOutletSide;
+    verticalDropMeters?: number;
+  } = {},
 ): TerminalProfileDefinition {
+  const lateralOffsetMeters = options.lateralOffsetMeters ?? 0;
+
   return {
     connectionHeightMeters,
     heightStatus: "suggested",
-    lateralOffsetMeters: 0,
-    outletSide: "direct",
+    lateralOffsetMeters,
+    outletSide:
+      lateralOffsetMeters > 0 ? options.outletSide ?? "right" : "direct",
     profileLabel: TERMINAL_PROFILE_LABELS[terminalProfile],
     requiresShutoffValve,
     terminalProfile,
+    verticalDropMeters: options.verticalDropMeters ?? 0,
   };
 }

@@ -56,6 +56,7 @@ export type EquipmentTerminalConfig = {
   outletSide: EquipmentTerminalOutletSide;
   requiresShutoffValve: boolean;
   terminalProfile: EquipmentTerminalProfile;
+  verticalDropMeters: number;
 };
 
 export type WorkbenchEquipment = {
@@ -75,6 +76,12 @@ export type WorkbenchEquipment = {
   source: "manual";
 };
 
+export type EquipmentWallPlacementAlternative = {
+  bodyPoint: Point2D;
+  connectionPoint: Point2D;
+  wallAnchor: EquipmentWallAnchor;
+};
+
 export type EquipmentDraftStep = "details" | "placing" | "review";
 
 export type EquipmentDraft = {
@@ -91,6 +98,8 @@ export type EquipmentDraft = {
   terminalConfig: EquipmentTerminalConfig | null;
   terminalLateralOffsetInput: string;
   wallAnchor: EquipmentWallAnchor | null;
+  selectedWallAlternativeIndex?: number;
+  wallAlternatives?: EquipmentWallPlacementAlternative[];
   demandValueInput: string;
   demandUnit: DemandUnit;
   notes: string;

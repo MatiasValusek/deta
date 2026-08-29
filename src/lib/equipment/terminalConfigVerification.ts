@@ -4,6 +4,7 @@ import {
   createEquipmentTerminalConfigFromHeight,
   createSuggestedEquipmentTerminalConfig,
   parseTerminalLateralOffsetInput,
+  terminalEndHeightMeters,
 } from "./terminalConfig";
 
 export type TerminalConfigVerificationResult = {
@@ -27,6 +28,7 @@ export function runTerminalConfigVerifications() {
       assertEqual(suggested.heightStatus, "suggested");
       assertEqual(suggested.requiresShutoffValve, true);
       assertEqual(suggested.terminalProfile, "stove_wall_valve");
+      assertClose(suggested.verticalDropMeters, 0.2);
 
       const edited = {
         ...suggested,
@@ -39,9 +41,10 @@ export function runTerminalConfigVerifications() {
       assertEqual(equipment.terminalConfig.heightStatus, "suggested");
       assertEqual(equipment.terminalConfig.outletSide, "right");
       assertClose(equipment.terminalConfig.lateralOffsetMeters, 0.5);
+      assertClose(equipment.terminalConfig.verticalDropMeters, 0.2);
       assertClose(
         equipment.connectionPoint.z,
-        equipment.terminalConfig.connectionHeightMeters ?? -1,
+        terminalEndHeightMeters(equipment.terminalConfig) ?? -1,
       );
 
       const confirmed = confirmEquipmentTerminalConfig(equipment.terminalConfig);
@@ -49,6 +52,7 @@ export function runTerminalConfigVerifications() {
       assertEqual(confirmed.heightStatus, "confirmed");
       assertEqual(confirmed.outletSide, "right");
       assertClose(confirmed.lateralOffsetMeters, 0.5);
+      assertClose(confirmed.verticalDropMeters, 0.2);
       assertClose(confirmed.connectionHeightMeters, suggested.connectionHeightMeters ?? 0);
     },
   );
@@ -68,7 +72,9 @@ export function runTerminalConfigVerifications() {
 function stoveEquipment(
   terminalConfig: WorkbenchEquipment["terminalConfig"],
 ): WorkbenchEquipment {
-  const heightMeters = terminalConfig?.connectionHeightMeters ?? 0;
+  const heightMeters = terminalConfig
+    ? terminalEndHeightMeters(terminalConfig) ?? 0
+    : 0;
 
   return {
     id: "equipment:stove",
