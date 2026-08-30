@@ -16,7 +16,10 @@ import type {
   RouteIntentDraft,
   RouteIntentEndpoint,
 } from "@/lib/routing/types";
-import { routeProposalCanBeAccepted } from "@/lib/routing/proposalAcceptance";
+import {
+  routeProposalAcceptanceBlockReason,
+  routeProposalCanBeAccepted,
+} from "@/lib/routing/proposalAcceptance";
 
 type RouteApplianceStatus = {
   equipment: WorkbenchEquipment;
@@ -625,6 +628,11 @@ function RouteMainFlow({
       totalAppliances,
       proposalOutdated,
     );
+    const acceptBlockReason = routeProposalAcceptanceBlockReason(
+      proposal,
+      totalAppliances,
+      proposalOutdated,
+    );
     const unreachedNames = proposal.unreachedEquipmentIds
       .map(
         (equipmentId) =>
@@ -685,6 +693,11 @@ function RouteMainFlow({
             Regenerar
           </button>
         </div>
+        {!canAcceptProposal && acceptBlockReason ? (
+          <div className="mt-2 rounded border border-[#f1d28a] bg-[#fffaf0] px-2 py-1 text-[var(--warning)]">
+            {acceptBlockReason}
+          </div>
+        ) : null}
       </section>
     );
   }
@@ -767,6 +780,11 @@ function ProposalSummary({
     applianceStatuses.length,
     isOutdated,
   );
+  const acceptBlockReason = routeProposalAcceptanceBlockReason(
+    proposal,
+    applianceStatuses.length,
+    isOutdated,
+  );
 
   return (
     <section className="mt-3 border-t border-[var(--line)] pt-2">
@@ -834,6 +852,11 @@ function ProposalSummary({
           Descartar
         </button>
       </div>
+      {!canAcceptProposal && acceptBlockReason ? (
+        <div className="mt-2 rounded border border-[#f1d28a] bg-[#fffaf0] px-2 py-1 text-[var(--warning)]">
+          {acceptBlockReason}
+        </div>
+      ) : null}
     </section>
   );
 }

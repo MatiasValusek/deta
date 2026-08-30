@@ -1277,7 +1277,7 @@ function segmentViolatesRestrictions(
   clearance: number,
 ) {
   if (distanceBetween(from, to) <= COORDINATE_EPSILON) {
-    return true;
+    return pointViolatesRestrictions(from, restrictions, clearance);
   }
 
   return restrictions.some((restriction) => {

@@ -1,19 +1,25 @@
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
 import type { Point2D } from "@/lib/geometry/types";
 import { generateAutomaticRouteProposal } from "@/lib/routing/autoProposal";
-import { routeProposalCanBeAccepted } from "@/lib/routing/proposalAcceptance";
+import {
+  routeProposalAcceptanceBlockReason,
+  routeProposalCanBeAccepted,
+} from "@/lib/routing/proposalAcceptance";
 import {
   applianceNodesAreTerminal,
   findRouteNodeByEquipment,
   findTerminalStartNodeByEquipment,
   getConnectedApplianceEquipmentIds,
   hasRoutePath,
+  isEquipmentTerminalSegment,
   resolveRouteNodePosition,
   routeEquipmentNodeId,
   routeEquipmentTerminalSegmentId,
   routeEquipmentTerminalStartNodeId,
 } from "@/lib/routing/network";
+import { applyConfirmedEquipmentTerminalConnection } from "@/lib/routing/terminalConnection";
 import type { ManualRouteNetwork } from "@/lib/routing/types";
+import { createRouteReviewState } from "@/lib/workbench/reviewStage";
 
 export type RouteProposalFlowVerificationResult = {
   name: string;
@@ -62,6 +68,53 @@ export function runRouteProposalFlowVerifications() {
     },
   );
 
+  verify(
+    results,
+    "10.8 propuesta 4/4 con terminales fisicos habilita aceptar y Revisar",
+    () => {
+      const fixture = routeProposalPhysicalTerminalFixture();
+      const reviewState = createRouteReviewState({
+        equipment: fixture.equipment,
+        hasActiveProposal: false,
+        hasRouteCycle: false,
+        network: fixture.acceptedNetwork,
+        routeRestrictionCount: 0,
+      });
+
+      assertEqual(
+        getConnectedApplianceEquipmentIds(
+          fixture.baseNetwork,
+          fixture.equipment,
+        ).size,
+        0,
+      );
+      assertEqual(
+        fixture.baseNetwork.segments.every((segment) =>
+          isEquipmentTerminalSegment(segment),
+        ),
+        true,
+      );
+      assertEqual(fixture.proposal.reachedEquipmentIds.length, 4);
+      assertEqual(fixture.proposal.unreachedEquipmentIds.length, 0);
+      assertEqual(fixture.proposal.validation.restrictionCount, 0);
+      assertEqual(fixture.proposal.validation.canAccept, true);
+      assertEqual(routeProposalCanBeAccepted(fixture.proposal, 4), true);
+      assertEqual(routeProposalAcceptanceBlockReason(fixture.proposal, 4), null);
+      assertEqual(
+        getConnectedApplianceEquipmentIds(
+          fixture.acceptedNetwork,
+          fixture.equipment,
+        ).size,
+        4,
+      );
+      assertEqual(applianceNodesAreTerminal(fixture.acceptedNetwork), true);
+      assertEqual(reviewState.canOpenReview, true);
+      assertEqual(reviewState.connectedApplianceCount, 4);
+      assertEqual(reviewState.totalApplianceCount, 4);
+      assertProposalTargetsTerminalStarts(fixture);
+    },
+  );
+
   return results;
 }
 
@@ -80,6 +133,38 @@ function routeProposalFlowFixture() {
     },
     equipment,
     fingerprint: "10.8C-route-flow",
+    marginMeters: 0,
+    minSegmentLengthSource: EPSILON,
+    planBaseId: PLAN_BASE_ID,
+    restrictions: [],
+    scaleMetersPerSourceUnit: SCALE_METERS_PER_SOURCE_UNIT,
+  });
+  const acceptedNetwork: ManualRouteNetwork = {
+    nodes: proposal.nodes,
+    segments: proposal.segments,
+  };
+
+  return {
+    acceptedNetwork,
+    baseNetwork,
+    equipment,
+    proposal,
+  };
+}
+
+function routeProposalPhysicalTerminalFixture() {
+  const equipment = fixtureEquipmentWithFourAppliances();
+  const baseNetwork = physicalTerminalNetwork(equipment);
+  const proposal = generateAutomaticRouteProposal({
+    baseNetwork,
+    bounds: {
+      maxX: 7,
+      maxY: 5,
+      minX: -1,
+      minY: -1,
+    },
+    equipment,
+    fingerprint: "10.8-route-flow-physical-4",
     marginMeters: 0,
     minSegmentLengthSource: EPSILON,
     planBaseId: PLAN_BASE_ID,
@@ -126,6 +211,13 @@ function fixtureEquipment(): WorkbenchEquipment[] {
     appliance("stove-1", "Cocina", 6, 1),
     appliance("heater-1", "Calefactor", 6, 3),
     appliance("boiler-1", "Caldera", 3, 4),
+  ];
+}
+
+function fixtureEquipmentWithFourAppliances(): WorkbenchEquipment[] {
+  return [
+    ...fixtureEquipment(),
+    appliance("oven-1", "Horno", 2, 2),
   ];
 }
 
@@ -212,6 +304,24 @@ function terminalOnlyNetwork(equipment: WorkbenchEquipment[]): ManualRouteNetwor
   return { nodes, segments };
 }
 
+function physicalTerminalNetwork(equipment: WorkbenchEquipment[]): ManualRouteNetwork {
+  let network = terminalOnlyNetwork(equipment);
+
+  for (const item of equipment.filter((candidate) => candidate.role === "appliance")) {
+    const result = applyConfirmedEquipmentTerminalConnection({
+      equipment,
+      equipmentId: item.id,
+      network,
+      scaleMetersPerSourceUnit: SCALE_METERS_PER_SOURCE_UNIT,
+    });
+
+    assert(result.ok, result.ok ? "" : result.message);
+    network = result.network;
+  }
+
+  return network;
+}
+
 function terminalStartPoint(equipment: WorkbenchEquipment): Point2D {
   const wallPoint = equipment.wallAnchor?.wallPoint ?? equipment.connectionPoint;
   const orientation = equipment.wallAnchor?.orientationRadians ?? 0;
@@ -240,7 +350,10 @@ function assertProposalTargetsTerminalStarts(
 
   assert(supplyNode, "Falta nodo de alimentacion.");
 
-  for (const equipmentId of ["stove-1", "heater-1", "boiler-1"]) {
+  for (const appliance of fixture.equipment.filter(
+    (item) => item.role === "appliance",
+  )) {
+    const equipmentId = appliance.id;
     const terminalStart = findTerminalStartNodeByEquipment(
       fixture.acceptedNetwork,
       equipmentId,
@@ -263,7 +376,7 @@ function assertProposalTargetsTerminalStarts(
     );
     assertPoint(
       terminalPoint,
-      terminalStartPoint(applianceNodeEquipment(fixture, equipmentId)),
+      terminalStartPoint(appliance),
     );
     assertEqual(
       fixture.acceptedNetwork.segments.some(
@@ -275,15 +388,6 @@ function assertProposalTargetsTerminalStarts(
       false,
     );
   }
-}
-
-function applianceNodeEquipment(
-  fixture: RouteProposalFlowFixture,
-  equipmentId: string,
-) {
-  const equipment = fixture.equipment.find((item) => item.id === equipmentId);
-  assert(equipment, `Falta equipo ${equipmentId}.`);
-  return equipment;
 }
 
 function equipmentIndex(equipment: WorkbenchEquipment[]) {
