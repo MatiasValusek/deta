@@ -2656,6 +2656,17 @@ export function DxfWorkbench() {
     handleActivateBase(planBase.id);
   }
 
+  function handleGoToEquipmentFromCalculation() {
+    setActiveMainStage("equipment");
+    setActiveRightPanelSection("equipment");
+
+    if (!planBase) {
+      return;
+    }
+
+    handleActivateBase(planBase.id);
+  }
+
   function handleShowEquipmentChange(show: boolean) {
     if (!planBase) {
       return;
@@ -6042,6 +6053,7 @@ export function DxfWorkbench() {
           equipment={planEquipment}
           hasPendingProposal={Boolean(routeProposal)}
           isPlanActive={activeBase?.type === "plan"}
+          mode={activeWorkflowStage === "deliver" ? "deliver" : "calculate"}
           pipeSystem={SIGAS_PIPE_SYSTEM}
           planReady={Boolean(planBase)}
           result={technicalCalculationResult}
@@ -6051,6 +6063,7 @@ export function DxfWorkbench() {
           onAdoptSegmentDiameter={handleAdoptSegmentDiameter}
           onConfirmAccessoryProposal={handleConfirmAccessoryProposal}
           onConfirmDiameterTransition={handleConfirmDiameterTransition}
+          onGoToEquipment={handleGoToEquipmentFromCalculation}
           onGoToPlan={handleGoToPlanForRoute}
           onRejectAccessoryProposal={handleRejectAccessoryProposal}
           onRejectDiameterTransition={handleRejectDiameterTransition}

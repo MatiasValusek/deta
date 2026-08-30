@@ -114,6 +114,16 @@ type CalculationPanelProps = {
   onRejectDiameterTransition: (transitionId: string) => void;
 };
 
+type CalculationPendingSummary = {
+  accessoryProposalCount: number;
+  adoptedDiameterIssueCount: number;
+  blockingCount: number;
+  diameterTransitionCount: number;
+  materialPendingCount: number;
+  technicalIssueCount: number;
+  total: number;
+};
+
 export function CalculationPanel({
   adoptedDiameterDecisions,
   accessoryProposals,
@@ -265,7 +275,7 @@ export function CalculationPanel({
   );
   const isDeliverMode = mode === "deliver";
   const isCalculationComplete =
-    result?.status === "valid" && pendingSummary.total === 0;
+    result?.status === "valid" && pendingSummary.blockingCount === 0;
   const canExportDocuments =
     isDeliverMode &&
     isCalculationComplete &&
@@ -337,8 +347,8 @@ export function CalculationPanel({
           <p className="text-xs text-[var(--muted)]">
             {result
               ? isCalculationComplete
-                ? "Cálculo completo"
-                : `Requiere revisión · ${pendingSummary.total} pendientes`
+                ? "Calculo completo"
+                : `Requiere revision - ${pendingSummary.blockingCount} pendientes`
               : "Sin instalación calculable"}
           </p>
         </div>
@@ -402,14 +412,23 @@ export function CalculationPanel({
       {result ? (
         <>
           <CalculationSummary
-            pendingCount={pendingSummary.total}
+            adoptedDiameterValidation={adoptedDiameterValidation}
+            pendingSummary={pendingSummary}
             result={result}
           />
+          {isDeliverMode ? (
+            <DeliverReadinessGate
+              pendingSummary={pendingSummary}
+              result={result}
+            />
+          ) : null}
           <CalculationIssues
             accessoryProposalCount={pendingSummary.accessoryProposalCount}
             adoptedDiameterValidation={adoptedDiameterValidation}
             diameterTransitionCount={pendingSummary.diameterTransitionCount}
             equipment={equipment}
+            materialTakeoff={materialTakeoff}
+            pendingSummary={pendingSummary}
             result={result}
             onGoToEquipment={onGoToEquipment}
             onGoToPlan={onGoToPlan}
@@ -429,20 +448,35 @@ export function CalculationPanel({
             onReject={onRejectDiameterTransition}
           />
           {isDeliverMode ? (
-            <MaterialTakeoffSection takeoff={materialTakeoff} />
+            <>
+              <MaterialTakeoffSection
+                result={result}
+                takeoff={materialTakeoff}
+              />
+              <CalculationSheetSection
+                adoptedDiameterValidationBySegmentId={
+                  adoptedDiameterValidationBySegmentId
+                }
+                sheet={calculationSheet}
+              />
+            </>
           ) : (
-            <MaterialTakeoffCompactSummary takeoff={materialTakeoff} />
+            <>
+              <MaterialTakeoffCompactSummary
+                takeoff={materialTakeoff}
+              />
+              <SegmentList
+                adoptedDiameterValidationBySegmentId={
+                  adoptedDiameterValidationBySegmentId
+                }
+                equipment={equipment}
+                result={result}
+                selectedSegmentId={selectedSegment?.segmentId ?? null}
+                onAdoptSegmentDiameter={onAdoptSegmentDiameter}
+                onSelectSegment={setSelectedSegmentId}
+              />
+            </>
           )}
-          <SegmentList
-            adoptedDiameterValidationBySegmentId={
-              adoptedDiameterValidationBySegmentId
-            }
-            equipment={equipment}
-            result={result}
-            selectedSegmentId={selectedSegment?.segmentId ?? null}
-            onAdoptSegmentDiameter={onAdoptSegmentDiameter}
-            onSelectSegment={setSelectedSegmentId}
-          />
         </>
       ) : null}
     </section>
@@ -1212,78 +1246,214 @@ function proposalReviewReason(proposal: AccessoryProposal) {
   return proposal.reason;
 }
 
+function isActionableAccessoryProposal(proposal: AccessoryProposal) {
+  return (
+    proposal.state !== "confirmed" &&
+    proposal.state !== "rejected" &&
+    proposal.kind !== "straight" &&
+    proposal.kind !== "terminal"
+  );
+}
+
+function isActionableDiameterTransitionProposal(
+  proposal: DiameterTransitionProposal,
+) {
+  return (
+    proposal.state !== "confirmed" &&
+    proposal.state !== "rejected" &&
+    proposal.state !== "not_required"
+  );
+}
+
+function formatAccessoryProposalTitle(
+  proposal: AccessoryProposal,
+  result: TechnicalCalculationResult,
+) {
+  return `${accessoryProposalKindLabel(proposal.kind)} en ${formatNodeReference(
+    proposal.nodeId,
+    result,
+  )}`;
+}
+
+function formatAccessoryProposalDiameters(
+  review: AccessoryProposalTechnicalReview | null,
+) {
+  if (!review || review.incidentSegments.length === 0) {
+    return "Diametros pendientes";
+  }
+
+  const diameters = [
+    ...new Set(
+      review.incidentSegments.map((segment) =>
+        formatCompactDiameterReference(segment.diameter),
+      ),
+    ),
+  ].filter((label) => label !== "Diam. pendiente");
+
+  return diameters.length > 0 ? diameters.join(" / ") : "Diametros pendientes";
+}
+
+function formatAccessoryProposalProblem(
+  proposal: AccessoryProposal,
+  review: AccessoryProposalTechnicalReview | null,
+) {
+  return (
+    review?.reason ??
+    proposalReviewReason(proposal) ??
+    "Elegir una familia compatible o rechazar la propuesta."
+  );
+}
+
+function formatDiameterTransitionContext(
+  proposal: DiameterTransitionProposal,
+  result: TechnicalCalculationResult,
+) {
+  return `en ${formatNodeReference(proposal.nodeId, result)}`;
+}
+
+function formatDiameterTransitionProblem(
+  proposal: DiameterTransitionProposal,
+  review: DiameterTransitionTechnicalReview | null,
+) {
+  return (
+    review?.reason ??
+    proposal.reason ??
+    "Elegir una familia compatible o rechazar la transicion."
+  );
+}
+
+function formatNodeReference(
+  nodeId: string,
+  result: TechnicalCalculationResult,
+) {
+  return result.nodeLabels[nodeId] ?? "nodo del trazado";
+}
+
 function CalculationSummary({
-  pendingCount,
+  adoptedDiameterValidation,
+  pendingSummary,
   result,
 }: {
-  pendingCount: number;
+  adoptedDiameterValidation: TechnicalAdoptedDiameterValidation;
+  pendingSummary: CalculationPendingSummary;
   result: TechnicalCalculationResult;
 }) {
+  const transitionAwareSizing = result.transitionAwareNetworkSizing;
+  const globalResolvedSegmentCount =
+    transitionAwareSizing?.status === "resolved"
+      ? transitionAwareSizing.segments.filter(
+          (segment) => segment.status === "resolved",
+        ).length
+      : result.totals.dimensionedSegmentCount;
   const totalFlow = formatTechnicalFlow(
     result.totals.accumulatedFlow,
     result.totals.accumulatedFlowUnit,
   );
-  const physicalLength = formatCalculationMeters(result.totals.physicalLengthMeters);
-  const equivalentLength = formatCalculationMeters(
-    result.totals.accessoryEquivalentLengthMeters,
-    "Pendiente",
-  );
   const calculationLength = formatTotalCalculationLength(result);
   const status =
-    result.status === "valid" && pendingCount === 0
-      ? "Cálculo completo"
-      : `Requiere revisión · ${pendingCount} pendientes`;
+    result.status === "valid" && pendingSummary.blockingCount === 0
+      ? "Calculo completo"
+      : `Requiere revision - ${pendingSummary.blockingCount} pendientes`;
+  const adoptionLabel =
+    adoptedDiameterValidation.segments.length > 0
+      ? adoptedDiameterValidationStatusLabel(adoptedDiameterValidation.status)
+      : "Sin tramos";
 
   return (
-    <dl className="mt-3 grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 gap-y-1 text-xs">
-      <dt>Tramos</dt>
-      <dd className="text-right font-mono">{result.totals.segmentCount}</dd>
-      <dt>Dimensionados globales</dt>
+    <section className="mt-3 rounded border border-[var(--line)] px-3 py-2 text-xs">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="font-semibold">{status}</div>
+          <div className="mt-0.5 text-[10px] text-[var(--muted)]">
+            {formatPipeSystemLabel(result)}
+          </div>
+        </div>
+        <div className="text-right text-[10px] text-[var(--muted)]">
+          {formatTransitionAwareSizingStatus(result)}
+        </div>
+      </div>
+      <dl className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <dt>Tramos dimensionados</dt>
       <dd className="text-right font-mono">
-        {globalResolvedSegmentCount ?? result.totals.dimensionedSegmentCount}/
-        {result.totals.segmentCount}
+        {globalResolvedSegmentCount}/{result.totals.segmentCount}
       </dd>
       <dt>Artefactos</dt>
       <dd className="text-right font-mono">{result.totals.applianceCount}</dd>
       <dt>Caudal normalizado total</dt>
       <dd className="text-right">{totalFlow}</dd>
-      <dt>Sistema canerias</dt>
-      <dd className="text-right">{formatPipeSystemLabel(result)}</dd>
-      <dt>Longitud fisica caños</dt>
-      <dd className="text-right">{physicalLength}</dd>
-      <dt>Equiv. accesorios tramo</dt>
-      <dd className="text-right">{equivalentLength}</dd>
       <dt>Long. fisica + equiv. locales</dt>
       <dd className="text-right">{calculationLength}</dd>
-      <dt>Dimensionado completo</dt>
-      <dd className="text-right">
-        {formatTransitionAwareSizingStatus(result)}
-      </dd>
-      {transitionAwareSizing ? (
-        <>
-          <dt>Estados 09C2B</dt>
-          <dd className="text-right font-mono">
-            {transitionAwareSizing.evaluatedStateCount}/
-            {formatStateCount(transitionAwareSizing.theoreticalStateCount)}
-          </dd>
-        </>
-      ) : null}
-      {adoptedDiameterValidation.segments.length > 0 ? (
-        <>
-          <dt>Adopción diámetros</dt>
-          <dd className="text-right">
-            {adoptedDiameterValidationStatusLabel(
-              adoptedDiameterValidation.status,
-            )}
-          </dd>
-        </>
-      ) : null}
     </dl>
+      <div className="mt-2 flex flex-wrap gap-1 text-[10px]">
+        <span className="rounded border border-[var(--line)] px-2 py-0.5">
+          Diametros: {adoptionLabel}
+        </span>
+        {transitionAwareSizing ? (
+          <span className="rounded border border-[var(--line)] px-2 py-0.5">
+            Estados: {transitionAwareSizing.evaluatedStateCount}/
+            {formatStateCount(transitionAwareSizing.theoreticalStateCount)}
+          </span>
+        ) : null}
+      </div>
+    </section>
   );
 }
 
-function CalculationIssues({ result }: { result: TechnicalCalculationResult }) {
-  if (result.issues.length === 0) {
+function DeliverReadinessGate({
+  pendingSummary,
+  result,
+}: {
+  pendingSummary: CalculationPendingSummary;
+  result: TechnicalCalculationResult;
+}) {
+  const isReady =
+    result.status === "valid" && pendingSummary.blockingCount === 0;
+
+  if (isReady) {
+    return (
+      <div className="mt-3 rounded border border-[#badbcc] bg-[#f1faf4] px-3 py-2 text-xs text-[#1f6b45]">
+        <div className="font-semibold">Entrega lista</div>
+        <div className="mt-0.5">
+          Materiales, planilla tecnica y exportes disponibles.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-3 rounded border border-[#f1d28a] bg-[#fffaf0] px-3 py-2 text-xs text-[var(--warning)]">
+      <div className="font-semibold">Entrega bloqueada</div>
+      <div className="mt-0.5">
+        Resolver {pendingSummary.blockingCount}{" "}
+        {pendingSummary.blockingCount === 1 ? "pendiente" : "pendientes"} antes
+        de exportar.
+      </div>
+    </div>
+  );
+}
+
+function CalculationIssues({
+  accessoryProposalCount,
+  adoptedDiameterValidation,
+  diameterTransitionCount,
+  equipment,
+  materialTakeoff,
+  pendingSummary,
+  result,
+  onGoToEquipment,
+  onGoToPlan,
+}: {
+  accessoryProposalCount: number;
+  adoptedDiameterValidation: TechnicalAdoptedDiameterValidation;
+  diameterTransitionCount: number;
+  equipment: WorkbenchEquipment[];
+  materialTakeoff: TechnicalMaterialTakeoff;
+  pendingSummary: CalculationPendingSummary;
+  result: TechnicalCalculationResult;
+  onGoToEquipment: () => void;
+  onGoToPlan: () => void;
+}) {
+  if (pendingSummary.blockingCount === 0) {
     return null;
   }
 
@@ -1291,29 +1461,113 @@ function CalculationIssues({ result }: { result: TechnicalCalculationResult }) {
     result.status === "invalid"
       ? "border-red-200 bg-red-50 text-red-800"
       : "border-[#f1d28a] bg-[#fffaf0] text-[var(--warning)]";
+  const equipmentById = new Map(equipment.map((item) => [item.id, item]));
+  const visibleIssues = result.issues.filter(isVisibleTechnicalIssue);
+  const hasImplicitStatusIssue =
+    result.status !== "valid" && visibleIssues.length === 0;
+  const adoptionIssues = adoptedDiameterValidation.segments.filter(
+    (segment) => segment.status !== "valid",
+  );
+  const materialOnlyPendingItems = materialTakeoff.pendingItems.filter(
+    isMaterialOnlyPendingItem,
+  );
+  const hasEquipmentIssues = visibleIssues.some((issue) =>
+    technicalIssueTargetsEquipment(issue),
+  );
+  const hasPlanIssues =
+    hasImplicitStatusIssue ||
+    visibleIssues.some((issue) => !technicalIssueTargetsEquipment(issue)) ||
+    materialOnlyPendingItems.length > 0;
 
   return (
     <div className={`mt-3 rounded border px-3 py-2 text-xs ${tone}`}>
       <div className="font-semibold">
-        {result.status === "invalid" ? "Red no calculable" : "Datos pendientes"}
+        {result.status === "invalid"
+          ? "Red no calculable"
+          : "Pendientes para cerrar"}
       </div>
-      <ul className="mt-1 space-y-1">
-        {result.issues.slice(0, 5).map((issue, index) => (
-          <li key={`${issue.code}:${issue.accessoryId ?? ""}:${issue.segmentId ?? ""}:${issue.equipmentId ?? ""}:${index}`}>
-            {issue.message}
+      <ul className="mt-2 space-y-1">
+        {hasImplicitStatusIssue ? (
+          <li className="rounded bg-white/60 px-2 py-1">
+            Completar datos tecnicos del trazado para cerrar el calculo.
+          </li>
+        ) : null}
+        {visibleIssues.map((issue, index) => (
+          <li
+            className="rounded bg-white/60 px-2 py-1"
+            key={`${issue.code}:${issue.accessoryId ?? ""}:${issue.segmentId ?? ""}:${issue.equipmentId ?? ""}:${index}`}
+          >
+            {formatTechnicalIssueAction(issue, result, equipmentById)}
+          </li>
+        ))}
+        {accessoryProposalCount > 0 ? (
+          <li className="rounded bg-white/60 px-2 py-1">
+            Confirmar {accessoryProposalCount}{" "}
+            {accessoryProposalCount === 1
+              ? "accesorio detectado"
+              : "accesorios detectados"}
+            : elegir familia compatible o rechazar.
+          </li>
+        ) : null}
+        {diameterTransitionCount > 0 ? (
+          <li className="rounded bg-white/60 px-2 py-1">
+            Resolver {diameterTransitionCount}{" "}
+            {diameterTransitionCount === 1
+              ? "transicion de diametro"
+              : "transiciones de diametro"}
+            : elegir familia compatible o rechazar.
+          </li>
+        ) : null}
+        {adoptionIssues.map((validation) => (
+          <li
+            className="rounded bg-white/60 px-2 py-1"
+            key={validation.segmentId}
+          >
+            {formatSegmentReference(validation.segmentId, result)}:{" "}
+            {validation.reason ??
+              "validar el diametro adoptado antes de entregar."}
+          </li>
+        ))}
+        {materialOnlyPendingItems.map((item) => (
+          <li
+            className="rounded bg-white/60 px-2 py-1"
+            key={`${item.code}:${item.sourceId ?? item.segmentId ?? item.label}`}
+          >
+            {formatMaterialPendingItem(item, result)}
           </li>
         ))}
       </ul>
-      {result.issues.length > 5 ? (
-        <div className="mt-1">+ {result.issues.length - 5} observaciones</div>
+      {hasEquipmentIssues || hasPlanIssues ? (
+        <div className="mt-2 flex flex-wrap gap-1">
+          {hasEquipmentIssues ? (
+            <button
+              className="rounded border border-current bg-white px-2 py-1 text-[11px]"
+              type="button"
+              onClick={onGoToEquipment}
+            >
+              Revisar artefactos
+            </button>
+          ) : null}
+          {hasPlanIssues ? (
+            <button
+              className="rounded border border-current bg-white px-2 py-1 text-[11px]"
+              type="button"
+              onClick={onGoToPlan}
+            >
+              Revisar planta
+            </button>
+          ) : null}
+        </div>
       ) : null}
     </div>
   );
 }
 
 function MaterialTakeoffSection({
+  result,
   takeoff,
 }: {
+  result: TechnicalCalculationResult;
   takeoff: TechnicalMaterialTakeoff;
 }) {
   const hasMaterials =
@@ -1397,12 +1651,60 @@ function MaterialTakeoffSection({
       ) : null}
       {takeoff.pendingItems.length > 0 ? (
         <ul className="mt-1 space-y-1 text-[10px] text-[var(--muted)]">
-          {takeoff.pendingItems.slice(0, 4).map((item) => (
+          {takeoff.pendingItems.map((item) => (
             <li key={`${item.code}:${item.sourceId ?? item.segmentId ?? ""}`}>
-              {item.label}: {item.reason}
+              {formatMaterialPendingItem(item, result)}
             </li>
           ))}
         </ul>
+      ) : null}
+    </section>
+  );
+}
+
+function MaterialTakeoffCompactSummary({
+  takeoff,
+}: {
+  takeoff: TechnicalMaterialTakeoff;
+}) {
+  const hasMaterials =
+    takeoff.pipeItems.length > 0 || takeoff.accessoryItems.length > 0;
+  const pendingCount = takeoff.pendingSummary.total;
+
+  return (
+    <section className="mt-3 rounded border border-[var(--line)] px-3 py-2 text-xs">
+      <div className="mb-2 flex items-baseline justify-between gap-2">
+        <h3 className="text-xs font-semibold uppercase text-[var(--muted)]">
+          Materiales
+        </h3>
+        <div className="text-[10px] text-[var(--muted)]">
+          {hasMaterials ? "Precomputo" : "Pendiente"}
+        </div>
+      </div>
+      <dl className="grid grid-cols-2 gap-2">
+        <div>
+          <dt className="text-[10px] uppercase text-[var(--muted)]">Caneria</dt>
+          <dd className="font-mono">
+            {formatCalculationMeters(
+              takeoff.physicalMaterialQuantities.pipeLengthMeters,
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-[10px] uppercase text-[var(--muted)]">
+            Accesorios
+          </dt>
+          <dd className="font-mono">
+            {formatMaterialQuantity(
+              takeoff.physicalMaterialQuantities.accessoryQuantity,
+            )}
+          </dd>
+        </div>
+      </dl>
+      {pendingCount > 0 ? (
+        <div className="mt-2 rounded border border-[#f1d28a] bg-[#fffaf0] px-2 py-1 text-[10px] text-[var(--warning)]">
+          {formatMaterialPendingSummary(takeoff)}
+        </div>
       ) : null}
     </section>
   );
@@ -1868,12 +2170,21 @@ function CalculationSheetRowView({
 }
 
 function SegmentList({
+  adoptedDiameterValidationBySegmentId,
+  equipment,
   result,
   selectedSegmentId,
+  onAdoptSegmentDiameter,
   onSelectSegment,
 }: {
+  adoptedDiameterValidationBySegmentId: Record<
+    string,
+    TechnicalAdoptedDiameterSegmentValidation
+  >;
+  equipment: WorkbenchEquipment[];
   result: TechnicalCalculationResult;
   selectedSegmentId: string | null;
+  onAdoptSegmentDiameter: (segmentId: string, diameterId: string | null) => void;
   onSelectSegment: (segmentId: string) => void;
 }) {
   if (result.segments.length === 0) {
@@ -1884,40 +2195,202 @@ function SegmentList({
     );
   }
 
+  const equipmentById = new Map(equipment.map((item) => [item.id, item]));
+
   return (
     <section className="mt-3">
-      <h3 className="mb-2 text-xs font-semibold uppercase text-[var(--muted)]">
-        Tramos
-      </h3>
-      <div className="space-y-1">
-        {result.segments.map((segment) => (
-          <button
-            className={`w-full rounded border px-2 py-1 text-left text-xs hover:border-[var(--accent)] ${
-              segment.segmentId === selectedSegmentId
-                ? "border-[var(--accent)] bg-[#f0f7ff]"
-                : "border-[var(--line)]"
-            }`}
-            key={segment.segmentId}
-            type="button"
-            onClick={() => onSelectSegment(segment.segmentId)}
-          >
-            <div className="font-medium">
-              {segmentLabel(segment, result.nodeLabels)}
-            </div>
-            <div className="mt-0.5 text-[10px] text-[var(--muted)]">
-              {formatSegmentConsumption(segment)}
-              {" - "}
-              {formatGoverningRouteLength(segment)}
-              {" - "}
-              {formatProvisionalSegmentDiameter(segment)}
-              {" - "}
-              {segment.downstreamApplianceIds.length}{" "}
-              {segment.downstreamApplianceIds.length === 1 ? "artefacto" : "artefactos"}
-            </div>
-          </button>
-        ))}
+      <div className="mb-2 flex items-baseline justify-between gap-2">
+        <h3 className="text-xs font-semibold uppercase text-[var(--muted)]">
+          Tramos
+        </h3>
+        <div className="text-[10px] text-[var(--muted)]">
+          {result.segments.length}{" "}
+          {result.segments.length === 1 ? "tramo" : "tramos"}
+        </div>
+      </div>
+      <div className="overflow-x-auto rounded border border-[var(--line)]">
+        <table className="min-w-[760px] table-fixed border-collapse text-[10px]">
+          <thead className="bg-[#f8fafc] text-[var(--muted)]">
+            <tr>
+              <th className="w-32 border-b border-[var(--line)] px-2 py-1 text-left font-semibold">
+                Tramo
+              </th>
+              <th className="w-36 border-b border-[var(--line)] px-2 py-1 text-left font-semibold">
+                Alimenta
+              </th>
+              <th className="w-20 border-b border-[var(--line)] px-2 py-1 text-right font-semibold">
+                Caudal
+              </th>
+              <th className="w-24 border-b border-[var(--line)] px-2 py-1 text-right font-semibold">
+                Longitud
+              </th>
+              <th className="w-28 border-b border-[var(--line)] px-2 py-1 text-right font-semibold">
+                Diametro
+              </th>
+              <th className="w-28 border-b border-[var(--line)] px-2 py-1 text-left font-semibold">
+                Estado
+              </th>
+              <th className="w-36 border-b border-[var(--line)] px-2 py-1 text-left font-semibold">
+                Accion
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {result.segments.map((segment) => {
+              const validation =
+                adoptedDiameterValidationBySegmentId[segment.segmentId] ??
+                null;
+              const isSelected = segment.segmentId === selectedSegmentId;
+
+              return (
+                <SegmentTableRow
+                  equipmentById={equipmentById}
+                  isSelected={isSelected}
+                  key={segment.segmentId}
+                  result={result}
+                  segment={segment}
+                  validation={validation}
+                  onAdoptSegmentDiameter={onAdoptSegmentDiameter}
+                  onSelectSegment={onSelectSegment}
+                />
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </section>
+  );
+}
+
+function SegmentTableRow({
+  equipmentById,
+  isSelected,
+  result,
+  segment,
+  validation,
+  onAdoptSegmentDiameter,
+  onSelectSegment,
+}: {
+  equipmentById: Map<string, WorkbenchEquipment>;
+  isSelected: boolean;
+  result: TechnicalCalculationResult;
+  segment: TechnicalSegmentResult;
+  validation: TechnicalAdoptedDiameterSegmentValidation | null;
+  onAdoptSegmentDiameter: (segmentId: string, diameterId: string | null) => void;
+  onSelectSegment: (segmentId: string) => void;
+}) {
+  const adoptedDiameter = validation?.adoptedDiameter ?? segment.calculatedDiameter;
+  const status = validation
+    ? adoptedDiameterValidationStatusLabel(validation.status)
+    : technicalCalculationStatusLabel(result.status);
+  const needsManualAction =
+    validation !== null &&
+    (validation.status !== "valid" || validation.decision !== null);
+  const rowTone = isSelected ? "bg-[#f0f7ff]" : "";
+
+  return (
+    <tr className={`border-t border-[var(--line)] align-top first:border-t-0 ${rowTone}`}>
+      <td className="px-2 py-1">
+        <button
+          className="text-left font-medium hover:text-[var(--accent)]"
+          type="button"
+          onClick={() => onSelectSegment(segment.segmentId)}
+        >
+          {segmentLabel(segment, result.nodeLabels)}
+        </button>
+      </td>
+      <td className="px-2 py-1 text-[var(--muted)]">
+        {formatSegmentApplianceSummary(segment, equipmentById)}
+      </td>
+      <td className="px-2 py-1 text-right font-mono">
+        {formatSegmentConsumption(segment)}
+      </td>
+      <td className="px-2 py-1 text-right font-mono">
+        <div>
+          {formatCalculationMeters(segment.segmentPhysicalLengthMeters)}
+        </div>
+        <div className="text-[9px] text-[var(--muted)]">
+          calc. {formatSegmentCalculationLength(segment)}
+        </div>
+      </td>
+      <td className="px-2 py-1 text-right">
+        <div>{formatDiameterReference(adoptedDiameter)}</div>
+        {validation?.requiredDiameter ? (
+          <div className="text-[9px] text-[var(--muted)]">
+            req. {formatCompactDiameterReference(validation.requiredDiameter)}
+          </div>
+        ) : null}
+      </td>
+      <td className="px-2 py-1">
+        <span className={segmentStatusTone(validation?.status ?? "valid")}>
+          {status}
+        </span>
+        {validation?.reason ? (
+          <div className="mt-0.5 line-clamp-2 text-[9px] text-[var(--warning)]">
+            {validation.reason}
+          </div>
+        ) : null}
+      </td>
+      <td className="px-2 py-1">
+        {needsManualAction ? (
+          <SegmentAdoptedDiameterControl
+            validation={validation}
+            onAdoptSegmentDiameter={onAdoptSegmentDiameter}
+          />
+        ) : (
+          <span className="text-[var(--muted)]">Automatico</span>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+function SegmentAdoptedDiameterControl({
+  validation,
+  onAdoptSegmentDiameter,
+}: {
+  validation: TechnicalAdoptedDiameterSegmentValidation;
+  onAdoptSegmentDiameter: (segmentId: string, diameterId: string | null) => void;
+}) {
+  const selectedDiameterId =
+    validation.decision && validation.adoptedDiameter
+      ? validation.adoptedDiameter.id
+      : "";
+  const canSelect = validation.selectableDiameters.length > 0;
+
+  return (
+    <div className="space-y-1">
+      <select
+        className="w-full rounded border border-[var(--line)] bg-white px-2 py-1 text-[10px]"
+        disabled={!canSelect}
+        value={selectedDiameterId}
+        onChange={(event) =>
+          onAdoptSegmentDiameter(
+            validation.segmentId,
+            event.target.value || null,
+          )
+        }
+      >
+        <option value="">Usar requerido</option>
+        {validation.selectableDiameters.map((diameter) => (
+          <option key={diameter.id} value={diameter.id}>
+            {formatDiameterSymbol(diameter)}
+            {diameterIsBelowRequired(diameter, validation)
+              ? " (menor al requerido)"
+              : ""}
+          </option>
+        ))}
+      </select>
+      {validation.decision ? (
+        <button
+          className="rounded border border-[var(--line)] bg-white px-2 py-0.5 text-[10px] hover:border-[var(--accent)]"
+          type="button"
+          onClick={() => onAdoptSegmentDiameter(validation.segmentId, null)}
+        >
+          Requerido
+        </button>
+      ) : null}
+    </div>
   );
 }
 
@@ -2803,7 +3276,7 @@ function RouteAccessoryContributionItem({
         <span className="font-mono">
           {ownerSegment
             ? segmentLabel(ownerSegment, result.nodeLabels)
-            : contribution.ownerSegmentId}
+            : "Tramo pendiente"}
         </span>
         {" - "}
         {formatContributionDiameter(contribution)}
@@ -2876,11 +3349,225 @@ function AccessorySummaryRow({
   );
 }
 
+function createCalculationPendingSummary({
+  accessoryProposals,
+  adoptedDiameterValidation,
+  diameterTransitionProposals,
+  materialTakeoff,
+  result,
+}: {
+  accessoryProposals: AccessoryProposal[];
+  adoptedDiameterValidation: TechnicalAdoptedDiameterValidation;
+  diameterTransitionProposals: DiameterTransitionProposal[];
+  materialTakeoff: TechnicalMaterialTakeoff;
+  result: TechnicalCalculationResult | null;
+}): CalculationPendingSummary {
+  const accessoryProposalCount = accessoryProposals.filter(
+    isActionableAccessoryProposal,
+  ).length;
+  const diameterTransitionCount = diameterTransitionProposals.filter(
+    isActionableDiameterTransitionProposal,
+  ).length;
+  const adoptedDiameterIssueCount = adoptedDiameterValidation.segments.filter(
+    (segment) => segment.status !== "valid",
+  ).length;
+  const materialPendingCount = materialTakeoff.pendingItems.filter(
+    isMaterialOnlyPendingItem,
+  ).length;
+  const visibleIssueCount = result?.issues.filter(isVisibleTechnicalIssue).length ?? 0;
+  const implicitStatusIssueCount =
+    result && result.status !== "valid" && visibleIssueCount === 0 ? 1 : 0;
+  const technicalIssueCount = visibleIssueCount + implicitStatusIssueCount;
+  const total =
+    accessoryProposalCount +
+    adoptedDiameterIssueCount +
+    diameterTransitionCount +
+    materialPendingCount +
+    technicalIssueCount;
+
+  return {
+    accessoryProposalCount,
+    adoptedDiameterIssueCount,
+    blockingCount: total,
+    diameterTransitionCount,
+    materialPendingCount,
+    technicalIssueCount,
+    total,
+  };
+}
+
+function isVisibleTechnicalIssue(issue: TechnicalCalculationIssue) {
+  return (
+    issue.code !== "pending_adopted_diameter_validation" &&
+    issue.code !== "incompatible_adopted_diameter" &&
+    issue.code !== "unresolved_adopted_diameter"
+  );
+}
+
+function isMaterialOnlyPendingItem(
+  item: TechnicalMaterialTakeoff["pendingItems"][number],
+) {
+  return (
+    item.code !== "accessory_confirmation_pending" &&
+    item.code !== "diameter_effective_validation_pending" &&
+    item.code !== "diameter_transition_pending" &&
+    item.code !== "branch_transition_pending" &&
+    item.code !== "compound_transition_pending"
+  );
+}
+
+function technicalIssueTargetsEquipment(issue: TechnicalCalculationIssue) {
+  return (
+    issue.equipmentId !== undefined ||
+    issue.code === "missing_demand" ||
+    issue.code === "unresolved_demand_normalization" ||
+    issue.code === "mixed_demand_units" ||
+    issue.code === "appliance_not_connected" ||
+    issue.code === "appliance_not_terminal" ||
+    issue.code === "appliance_unreachable"
+  );
+}
+
+function formatTechnicalIssueAction(
+  issue: TechnicalCalculationIssue,
+  result: TechnicalCalculationResult,
+  equipmentById: Map<string, WorkbenchEquipment>,
+) {
+  const location = technicalIssueLocation(issue, result, equipmentById);
+  const action = technicalIssueAction(issue);
+
+  return location ? `${location}: ${action}` : action;
+}
+
+function technicalIssueLocation(
+  issue: TechnicalCalculationIssue,
+  result: TechnicalCalculationResult,
+  equipmentById: Map<string, WorkbenchEquipment>,
+) {
+  if (issue.equipmentId) {
+    return equipmentById.get(issue.equipmentId)?.name ?? "Artefacto";
+  }
+
+  if (issue.segmentId) {
+    return formatSegmentReference(issue.segmentId, result);
+  }
+
+  if (issue.nodeId) {
+    return formatNodeReference(issue.nodeId, result);
+  }
+
+  return null;
+}
+
+function technicalIssueAction(issue: TechnicalCalculationIssue) {
+  switch (issue.code) {
+    case "missing_scale":
+      return "definir la escala de planta.";
+    case "missing_supply":
+    case "missing_supply_node":
+      return "marcar una alimentacion valida.";
+    case "multiple_supply":
+      return "dejar una sola alimentacion activa.";
+    case "missing_endpoints":
+    case "missing_node_position":
+    case "zero_length_segment":
+    case "duplicate_segments":
+    case "cycle":
+    case "disconnected_component":
+      return "corregir el trazado confirmado.";
+    case "appliance_not_connected":
+    case "appliance_unreachable":
+      return "conectar el artefacto al recorrido confirmado.";
+    case "appliance_not_terminal":
+      return "ubicar el artefacto como extremo de recorrido.";
+    case "missing_demand":
+    case "unresolved_demand_normalization":
+    case "mixed_demand_units":
+      return "completar y normalizar el consumo.";
+    case "pending_equivalent_length":
+      return "resolver equivalencias de accesorios.";
+    case "pending_diameter_sizing":
+      return "completar datos para dimensionar diametro.";
+    case "pending_route_sizing_length":
+      return "resolver el recorrido gobernante.";
+    case "duplicate_ids":
+      return "corregir elementos duplicados del trazado.";
+    default:
+      return "revisar el dato tecnico indicado.";
+  }
+}
+
+function formatMaterialPendingItem(
+  item: TechnicalMaterialTakeoff["pendingItems"][number],
+  result: TechnicalCalculationResult,
+) {
+  const location = item.segmentId
+    ? formatSegmentReference(item.segmentId, result)
+    : null;
+  const action = materialPendingAction(item);
+  const reason = item.reason ? ` ${item.reason}` : "";
+
+  return location ? `${location}: ${action}.${reason}` : `${action}.${reason}`;
+}
+
+function materialPendingAction(
+  item: TechnicalMaterialTakeoff["pendingItems"][number],
+) {
+  if (item.category === "pipe") {
+    return "completar longitud fisica para computar caneria";
+  }
+
+  if (item.category === "accessory") {
+    return "resolver accesorio fisico para computo final";
+  }
+
+  if (item.category === "transition") {
+    return "resolver transicion fisica para computo final";
+  }
+
+  return "validar diametro adoptado para computo final";
+}
+
+function formatSegmentApplianceSummary(
+  segment: TechnicalSegmentResult,
+  equipmentById: Map<string, WorkbenchEquipment>,
+) {
+  if (segment.downstreamApplianceIds.length === 0) {
+    return "Sin artefactos";
+  }
+
+  const names = segment.downstreamApplianceIds.map(
+    (equipmentId) => equipmentById.get(equipmentId)?.name ?? "Artefacto",
+  );
+  const visibleNames = names.slice(0, 2).join(", ");
+  const remainingCount = names.length - 2;
+
+  return remainingCount > 0
+    ? `${visibleNames} +${remainingCount}`
+    : visibleNames;
+}
+
+function segmentStatusTone(
+  status: TechnicalAdoptedDiameterSegmentValidation["status"],
+) {
+  if (status === "valid") {
+    return "text-[#1f6b45]";
+  }
+
+  if (status === "invalid" || status === "unsupported") {
+    return "text-red-800";
+  }
+
+  return "text-[var(--warning)]";
+}
+
 function segmentLabel(
   segment: TechnicalSegmentResult,
   labels: Record<string, string>,
 ) {
-  return `${labels[segment.fromNodeId] ?? segment.fromNodeId} -> ${labels[segment.toNodeId] ?? segment.toNodeId}`;
+  return `${labels[segment.fromNodeId] ?? "Nodo"} -> ${
+    labels[segment.toNodeId] ?? "Nodo"
+  }`;
 }
 
 function inventoryStatusLabel(inventory: TechnicalPhysicalAccessoryInventory) {
@@ -2900,7 +3587,7 @@ function formatPhysicalAccessorySummary(
   result: TechnicalCalculationResult,
 ) {
   const nodeLabel = item.nodeId
-    ? result.nodeLabels[item.nodeId] ?? item.nodeId
+    ? result.nodeLabels[item.nodeId] ?? "nodo del trazado"
     : "nodo pendiente";
 
   return `${technicalPhysicalAccessoryKindLabel(item.kind)} - ${nodeLabel} - ${formatPhysicalAccessoryDiameters(item)}`;
@@ -2948,7 +3635,7 @@ function formatPhysicalAccessoryRouteUse(
           .join(", ")
       : "tramos pendientes";
 
-  return `${routeUse.routeId}${traversal} - ${segments}${variant}`;
+  return `Recorrido${traversal} - ${segments}${variant}`;
 }
 
 function physicalAccessoryRouteUseKey(
@@ -2969,7 +3656,7 @@ function formatSegmentReference(
   const segment =
     result.segments.find((item) => item.segmentId === segmentId) ?? null;
 
-  return segment ? segmentLabel(segment, result.nodeLabels) : segmentId;
+  return segment ? segmentLabel(segment, result.nodeLabels) : "Tramo pendiente";
 }
 
 function physicalAccessoryItemsByIds(
@@ -3270,7 +3957,7 @@ function formatTechnicalRoutePath(
   nodeIds: string[],
   labels: Record<string, string>,
 ) {
-  return nodeIds.map((nodeId) => labels[nodeId] ?? nodeId).join(" -> ");
+  return nodeIds.map((nodeId) => labels[nodeId] ?? "Nodo").join(" -> ");
 }
 
 function formatContributionDiameter(
