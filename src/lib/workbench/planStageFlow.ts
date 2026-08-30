@@ -97,7 +97,7 @@ function createPlanReadiness(
   if (!baseScaleMetersPerSourceUnit(planBase)) {
     return {
       baseId: planBase.id,
-      reason: "Confirmar escala",
+      reason: "Calibrar escala",
       status: "pending",
       title: planBase.name,
       type: "plan",
@@ -123,7 +123,7 @@ function createSectionReadiness(params: {
   if (!sectionScale) {
     return {
       baseId: params.section.id,
-      reason: "Confirmar escala",
+      reason: "Calibrar escala",
       status: "pending",
       title: params.section.name,
       type: "section",

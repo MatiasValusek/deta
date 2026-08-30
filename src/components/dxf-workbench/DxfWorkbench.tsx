@@ -1792,14 +1792,14 @@ export function DxfWorkbench() {
   }
 
   function handleMainWorkflowStageChange(stage: MainWorkflowStageId) {
-    if (stage !== "plan" && !planStageReadiness.canContinueToEquipment) {
-      return;
-    }
+    if (!canOpenWorkflowStage(stage)) {
+      const fallbackStage = fallbackWorkflowStage();
 
-    if (stage === "review" && !canOpenReviewStage) {
-      setActiveMainStage("route");
-      setActiveRightPanelSection("route");
-      setRouteError("Confirma un recorrido valido antes de revisar.");
+      setActiveMainStage(fallbackStage);
+      setActiveRightPanelSection(MAIN_WORKFLOW_DEFAULT_PANEL[fallbackStage]);
+      if (stage === "review") {
+        setRouteError("Confirma un recorrido valido antes de revisar.");
+      }
       return;
     }
 
@@ -5537,7 +5537,7 @@ export function DxfWorkbench() {
   }
 
   function handleCancelCalibrationTool() {
-    setActiveRightPanelSection("scale");
+    setActiveRightPanelSection("geometry");
     updateActiveBase((base) =>
       updateCalibrationForBase(base, (state) => ({
         ...state,
@@ -5576,7 +5576,28 @@ export function DxfWorkbench() {
   }
 
   function handleConfirmCalibration() {
-    setActiveRightPanelSection("scale");
+    const activePoints = createPointPair(activeCalibration.draft.points);
+    const activeDistance = parsePositiveDistance(
+      activeCalibration.draft.distanceOriginal,
+    );
+    let shouldReturnToPlanSummary = false;
+
+    if (activePoints && activeDistance !== null) {
+      try {
+        createConfirmedCalibration({
+          distanceOriginal: activeDistance,
+          points: activePoints,
+          unit: activeCalibration.draft.unit,
+        });
+        shouldReturnToPlanSummary = true;
+      } catch {
+        shouldReturnToPlanSummary = false;
+      }
+    }
+
+    setActiveRightPanelSection(
+      shouldReturnToPlanSummary ? "geometry" : "scale",
+    );
     updateActiveBase((base) =>
       updateCalibrationForBase(base, (state) => {
         const points = createPointPair(state.draft.points);
@@ -5754,12 +5775,44 @@ export function DxfWorkbench() {
       ? "Confirmada"
       : "Pendiente"
     : "Sin base activa";
+  const canOpenEquipmentStage = planStageReadiness.canContinueToEquipment;
+  const canOpenRouteStage =
+    canOpenEquipmentStage && supplyCount === 1 && applianceEquipment.length > 0;
+  const canOpenCalculateStage = canOpenReviewStage;
+  const canOpenDeliverStage = technicalCalculationResult?.status === "valid";
+
+  function canOpenWorkflowStage(stage: MainWorkflowStageId) {
+    if (stage === "plan") {
+      return true;
+    }
+
+    if (stage === "equipment") {
+      return canOpenEquipmentStage;
+    }
+
+    if (stage === "route") {
+      return canOpenRouteStage;
+    }
+
+    if (stage === "review") {
+      return canOpenReviewStage;
+    }
+
+    if (stage === "calculate") {
+      return canOpenCalculateStage;
+    }
+
+    return canOpenDeliverStage;
+  }
+
+  function fallbackWorkflowStage() {
+    return canOpenEquipmentStage ? "equipment" : "plan";
+  }
+
   const activeWorkflowStage =
-    activeMainStage === "review" && !canOpenReviewStage
-      ? "route"
-      : activeMainStage === "plan" || planStageReadiness.canContinueToEquipment
-        ? activeMainStage
-        : "plan";
+    canOpenWorkflowStage(activeMainStage)
+      ? activeMainStage
+      : fallbackWorkflowStage();
   const isReviewStage = activeWorkflowStage === "review";
   const reviewSummaryText = !planBase
     ? "Sin Planta"
@@ -6074,10 +6127,7 @@ export function DxfWorkbench() {
           >
             {MAIN_WORKFLOW_STAGES.map((stage) => {
               const isActive = stage.id === activeWorkflowStage;
-              const isLocked =
-                (stage.id !== "plan" &&
-                  !planStageReadiness.canContinueToEquipment) ||
-                (stage.id === "review" && !canOpenReviewStage);
+              const isLocked = !canOpenWorkflowStage(stage.id);
 
               return (
                 <button
@@ -6597,7 +6647,10 @@ export function DxfWorkbench() {
           <div className="min-h-0 flex-1 overflow-auto">
             <PlanStagePanel
               isImporting={isImporting}
+              planBase={planBase}
               readiness={planStageReadiness}
+              sectionBases={orderedBases.filter((base) => base.type === "section")}
+              sectionPlanLinks={sectionPlanLinks}
               onAddPlan={() => planInputRef.current?.click()}
               onAddSection={() => sectionInputRef.current?.click()}
               onContinue={handlePlanStageContinue}
@@ -6614,6 +6667,7 @@ export function DxfWorkbench() {
                 isImporting={isImporting}
                 planReady={Boolean(planBase)}
                 onFitActiveView={handleFitActiveView}
+                onOpenScale={handleOpenPlanStageScale}
                 onRemoveActiveBase={handleRemoveActiveBase}
                 onRemoveSectionRegistration={handleRemoveSectionRegistration}
                 onReplaceActiveBase={() => replaceInputRef.current?.click()}
@@ -6713,6 +6767,7 @@ function PlanContextPanel({
   isImporting,
   planReady,
   onFitActiveView,
+  onOpenScale,
   onRemoveActiveBase,
   onRemoveSectionRegistration,
   onReplaceActiveBase,
@@ -6730,6 +6785,7 @@ function PlanContextPanel({
   isImporting: boolean;
   planReady: boolean;
   onFitActiveView: () => void;
+  onOpenScale: (baseId: string | null, startCalibration?: boolean) => void;
   onRemoveActiveBase: () => void;
   onRemoveSectionRegistration: (link: SectionPlanLink) => void;
   onReplaceActiveBase: () => void;
@@ -6743,40 +6799,51 @@ function PlanContextPanel({
   const sectionStatus =
     activeRegistrationSummary?.status ??
     (activeSectionLink ? "Vinculado · Sin correspondencia" : "Sin vincular");
+  const hasCalibration = Boolean(activeBase.calibration.calibration);
 
   return (
     <section className="border-b border-[var(--line)] bg-white p-3 text-xs">
-      <h2 className="text-sm font-semibold">
-        {isSection ? "Corte" : "Planta"}
-      </h2>
-      <div className="mt-3 grid grid-cols-2 gap-2">
-        <button
-          className="col-span-2 rounded border border-[var(--line)] bg-white px-2 py-1 font-medium hover:border-[var(--accent)]"
-          type="button"
-          onClick={onFitActiveView}
-        >
-          Ajustar a pantalla
-        </button>
-        <button
-          className="rounded border border-[var(--line)] bg-white px-2 py-1 font-medium hover:border-[var(--accent)] disabled:cursor-not-allowed disabled:bg-[#f5f6f7] disabled:text-[var(--muted)]"
-          disabled={isImporting}
-          type="button"
-          onClick={onReplaceActiveBase}
-        >
-          Reemplazar
-        </button>
-        <button
-          className="rounded border border-[var(--line)] bg-white px-2 py-1 font-medium hover:border-[var(--accent)] disabled:cursor-not-allowed disabled:bg-[#f5f6f7] disabled:text-[var(--muted)]"
-          disabled={isImporting}
-          type="button"
-          onClick={onRemoveActiveBase}
-        >
-          Quitar
-        </button>
-      </div>
+      <details>
+        <summary className="cursor-pointer text-[var(--muted)] hover:text-[var(--foreground)]">
+          Opciones de {activeBase.name}
+        </summary>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <button
+            className="col-span-2 rounded border border-[var(--line)] bg-white px-2 py-1 font-medium hover:border-[var(--accent)]"
+            type="button"
+            onClick={onFitActiveView}
+          >
+            Ajustar a pantalla
+          </button>
+          {hasCalibration ? (
+            <button
+              className="col-span-2 rounded border border-[var(--line)] bg-white px-2 py-1 font-medium hover:border-[var(--accent)]"
+              type="button"
+              onClick={() => onOpenScale(activeBase.id)}
+            >
+              Volver a calibrar
+            </button>
+          ) : null}
+          <button
+            className="rounded border border-[var(--line)] bg-white px-2 py-1 font-medium hover:border-[var(--accent)] disabled:cursor-not-allowed disabled:bg-[#f5f6f7] disabled:text-[var(--muted)]"
+            disabled={isImporting}
+            type="button"
+            onClick={onReplaceActiveBase}
+          >
+            Reemplazar
+          </button>
+          <button
+            className="rounded border border-[var(--line)] bg-white px-2 py-1 font-medium hover:border-[var(--accent)] disabled:cursor-not-allowed disabled:bg-[#f5f6f7] disabled:text-[var(--muted)]"
+            disabled={isImporting}
+            type="button"
+            onClick={onRemoveActiveBase}
+          >
+            Quitar
+          </button>
+        </div>
 
-      {isSection ? (
-        <div className="mt-4 border-t border-[var(--line)] pt-3">
+        {isSection ? (
+          <div className="mt-4 border-t border-[var(--line)] pt-3">
           <h3 className="font-semibold">Vinculación Planta-Corte</h3>
           <p className="mt-1 text-[var(--muted)]">{sectionStatus}</p>
 
@@ -6863,19 +6930,23 @@ function PlanContextPanel({
                 type="button"
                 onClick={() => onStartSectionLink(activeBase.id)}
               >
-                Vincular con planta
+                Vincular con Planta
               </button>
             )}
           </div>
-        </div>
-      ) : null}
+          </div>
+        ) : null}
+      </details>
     </section>
   );
 }
 
 function PlanStagePanel({
   isImporting,
+  planBase,
   readiness,
+  sectionBases,
+  sectionPlanLinks,
   onAddPlan,
   onAddSection,
   onContinue,
@@ -6883,20 +6954,82 @@ function PlanStagePanel({
   onSectionAction,
 }: {
   isImporting: boolean;
+  planBase: WorkbenchBase | null;
   readiness: PlanStageReadiness;
+  sectionBases: WorkbenchBase[];
+  sectionPlanLinks: SectionPlanLink[];
   onAddPlan: () => void;
   onAddSection: () => void;
   onContinue: () => void;
   onOpenScale: (baseId: string | null, startCalibration?: boolean) => void;
   onSectionAction: (baseId: string | null) => void;
 }) {
-  const planLoaded = readiness.plan.status !== "missing";
-  const scalePending = planLoaded && readiness.plan.status === "pending";
-  const sectionCount = readiness.sections.length;
-  const activeSection =
+  const planLoaded = Boolean(planBase);
+  const planScaleReference = calibrationReferenceLabel(planBase);
+  const pendingSection =
     readiness.sections.find((section) => section.status !== "ready") ??
-    readiness.sections[0] ??
     null;
+  const primaryAction = !planLoaded
+    ? {
+        disabled: isImporting,
+        label: "Cargar Planta",
+        onClick: onAddPlan,
+      }
+    : readiness.plan.status !== "ready"
+      ? {
+          disabled: isImporting,
+          label: "Calibrar escala",
+          onClick: () => onOpenScale(readiness.plan.baseId),
+        }
+      : pendingSection
+        ? {
+            disabled: isImporting,
+            label: planSectionActionLabel(pendingSection.reason),
+            onClick: () => onSectionAction(pendingSection.baseId),
+          }
+        : readiness.canContinueToEquipment
+          ? {
+              disabled: false,
+              label: "Continuar a Artefactos",
+              onClick: onContinue,
+            }
+          : null;
+  const statusLines: PlanStatusLine[] = [
+    planLoaded
+      ? { complete: true, key: "plan", text: "Planta" }
+      : { key: "plan", text: "Planta pendiente", warning: true },
+    ...(planLoaded
+      ? [
+          planScaleReference
+            ? {
+                complete: true,
+                key: "plan-scale",
+                text: `Escala · ${planScaleReference}`,
+              }
+            : {
+                key: "plan-scale",
+                text: "Escala pendiente",
+                warning: true,
+              },
+        ]
+      : []),
+    ...(sectionBases.length > 0
+      ? sectionBases.flatMap((sectionBase) =>
+          sectionStatusLines({
+            link:
+              sectionPlanLinks.find(
+                (link) => link.sectionBaseId === sectionBase.id,
+              ) ?? null,
+            planBase,
+            readiness:
+              readiness.sections.find(
+                (section) => section.baseId === sectionBase.id,
+              ) ?? null,
+            sectionBase,
+          }),
+        )
+      : [{ key: "section-optional", muted: true, text: "Corte opcional" }]),
+  ];
 
   return (
     <section
@@ -6905,92 +7038,151 @@ function PlanStagePanel({
     >
       <h2 className="text-sm font-semibold">Plano</h2>
 
-      <div className="mt-3 space-y-2">
-        <div className="rounded border border-[var(--line)] px-3 py-2">
-          <div className="font-semibold">
-            {planLoaded ? "Planta cargada" : "Comenzá cargando la Planta"}
-          </div>
-          <div className="mt-1 truncate text-[var(--muted)]">
-            {planLoaded ? readiness.plan.title : "DXF o PDF"}
-          </div>
-          {!planLoaded ? (
-            <button
-              className="mt-2 w-full rounded border border-[var(--accent)] bg-[var(--accent)] px-3 py-2 font-semibold text-white hover:bg-[var(--accent-strong)] disabled:cursor-not-allowed disabled:border-[var(--line)] disabled:bg-white disabled:text-[var(--muted)]"
-              disabled={isImporting}
-              type="button"
-              onClick={onAddPlan}
-            >
-              Cargar Planta
-            </button>
-          ) : null}
-        </div>
-
-        {planLoaded ? (
-          <div className="rounded border border-[var(--line)] px-3 py-2">
-            <div className={scalePending ? "font-semibold text-[var(--warning)]" : "font-semibold text-[#24713a]"}>
-              {scalePending ? "Escala pendiente" : "Escala confirmada"}
-            </div>
-            <button
-              className={`mt-2 w-full rounded border px-3 py-2 font-semibold disabled:cursor-not-allowed disabled:border-[var(--line)] disabled:bg-white disabled:text-[var(--muted)] ${
-                scalePending
-                  ? "border-[var(--accent)] bg-[var(--accent)] text-white hover:bg-[var(--accent-strong)]"
-                  : "border-[var(--line)] bg-white text-[var(--foreground)] hover:border-[var(--accent)]"
-              }`}
-              disabled={isImporting}
-              type="button"
-              onClick={() => onOpenScale(readiness.plan.baseId, scalePending)}
-            >
-              {scalePending ? "Calibrar escala" : "Ver escala"}
-            </button>
-          </div>
-        ) : null}
-
-        <div className="rounded border border-[var(--line)] px-3 py-2">
-          <div className="font-semibold">Corte opcional</div>
-          <div className="mt-1 text-[var(--muted)]">
-            {sectionCount === 0
-              ? "Podés agregarlo ahora o más adelante."
-              : `${sectionCount} ${sectionCount === 1 ? "Corte cargado" : "Cortes cargados"}.`}
-          </div>
-          <div
-            className={`mt-2 grid gap-2 ${
-              activeSection ? "grid-cols-2" : "grid-cols-1"
-            }`}
-          >
-            {activeSection ? (
-              <button
-                className="rounded border border-[var(--line)] bg-white px-2 py-1 font-medium hover:border-[var(--accent)]"
-                type="button"
-                onClick={() => onSectionAction(activeSection.baseId)}
-              >
-                {activeSection.status === "ready"
-                  ? "Ver Corte"
-                  : activeSection.reason}
-              </button>
-            ) : null}
-            <button
-              className="rounded border border-[var(--line)] bg-white px-2 py-1 font-medium hover:border-[var(--accent)] disabled:cursor-not-allowed disabled:bg-[#f5f6f7] disabled:text-[var(--muted)]"
-              disabled={isImporting}
-              type="button"
-              onClick={onAddSection}
-            >
-              Agregar Corte
-            </button>
-          </div>
-        </div>
+      <div className="mt-3 space-y-1.5">
+        {statusLines.map((line) => (
+          <PlanStatusRow key={line.key} line={line} />
+        ))}
       </div>
 
-      {readiness.canContinueToEquipment ? (
+      {primaryAction ? (
         <button
           className="mt-3 w-full rounded border border-[var(--accent)] bg-[var(--accent)] px-3 py-2 font-semibold text-white hover:bg-[var(--accent-strong)]"
+          disabled={primaryAction.disabled}
           type="button"
-          onClick={onContinue}
+          onClick={primaryAction.onClick}
         >
-          Continuar a Artefactos
+          {primaryAction.label}
+        </button>
+      ) : null}
+
+      {planLoaded && sectionBases.length === 0 ? (
+        <button
+          className="mt-2 w-full rounded border border-[var(--line)] bg-white px-3 py-2 font-medium text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--foreground)] disabled:cursor-not-allowed disabled:bg-[#f5f6f7]"
+          disabled={isImporting}
+          type="button"
+          onClick={onAddSection}
+        >
+          Agregar Corte
         </button>
       ) : null}
     </section>
   );
+}
+
+type PlanStatusLine = {
+  complete?: boolean;
+  key: string;
+  muted?: boolean;
+  text: string;
+  warning?: boolean;
+};
+
+function PlanStatusRow({ line }: { line: PlanStatusLine }) {
+  const textClassName = line.muted
+    ? "text-[var(--muted)]"
+    : line.warning
+      ? "text-[var(--warning)]"
+      : "text-[var(--foreground)]";
+
+  return (
+    <div className={`flex min-h-6 items-center gap-2 ${textClassName}`}>
+      <span
+        aria-hidden="true"
+        className={`w-4 shrink-0 text-center ${
+          line.complete ? "text-[#24713a]" : "text-[var(--muted)]"
+        }`}
+      >
+        {line.complete ? "✓" : "·"}
+      </span>
+      <span className="min-w-0 truncate">{line.text}</span>
+    </div>
+  );
+}
+
+function sectionStatusLines({
+  link,
+  planBase,
+  readiness,
+  sectionBase,
+}: {
+  link: SectionPlanLink | null;
+  planBase: WorkbenchBase | null;
+  readiness: PlanStageReadiness["sections"][number] | null;
+  sectionBase: WorkbenchBase;
+}): PlanStatusLine[] {
+  if (!calibrationScaleMetersPerSourceUnit(sectionBase)) {
+    return [
+      {
+        key: `${sectionBase.id}:scale`,
+        text: `${sectionBase.name} · escala pendiente`,
+        warning: true,
+      },
+    ];
+  }
+
+  if (!link || !planBase || link.planBaseId !== planBase.id) {
+    return [
+      { complete: true, key: `${sectionBase.id}:base`, text: sectionBase.name },
+      {
+        key: `${sectionBase.id}:link`,
+        text: "Vinculación pendiente",
+        warning: true,
+      },
+    ];
+  }
+
+  if (!link.registration) {
+    return [
+      { complete: true, key: `${sectionBase.id}:base`, text: sectionBase.name },
+      {
+        key: `${sectionBase.id}:registration`,
+        text: "Correspondencia pendiente",
+        warning: true,
+      },
+    ];
+  }
+
+  if (readiness?.status === "ready") {
+    return [
+      {
+        complete: true,
+        key: `${sectionBase.id}:ready`,
+        text: `${sectionBase.name} · vinculado`,
+      },
+    ];
+  }
+
+  return [
+    {
+      key: `${sectionBase.id}:alignment`,
+      text: `${sectionBase.name} · revisar alineación`,
+      warning: true,
+    },
+  ];
+}
+
+function planSectionActionLabel(reason: string) {
+  if (reason === "Calibrar escala") {
+    return "Calibrar escala";
+  }
+
+  if (reason === "Alinear planta-corte") {
+    return "Definir correspondencia";
+  }
+
+  if (reason === "Revisar alineacion") {
+    return "Editar correspondencia";
+  }
+
+  return reason;
+}
+
+function calibrationReferenceLabel(base: WorkbenchBase | null) {
+  const calibration = base?.calibration.calibration;
+
+  return calibration
+    ? `${formatNumber(calibration.distanceOriginal)} ${calibration.unit}`
+    : null;
 }
 
 async function createBaseFromFile(params: {
