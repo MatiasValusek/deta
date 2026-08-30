@@ -5694,7 +5694,6 @@ export function DxfWorkbench() {
     });
   }
 
-  const activeFileName = activeBase?.originalFileName;
   const canSaveSectionLink =
     Boolean(sectionLinkDraft?.planStart) &&
     Boolean(sectionLinkDraft?.planEnd) &&
@@ -6066,60 +6065,48 @@ export function DxfWorkbench() {
 
   return (
     <main className="flex h-screen overflow-hidden flex-col bg-[var(--background)] text-[var(--foreground)]">
-      <header className="shrink-0 border-b border-[var(--line)] bg-white px-5 py-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-xl font-semibold tracking-normal">deta</h1>
-          </div>
+      <header className="shrink-0 border-b border-[var(--line)] bg-white px-5 py-3">
+        <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3">
+          <h1 className="min-w-0 text-xl font-semibold tracking-normal">DETA</h1>
+          <nav
+            aria-label="Flujo principal"
+            className="flex min-w-0 flex-wrap items-center justify-center gap-1"
+          >
+            {MAIN_WORKFLOW_STAGES.map((stage) => {
+              const isActive = stage.id === activeWorkflowStage;
+              const isLocked =
+                (stage.id !== "plan" &&
+                  !planStageReadiness.canContinueToEquipment) ||
+                (stage.id === "review" && !canOpenReviewStage);
 
-          <div className="flex flex-wrap items-center gap-2">
+              return (
+                <button
+                  aria-current={isActive ? "step" : undefined}
+                  className={`rounded border px-3 py-1.5 text-xs font-medium transition ${
+                    isActive
+                      ? "border-[var(--accent)] bg-[var(--accent)] text-white"
+                      : "border-[var(--line)] bg-white hover:border-[var(--accent)]"
+                  } disabled:cursor-not-allowed disabled:bg-[#f5f6f7] disabled:text-[var(--muted)]`}
+                  disabled={isLocked}
+                  key={stage.id}
+                  type="button"
+                  onClick={() => handleMainWorkflowStageChange(stage.id)}
+                >
+                  {stage.label}
+                </button>
+              );
+            })}
+          </nav>
+          <div className="flex justify-end">
             <button
-              className="rounded px-2 py-1 text-xs text-[var(--muted)] hover:text-[var(--foreground)]"
+              className="rounded border border-[var(--line)] bg-white px-3 py-2 text-sm font-medium hover:border-[var(--accent)]"
               type="button"
               onClick={handleResetLocalProject}
             >
-              Restablecer proyecto local
+              Restablecer
             </button>
-            {activeBase ? (
-              <button
-                className="rounded border border-[var(--line)] bg-white px-3 py-2 text-sm font-medium hover:border-[var(--accent)]"
-                type="button"
-                onClick={handleFitActiveView}
-              >
-                Ajustar a pantalla
-              </button>
-            ) : null}
           </div>
         </div>
-        <nav
-          aria-label="Flujo principal"
-          className="mt-3 flex min-w-0 flex-wrap items-center gap-1"
-        >
-          {MAIN_WORKFLOW_STAGES.map((stage) => {
-            const isActive = stage.id === activeWorkflowStage;
-            const isLocked =
-              (stage.id !== "plan" &&
-                !planStageReadiness.canContinueToEquipment) ||
-              (stage.id === "review" && !canOpenReviewStage);
-
-            return (
-              <button
-                aria-current={isActive ? "step" : undefined}
-                className={`rounded border px-3 py-1.5 text-xs font-medium transition ${
-                  isActive
-                    ? "border-[var(--accent)] bg-[var(--accent)] text-white"
-                    : "border-[var(--line)] bg-white hover:border-[var(--accent)]"
-                } disabled:cursor-not-allowed disabled:bg-[#f5f6f7] disabled:text-[var(--muted)]`}
-                disabled={isLocked}
-                key={stage.id}
-                type="button"
-                onClick={() => handleMainWorkflowStageChange(stage.id)}
-              >
-                {stage.label}
-              </button>
-            );
-          })}
-        </nav>
       </header>
 
       <input
@@ -6180,27 +6167,20 @@ export function DxfWorkbench() {
         <section className="flex min-h-0 min-w-0 flex-col overflow-hidden">
           {hasAnyBase ? (
           <div className="shrink-0 border-b border-[var(--line)] bg-white px-3 py-2">
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <span className="text-xs font-semibold uppercase text-[var(--muted)]">
-                Bases
-              </span>
-              <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+            <div className="flex min-w-0 items-center gap-1 overflow-x-auto">
                 {orderedBases.map((base) => (
                   <button
-                    className={`flex max-w-52 items-center gap-2 rounded border px-2 py-1 text-left text-xs ${base.id === activeBaseId ? "border-[var(--accent)] bg-[var(--accent)] text-white" : "border-[var(--line)] bg-white hover:border-[var(--accent)]"}`}
+                    className={`shrink-0 rounded border px-3 py-1.5 text-left text-xs font-medium ${base.id === activeBaseId ? "border-[var(--accent)] bg-[var(--accent)] text-white" : "border-[var(--line)] bg-white hover:border-[var(--accent)]"}`}
                     key={base.id}
                     type="button"
                     onClick={() => handleActivateBase(base.id)}
                   >
-                    <span className="truncate font-medium">{base.name}</span>
-                    <span className="shrink-0 rounded border border-current px-1 py-0.5 font-mono text-[10px] uppercase opacity-80">
-                      {base.sourceType}
-                    </span>
+                    <span className="block max-w-48 truncate">{base.name}</span>
                   </button>
                 ))}
                 {!planBase ? (
                   <button
-                    className="shrink-0 rounded border border-[var(--line)] bg-white px-2 py-1 text-xs font-medium hover:border-[var(--accent)]"
+                    className="shrink-0 rounded border border-[var(--line)] bg-white px-3 py-1.5 text-xs font-medium hover:border-[var(--accent)]"
                     disabled={isImporting}
                     type="button"
                     onClick={() => planInputRef.current?.click()}
@@ -6209,7 +6189,7 @@ export function DxfWorkbench() {
                   </button>
                 ) : null}
                 <button
-                  className="shrink-0 rounded border border-[var(--line)] bg-white px-2 py-1 text-xs font-medium hover:border-[var(--accent)]"
+                  className="shrink-0 rounded border border-[var(--line)] bg-white px-3 py-1.5 text-xs font-medium hover:border-[var(--accent)]"
                   disabled={isImporting}
                   type="button"
                   onClick={() => sectionInputRef.current?.click()}
@@ -6217,135 +6197,9 @@ export function DxfWorkbench() {
                   + Corte
                 </button>
               </div>
-              {activeBase ? (
-              <div className="flex shrink-0 items-center gap-1">
-                <button
-                  className="rounded px-2 py-1 text-xs text-[var(--muted)] hover:text-[var(--foreground)]"
-                  disabled={isImporting}
-                  type="button"
-                  onClick={() => replaceInputRef.current?.click()}
-                >
-                  Reemplazar
-                </button>
-                <button
-                  className="rounded px-2 py-1 text-xs text-[var(--muted)] hover:text-[var(--foreground)]"
-                  disabled={isImporting}
-                  type="button"
-                  onClick={handleRemoveActiveBase}
-                >
-                  Quitar
-                </button>
-              </div>
-              ) : null}
-              {!planBase ? (
-                <span className="shrink-0 rounded border border-[#ecd5ad] bg-[#fff9ec] px-2 py-1 text-xs text-[var(--warning)]">
-                  Falta agregar la planta
-                </span>
-              ) : null}
-            </div>
           </div>
           ) : null}
 
-          {hasAnyBase ? (
-          <div className="shrink-0 flex items-center justify-between gap-3 border-b border-[var(--line)] bg-white px-4 py-2 text-sm">
-            <div className="flex min-w-0 flex-1 items-center gap-2">
-              <span className="min-w-0 truncate text-[var(--muted)]">
-                {activeFileName ?? "Sin archivo cargado"}
-              </span>
-              {activeBase?.type === "section" ? (
-                <div className="flex shrink-0 flex-wrap items-center gap-1">
-                  <span className="rounded border border-[var(--line)] px-2 py-1 text-xs text-[var(--muted)]">
-                    {activeRegistrationSummary?.status ??
-                      (activeSectionLink ? "Vinculado · Sin correspondencia" : "Sin vincular")}
-                  </span>
-                  {activeRegistrationSummary?.lengthLabel ? (
-                    <span className="rounded border border-[var(--line)] px-2 py-1 text-xs text-[var(--muted)]">
-                      {activeRegistrationSummary.lengthLabel}
-                    </span>
-                  ) : null}
-                  {activeSectionLink ? (
-                    <>
-                      <button
-                        className="rounded border border-[var(--line)] bg-white px-2 py-1 text-xs hover:border-[var(--accent)]"
-                        type="button"
-                        onClick={() => handleViewSectionLinkInPlan(activeSectionLink)}
-                      >
-                        Ver en planta
-                      </button>
-                      <button
-                        className="rounded border border-[var(--line)] bg-white px-2 py-1 text-xs hover:border-[var(--accent)]"
-                        type="button"
-                        onClick={() => handleStartSectionLink(activeBase.id, true)}
-                      >
-                        Editar vinculo
-                      </button>
-                      <button
-                        className="rounded border border-[var(--line)] bg-white px-2 py-1 text-xs hover:border-[var(--accent)]"
-                        type="button"
-                        onClick={() => handleUnlinkSection(activeBase.id)}
-                      >
-                        Desvincular
-                      </button>
-                      {activeSectionLink.registration ? (
-                        <>
-                          <button
-                            className="rounded border border-[var(--line)] bg-white px-2 py-1 text-xs hover:border-[var(--accent)]"
-                            type="button"
-                            onClick={() => handleViewSectionRegistration(activeSectionLink)}
-                          >
-                            Ver referencias
-                          </button>
-                          <button
-                            className="rounded border border-[var(--line)] bg-white px-2 py-1 text-xs hover:border-[var(--accent)]"
-                            type="button"
-                            onClick={() => handleStartSectionRegistration(activeSectionLink, true)}
-                          >
-                            Editar correspondencia
-                          </button>
-                          <button
-                            className="rounded border border-[var(--line)] bg-white px-2 py-1 text-xs hover:border-[var(--accent)]"
-                            type="button"
-                            onClick={() => handleRemoveSectionRegistration(activeSectionLink)}
-                          >
-                            Quitar correspondencia
-                          </button>
-                        </>
-                      ) : (
-                        <button
-                          className="rounded border border-[var(--accent)] bg-[var(--accent)] px-2 py-1 text-xs font-medium text-white hover:bg-[var(--accent-strong)]"
-                          disabled={Boolean(sectionRegistrationDraft)}
-                          type="button"
-                          onClick={() => handleStartSectionRegistration(activeSectionLink)}
-                        >
-                          Definir correspondencia
-                        </button>
-                      )}
-                    </>
-                  ) : (
-                    <button
-                      className="shrink-0 rounded border border-[var(--accent)] bg-[var(--accent)] px-2 py-1 text-xs font-medium text-white hover:bg-[var(--accent-strong)]"
-                      disabled={!planBase || Boolean(sectionLinkDraft)}
-                      type="button"
-                      onClick={() => handleStartSectionLink(activeBase.id)}
-                    >
-                      Vincular con planta
-                    </button>
-                  )}
-                </div>
-              ) : null}
-            </div>
-            <div className="ml-3 flex shrink-0 items-center gap-3">
-              {activeBase ? (
-                <span className="rounded border border-[var(--line)] px-2 py-1 font-mono text-[10px] uppercase text-[var(--muted)]">
-                  {activeBase.sourceType}
-                </span>
-              ) : null}
-              <span className="font-mono text-xs text-[var(--muted)]">
-                {cursor ? `X ${formatNumber(cursor.x)} / Y ${formatNumber(cursor.y)}` : "X - / Y -"}
-              </span>
-            </div>
-          </div>
-          ) : null}
           {sessionError ? (
             <div className="m-4 rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
               {sessionError}
@@ -6740,6 +6594,7 @@ export function DxfWorkbench() {
         {hasAnyBase ? (
         <aside className="flex min-h-0 flex-col overflow-hidden border-l border-[var(--line)] bg-white">
           {activeWorkflowStage === "plan" && activeRightPanelSection !== "scale" ? (
+          <div className="min-h-0 flex-1 overflow-auto">
             <PlanStagePanel
               isImporting={isImporting}
               readiness={planStageReadiness}
@@ -6749,6 +6604,27 @@ export function DxfWorkbench() {
               onOpenScale={handleOpenPlanStageScale}
               onSectionAction={handlePlanStageSectionAction}
             />
+            {activeBase ? (
+              <PlanContextPanel
+                activeBase={activeBase}
+                activeRegistrationSummary={activeRegistrationSummary}
+                activeSectionLink={activeSectionLink}
+                hasSectionLinkDraft={Boolean(sectionLinkDraft)}
+                hasSectionRegistrationDraft={Boolean(sectionRegistrationDraft)}
+                isImporting={isImporting}
+                planReady={Boolean(planBase)}
+                onFitActiveView={handleFitActiveView}
+                onRemoveActiveBase={handleRemoveActiveBase}
+                onRemoveSectionRegistration={handleRemoveSectionRegistration}
+                onReplaceActiveBase={() => replaceInputRef.current?.click()}
+                onStartSectionLink={handleStartSectionLink}
+                onStartSectionRegistration={handleStartSectionRegistration}
+                onUnlinkSection={handleUnlinkSection}
+                onViewSectionLinkInPlan={handleViewSectionLinkInPlan}
+                onViewSectionRegistration={handleViewSectionRegistration}
+              />
+            ) : null}
+          </div>
           ) : null}
           {activeWorkflowStage === "plan" && activeRightPanelSection === "scale" ? (
           <div className="min-h-0 flex-1 overflow-auto">
@@ -6824,6 +6700,175 @@ function RouteSectionPreviewPanel({ onGoToPlan }: { onGoToPlan: () => void }) {
           Ir a Planta
         </button>
       </div>
+    </section>
+  );
+}
+
+function PlanContextPanel({
+  activeBase,
+  activeRegistrationSummary,
+  activeSectionLink,
+  hasSectionLinkDraft,
+  hasSectionRegistrationDraft,
+  isImporting,
+  planReady,
+  onFitActiveView,
+  onRemoveActiveBase,
+  onRemoveSectionRegistration,
+  onReplaceActiveBase,
+  onStartSectionLink,
+  onStartSectionRegistration,
+  onUnlinkSection,
+  onViewSectionLinkInPlan,
+  onViewSectionRegistration,
+}: {
+  activeBase: WorkbenchBase;
+  activeRegistrationSummary: SectionRegistrationSummary | null;
+  activeSectionLink: SectionPlanLink | null;
+  hasSectionLinkDraft: boolean;
+  hasSectionRegistrationDraft: boolean;
+  isImporting: boolean;
+  planReady: boolean;
+  onFitActiveView: () => void;
+  onRemoveActiveBase: () => void;
+  onRemoveSectionRegistration: (link: SectionPlanLink) => void;
+  onReplaceActiveBase: () => void;
+  onStartSectionLink: (sectionBaseId: string, edit?: boolean) => void;
+  onStartSectionRegistration: (link: SectionPlanLink, edit?: boolean) => void;
+  onUnlinkSection: (sectionBaseId: string) => void;
+  onViewSectionLinkInPlan: (link: SectionPlanLink) => void;
+  onViewSectionRegistration: (link: SectionPlanLink) => void;
+}) {
+  const isSection = activeBase.type === "section";
+  const sectionStatus =
+    activeRegistrationSummary?.status ??
+    (activeSectionLink ? "Vinculado · Sin correspondencia" : "Sin vincular");
+
+  return (
+    <section className="border-b border-[var(--line)] bg-white p-3 text-xs">
+      <h2 className="text-sm font-semibold">
+        {isSection ? "Corte" : "Planta"}
+      </h2>
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <button
+          className="col-span-2 rounded border border-[var(--line)] bg-white px-2 py-1 font-medium hover:border-[var(--accent)]"
+          type="button"
+          onClick={onFitActiveView}
+        >
+          Ajustar a pantalla
+        </button>
+        <button
+          className="rounded border border-[var(--line)] bg-white px-2 py-1 font-medium hover:border-[var(--accent)] disabled:cursor-not-allowed disabled:bg-[#f5f6f7] disabled:text-[var(--muted)]"
+          disabled={isImporting}
+          type="button"
+          onClick={onReplaceActiveBase}
+        >
+          Reemplazar
+        </button>
+        <button
+          className="rounded border border-[var(--line)] bg-white px-2 py-1 font-medium hover:border-[var(--accent)] disabled:cursor-not-allowed disabled:bg-[#f5f6f7] disabled:text-[var(--muted)]"
+          disabled={isImporting}
+          type="button"
+          onClick={onRemoveActiveBase}
+        >
+          Quitar
+        </button>
+      </div>
+
+      {isSection ? (
+        <div className="mt-4 border-t border-[var(--line)] pt-3">
+          <h3 className="font-semibold">Vinculación Planta-Corte</h3>
+          <p className="mt-1 text-[var(--muted)]">{sectionStatus}</p>
+
+          {activeRegistrationSummary?.lengthLabel ? (
+            <div className="mt-3 rounded border border-[var(--line)] px-3 py-2">
+              <div className="font-medium">Comparación de medidas</div>
+              <div className="mt-1 text-[var(--muted)]">
+                {activeRegistrationSummary.lengthLabel}
+              </div>
+            </div>
+          ) : null}
+
+          <div className="mt-3 grid gap-2">
+            {activeSectionLink ? (
+              <>
+                <button
+                  className="rounded border border-[var(--line)] bg-white px-2 py-1 font-medium hover:border-[var(--accent)]"
+                  type="button"
+                  onClick={() => onViewSectionLinkInPlan(activeSectionLink)}
+                >
+                  Ver en planta
+                </button>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    className="rounded border border-[var(--line)] bg-white px-2 py-1 font-medium hover:border-[var(--accent)]"
+                    type="button"
+                    onClick={() => onStartSectionLink(activeBase.id, true)}
+                  >
+                    Editar vínculo
+                  </button>
+                  <button
+                    className="rounded border border-[var(--line)] bg-white px-2 py-1 font-medium hover:border-[var(--accent)]"
+                    type="button"
+                    onClick={() => onUnlinkSection(activeBase.id)}
+                  >
+                    Desvincular
+                  </button>
+                </div>
+                {activeSectionLink.registration ? (
+                  <>
+                    <button
+                      className="rounded border border-[var(--line)] bg-white px-2 py-1 font-medium hover:border-[var(--accent)]"
+                      type="button"
+                      onClick={() => onViewSectionRegistration(activeSectionLink)}
+                    >
+                      Ver referencias
+                    </button>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        className="rounded border border-[var(--line)] bg-white px-2 py-1 font-medium hover:border-[var(--accent)]"
+                        type="button"
+                        onClick={() =>
+                          onStartSectionRegistration(activeSectionLink, true)
+                        }
+                      >
+                        Editar correspondencia
+                      </button>
+                      <button
+                        className="rounded border border-[var(--line)] bg-white px-2 py-1 font-medium hover:border-[var(--accent)]"
+                        type="button"
+                        onClick={() =>
+                          onRemoveSectionRegistration(activeSectionLink)
+                        }
+                      >
+                        Quitar correspondencia
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <button
+                    className="rounded border border-[var(--accent)] bg-[var(--accent)] px-2 py-1 font-medium text-white hover:bg-[var(--accent-strong)] disabled:cursor-not-allowed disabled:border-[var(--line)] disabled:bg-white disabled:text-[var(--muted)]"
+                    disabled={hasSectionRegistrationDraft}
+                    type="button"
+                    onClick={() => onStartSectionRegistration(activeSectionLink)}
+                  >
+                    Definir correspondencia
+                  </button>
+                )}
+              </>
+            ) : (
+              <button
+                className="rounded border border-[var(--accent)] bg-[var(--accent)] px-2 py-1 font-medium text-white hover:bg-[var(--accent-strong)] disabled:cursor-not-allowed disabled:border-[var(--line)] disabled:bg-white disabled:text-[var(--muted)]"
+                disabled={!planReady || hasSectionLinkDraft}
+                type="button"
+                onClick={() => onStartSectionLink(activeBase.id)}
+              >
+                Vincular con planta
+              </button>
+            )}
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }

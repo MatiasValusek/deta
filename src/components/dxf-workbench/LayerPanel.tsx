@@ -16,28 +16,41 @@ export function LayerPanel({
   onToggle,
   onSetAll,
 }: LayerPanelProps) {
+  const allLayersVisible =
+    layers.length > 0 &&
+    layers.every((layer) => visibility[layer.name] ?? layer.visible);
+  const nextGlobalVisibility = !allLayersVisible;
+  const globalVisibilityLabel = nextGlobalVisibility
+    ? "Mostrar todas las capas"
+    : "Ocultar todas las capas";
+
   return (
     <div className="flex h-full flex-col">
-      <div className="border-b border-[var(--line)] px-4 py-3">
+      <div className="flex items-center justify-between gap-3 border-b border-[var(--line)] px-4 py-3">
         <h2 className="text-sm font-semibold">Capas</h2>
-        <div className="mt-3 flex gap-2">
-          <button
-            className="rounded border border-[var(--line)] px-2 py-1 text-xs hover:border-[var(--accent)]"
-            disabled={layers.length === 0}
-            type="button"
-            onClick={() => onSetAll(true)}
+        <button
+          aria-label={globalVisibilityLabel}
+          className="inline-flex h-8 w-8 items-center justify-center rounded border border-[var(--line)] bg-white text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--foreground)] disabled:cursor-not-allowed disabled:bg-[#f5f6f7] disabled:text-[var(--muted)]"
+          disabled={layers.length === 0}
+          title={globalVisibilityLabel}
+          type="button"
+          onClick={() => onSetAll(nextGlobalVisibility)}
+        >
+          <svg
+            aria-hidden="true"
+            className="h-4 w-4"
+            fill="none"
+            stroke="currentColor"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth="1.8"
+            viewBox="0 0 24 24"
           >
-            Mostrar
-          </button>
-          <button
-            className="rounded border border-[var(--line)] px-2 py-1 text-xs hover:border-[var(--accent)]"
-            disabled={layers.length === 0}
-            type="button"
-            onClick={() => onSetAll(false)}
-          >
-            Ocultar
-          </button>
-        </div>
+            <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" />
+            <circle cx="12" cy="12" r="2.8" />
+            {!allLayersVisible ? <path d="M4 4l16 16" /> : null}
+          </svg>
+        </button>
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto px-3 py-3">
