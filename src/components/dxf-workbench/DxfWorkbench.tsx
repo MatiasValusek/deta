@@ -238,6 +238,7 @@ import {
   type PlanStageBaseReadiness,
   type PlanStageReadiness,
 } from "@/lib/workbench/planStageFlow";
+import { createRouteReviewState } from "@/lib/workbench/reviewStage";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { DxfViewer } from "./DxfViewer";
 import { EquipmentPanel } from "./EquipmentPanel";
@@ -824,6 +825,24 @@ export function DxfWorkbench() {
     connectedApplianceIds.size === applianceEquipment.length &&
     routeRestrictionCount === 0 &&
     !routeCycleDetected;
+  const routeReviewState = useMemo(
+    () =>
+      createRouteReviewState({
+        equipment: planEquipment,
+        hasActiveProposal: Boolean(routeProposal),
+        hasRouteCycle: routeCycleDetected,
+        network: routeNetwork,
+        routeRestrictionCount,
+      }),
+    [
+      planEquipment,
+      routeCycleDetected,
+      routeNetwork,
+      routeProposal,
+      routeRestrictionCount,
+    ],
+  );
+  const canOpenReviewStage = routeReviewState.canOpenReview;
   const activeRouteDraftOverlay = useMemo(() => {
     if (!activeBase || activeBase.id !== routeDraft?.planBaseId) {
       return null;
@@ -1484,6 +1503,13 @@ export function DxfWorkbench() {
   }, [activeRightPanelSection, routeDraft, routeIntentDraft]);
 
   useEffect(() => {
+    if (activeMainStage === "review" && !canOpenReviewStage) {
+      setActiveMainStage("route");
+      setActiveRightPanelSection("route");
+    }
+  }, [activeMainStage, canOpenReviewStage]);
+
+  useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       const target = event.target;
 
@@ -1756,6 +1782,13 @@ export function DxfWorkbench() {
       return;
     }
 
+    if (stage === "review" && !canOpenReviewStage) {
+      setActiveMainStage("route");
+      setActiveRightPanelSection("route");
+      setRouteError("Confirma un recorrido valido antes de revisar.");
+      return;
+    }
+
     if (stage !== "review") {
       setSectionRouteHeightEditor(null);
     }
@@ -1803,8 +1836,9 @@ export function DxfWorkbench() {
   }
 
   function handleContinueToCalculateFromReview() {
-    if (!isRouteComplete) {
-      setActiveRightPanelSection("review");
+    if (!canOpenReviewStage) {
+      setActiveMainStage("route");
+      setActiveRightPanelSection("route");
       setRouteError("Confirma un recorrido valido antes de calcular.");
       return;
     }
@@ -4568,7 +4602,7 @@ export function DxfWorkbench() {
   }
 
   function handleContinueToReviewFromRoute() {
-    if (!isRouteComplete) {
+    if (!canOpenReviewStage) {
       setActiveRightPanelSection("route");
       setRouteError("Confirma un recorrido valido antes de revisar.");
       return;
@@ -5695,13 +5729,15 @@ export function DxfWorkbench() {
       : "Pendiente"
     : "Sin base activa";
   const activeWorkflowStage =
-    activeMainStage === "plan" || planStageReadiness.canContinueToEquipment
-      ? activeMainStage
-      : "plan";
+    activeMainStage === "review" && !canOpenReviewStage
+      ? "route"
+      : activeMainStage === "plan" || planStageReadiness.canContinueToEquipment
+        ? activeMainStage
+        : "plan";
   const isReviewStage = activeWorkflowStage === "review";
   const reviewSummaryText = !planBase
     ? "Sin Planta"
-    : isRouteComplete
+    : canOpenReviewStage
       ? "Listo para calcular"
       : "Falta recorrido confirmado";
   const reviewSectionItems: ReviewSectionItem[] = bases
@@ -5844,7 +5880,7 @@ export function DxfWorkbench() {
           hasAppliances={applianceEquipment.length > 0}
           hasSupply={supplyCount === 1}
           isGeneratingProposal={isRouteProposalGenerating}
-          isComplete={isRouteComplete}
+          isComplete={canOpenReviewStage}
           isPlanActive={activeBase?.type === "plan"}
           isSectionContent
           lengthLabel={routeLengthLabel}
@@ -5890,19 +5926,21 @@ export function DxfWorkbench() {
       id: "review",
       title: "Revisar",
       summary: reviewSummaryText,
-      disabled: !planBase,
-      disabledReason: "Sin Planta",
+      disabled: !canOpenReviewStage,
+      disabledReason: planBase
+        ? "Falta recorrido confirmado"
+        : "Sin Planta",
       hasActiveTool: Boolean(selectedRouteEdit || sectionRouteHeightEditor),
       content: (
         <ReviewPanel
           activeBaseType={activeBase?.type ?? null}
-          connectedApplianceCount={connectedApplianceIds.size}
-          hasValidRoute={isRouteComplete}
+          connectedApplianceCount={routeReviewState.connectedApplianceCount}
+          hasValidRoute={canOpenReviewStage}
           isPlanActive={activeBase?.type === "plan"}
           planName={planBase?.name ?? null}
           routeRestrictionCount={routeRestrictionCount}
           sections={reviewSectionItems}
-          totalApplianceCount={applianceEquipment.length}
+          totalApplianceCount={routeReviewState.totalApplianceCount}
           onContinueToCalculate={handleContinueToCalculateFromReview}
           onOpenPlan={handleReviewPlanOpen}
           onOpenSection={handleReviewSectionOpen}
@@ -6038,8 +6076,9 @@ export function DxfWorkbench() {
           {MAIN_WORKFLOW_STAGES.map((stage) => {
             const isActive = stage.id === activeWorkflowStage;
             const isLocked =
-              stage.id !== "plan" &&
-              !planStageReadiness.canContinueToEquipment;
+              (stage.id !== "plan" &&
+                !planStageReadiness.canContinueToEquipment) ||
+              (stage.id === "review" && !canOpenReviewStage);
 
             return (
               <button
