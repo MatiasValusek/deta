@@ -130,6 +130,7 @@ import {
   hasRoutePath,
   hasSegmentsWithMissingEndpoints,
   hasZeroLengthSegments,
+  isEquipmentTerminalSegment,
   pruneOrphanRouteNodes,
   projectPointToRouteSegmentPath,
   removeApplianceBranch,
@@ -4351,9 +4352,21 @@ export function DxfWorkbench() {
         return;
       }
 
+      const terminalRoutes = ensureEquipmentTerminalRoutes(
+        plan,
+        plan.equipment,
+        plan.routeNetwork,
+      );
+
+      if (!terminalRoutes.ok) {
+        setRouteError(terminalRoutes.message);
+        setIsRouteProposalGenerating(false);
+        return;
+      }
+
       const proposalPageNumber = routeProposalPdfPageNumber(plan);
       const proposal = buildProposalFromIntent({
-        baseNetwork: plan.routeNetwork,
+        baseNetwork: terminalRoutes.network,
         bounds: routeSourceBounds(plan),
         equipment: plan.equipment,
         fingerprint: createRouteIntentProposalFingerprint(
@@ -4442,9 +4455,21 @@ export function DxfWorkbench() {
         return;
       }
 
+      const terminalRoutes = ensureEquipmentTerminalRoutes(
+        plan,
+        plan.equipment,
+        plan.routeNetwork,
+      );
+
+      if (!terminalRoutes.ok) {
+        setRouteError(terminalRoutes.message);
+        setIsRouteProposalGenerating(false);
+        return;
+      }
+
       const proposalPageNumber = routeProposalPdfPageNumber(plan);
       const proposal = generateAutomaticRouteProposal({
-        baseNetwork: plan.routeNetwork,
+        baseNetwork: terminalRoutes.network,
         bounds: routeSourceBounds(plan),
         equipment: plan.equipment,
         fingerprint: createRouteProposalFingerprint(
@@ -4490,6 +4515,52 @@ export function DxfWorkbench() {
     handleGenerateRouteProposal();
   }
 
+  function handleContinueToReviewFromRoute() {
+    if (!isRouteComplete) {
+      setActiveRightPanelSection("route");
+      setRouteError("Confirma un recorrido valido antes de revisar.");
+      return;
+    }
+
+    handleMainWorkflowStageChange("review");
+  }
+
+  function handleEditConfirmedRoute() {
+    setActiveRightPanelSection("route");
+
+    if (planBase) {
+      updateBase(planBase.id, (base) => ({
+        ...base,
+        showRoute: true,
+      }));
+    }
+
+    setRouteProposal(null);
+    setRouteProposalMode(null);
+    setRouteDraft(null);
+    setRouteIntentDraft(null);
+    setSelectedRouteEdit(null);
+    setRouteError(null);
+  }
+
+  function handleEditRouteProposal() {
+    setActiveRightPanelSection("route");
+
+    if (planBase) {
+      updateBase(planBase.id, (base) => ({
+        ...base,
+        showRoute: true,
+      }));
+    }
+
+    setRouteProposal(null);
+    setRouteProposalMode(null);
+    setRouteDraft(null);
+    setRouteIntentDraft(null);
+    setSelectedRouteEdit(null);
+    setRouteError(null);
+  }
+
   function handleAcceptRouteProposal() {
     setActiveRightPanelSection("route");
 
@@ -4512,7 +4583,7 @@ export function DxfWorkbench() {
     }
 
     if (
-      planBase.routeNetwork.segments.length > 0 &&
+      routeNetworkHasInstallation(planBase.routeNetwork, planBase.equipment) &&
       !window.confirm("Aceptar la propuesta reemplazara la red actual. Continuar?")
     ) {
       return;
@@ -5543,7 +5614,11 @@ export function DxfWorkbench() {
   const routeSummaryText = planBase
     ? supplyCount !== 1
       ? "Falta alimentacion"
-      : `${connectedApplianceIds.size} de ${applianceEquipment.length} conectados - ${planBase.routeIntentConnections.length} intenciones - ${routeRestrictionCount} restricciones`
+      : routeProposal
+        ? `Propuesta ${routeProposal.reachedEquipmentIds.length} de ${applianceEquipment.length}`
+        : isRouteComplete
+          ? "Recorrido confirmado"
+          : `${connectedApplianceIds.size} de ${applianceEquipment.length} conectados`
     : "Sin Planta";
   const calculationSummaryText = technicalCalculationResult
     ? technicalCalculationResult.status === "valid"
@@ -5712,6 +5787,9 @@ export function DxfWorkbench() {
           onDeleteIntentConnection={handleDeleteRouteIntentConnection}
           onDiscardProposal={handleDiscardRouteProposal}
           onDisconnectAppliance={handleDisconnectRouteAppliance}
+          onContinueToReview={handleContinueToReviewFromRoute}
+          onEditInstallation={handleEditConfirmedRoute}
+          onEditProposal={handleEditRouteProposal}
           onGenerateProposal={handleGenerateRouteProposal}
           onGoToPlan={handleGoToPlanForRoute}
           onGoToScale={handleGoToScaleForRouteProposal}
@@ -8924,6 +9002,16 @@ function routeNetworkConnectedToSupply(
   );
 }
 
+function routeNetworkHasInstallation(
+  network: ManualRouteNetwork,
+  equipment: WorkbenchEquipment[],
+) {
+  return (
+    getConnectedApplianceEquipmentIds(network, equipment).size > 0 ||
+    network.segments.some((segment) => !isEquipmentTerminalSegment(segment))
+  );
+}
+
 function routeNodeIsStandaloneTerminal(
   network: ManualRouteNetwork,
   node: RouteNode,
@@ -9133,17 +9221,28 @@ function createRouteProposalFingerprint(
   const pageNumber = routeProposalPdfPageNumber(plan);
   const scale = calibrationScaleMetersPerSourceUnit(plan) ?? 0;
   const equipmentSignature = plan.equipment
-    .map(
-      (equipment) =>
-        [
-          equipment.id,
-          equipment.role,
-          equipment.pdfPageNumber ?? "",
-          formatFingerprintNumber(equipment.connectionPoint.x),
-          formatFingerprintNumber(equipment.connectionPoint.y),
-          formatFingerprintNumber(pointZMeters(equipment.connectionPoint)),
-        ].join(":"),
-    )
+    .map((equipment) => {
+      const terminalConfig = equipment.terminalConfig;
+      const wallPoint = equipment.wallAnchor?.wallPoint ?? null;
+
+      return [
+        equipment.id,
+        equipment.role,
+        equipment.pdfPageNumber ?? "",
+        formatFingerprintNumber(equipment.connectionPoint.x),
+        formatFingerprintNumber(equipment.connectionPoint.y),
+        formatFingerprintNumber(pointZMeters(equipment.connectionPoint)),
+        terminalConfig?.heightStatus ?? "",
+        formatFingerprintNumber(terminalConfig?.connectionHeightMeters ?? 0),
+        formatFingerprintNumber(terminalConfig?.lateralOffsetMeters ?? 0),
+        terminalConfig?.outletSide ?? "",
+        formatFingerprintNumber(terminalConfig?.verticalDropMeters ?? 0),
+        formatFingerprintNumber(equipment.wallAnchor?.orientationRadians ?? 0),
+        wallPoint ? formatFingerprintNumber(wallPoint.x) : "",
+        wallPoint ? formatFingerprintNumber(wallPoint.y) : "",
+        wallPoint ? formatFingerprintNumber(pointZMeters(wallPoint)) : "",
+      ].join(":");
+    })
     .sort()
     .join("|");
   const constraintSignature = plan.constraints
