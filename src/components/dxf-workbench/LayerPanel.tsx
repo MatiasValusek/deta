@@ -42,7 +42,7 @@ export function LayerPanel({
 
       <div className="min-h-0 flex-1 overflow-auto px-3 py-3">
         {layers.length === 0 ? (
-          <p className="text-sm text-[var(--muted)]">Seleccione un DXF.</p>
+          <p className="text-sm text-[var(--muted)]">Sin capas disponibles.</p>
         ) : (
           <div className="space-y-1">
             {layers.map((layer) => {

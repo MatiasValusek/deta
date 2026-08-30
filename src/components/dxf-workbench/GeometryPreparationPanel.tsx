@@ -74,7 +74,7 @@ export function GeometryPreparationPanel({
             Preparar geometria
           </h2>
           <p className="mt-1 text-xs text-[var(--muted)]">
-            {drawing ? `${drawing.entities.length} primitivas` : "Sin DXF"}
+            {drawing ? `${drawing.entities.length} primitivas` : "Sin dibujo"}
           </p>
         </div>
         <button

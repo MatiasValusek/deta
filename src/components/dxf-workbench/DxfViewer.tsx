@@ -811,7 +811,7 @@ export function DxfViewer({
             x={Math.max(size.width, 1) / 2}
             y={Math.max(size.height, 1) / 2}
           >
-            Seleccione un DXF
+            Seleccione una base
           </text>
         ) : (
           <g>

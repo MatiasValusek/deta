@@ -571,6 +571,7 @@ export function DxfWorkbench() {
     () => bases.find((base) => base.id === activeBaseId) ?? null,
     [activeBaseId, bases],
   );
+  const hasAnyBase = bases.length > 0;
   const orderedBases = useMemo(
     () =>
       [...bases].sort((a, b) => {
@@ -5667,7 +5668,6 @@ export function DxfWorkbench() {
   }
 
   const activeFileName = activeBase?.originalFileName;
-  const fitDisabled = !activeBase;
   const canSaveSectionLink =
     Boolean(sectionLinkDraft?.planStart) &&
     Boolean(sectionLinkDraft?.planEnd) &&
@@ -5690,14 +5690,14 @@ export function DxfWorkbench() {
       proposal.status === "pending" || proposal.status === "modified",
   ).length;
   const geometrySummary = !activeBase
-    ? "Sin base"
+    ? "Sin base cargada"
     : activeView === "dxf"
       ? drawing
         ? `${drawing.entities.length} primitivas - ${geometryPendingCount} pendientes`
-        : "Sin DXF"
+        : "Sin dibujo"
       : pdfModel
         ? `PDF - ${pdfModel.pageCount} paginas`
-        : "Sin PDF";
+        : "Sin documento";
   const equipmentSummary = planBase
     ? `${supplyCount} alimentacion - ${applianceCount} artefactos - ${pendingDemandCount} pendientes`
     : "Sin Planta";
@@ -5817,7 +5817,7 @@ export function DxfWorkbench() {
         </div>
       ) : (
         <div className="px-4 py-3 text-sm text-[var(--muted)]">
-          Agrega una Planta o un Corte para comenzar
+          Carga la Planta para comenzar.
         </div>
       ),
     },
@@ -6046,27 +6046,25 @@ export function DxfWorkbench() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-xl font-semibold tracking-normal">deta</h1>
-            <p className="mt-1 text-sm text-[var(--muted)]">
-              Plano - Artefactos - Recorrido - Revisar - Calcular - Entregar
-            </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
             <button
-              className="rounded border border-[var(--line)] bg-white px-3 py-2 text-sm font-medium hover:border-[var(--accent)]"
+              className="rounded px-2 py-1 text-xs text-[var(--muted)] hover:text-[var(--foreground)]"
               type="button"
               onClick={handleResetLocalProject}
             >
               Restablecer proyecto local
             </button>
-            <button
-              className="rounded border border-[var(--line)] bg-white px-3 py-2 text-sm font-medium hover:border-[var(--accent)]"
-              disabled={fitDisabled}
-              type="button"
-              onClick={handleFitActiveView}
-            >
-              Ajustar a pantalla
-            </button>
+            {activeBase ? (
+              <button
+                className="rounded border border-[var(--line)] bg-white px-3 py-2 text-sm font-medium hover:border-[var(--accent)]"
+                type="button"
+                onClick={handleFitActiveView}
+              >
+                Ajustar a pantalla
+              </button>
+            ) : null}
           </div>
         </div>
         <nav
@@ -6128,26 +6126,35 @@ export function DxfWorkbench() {
         onChange={(event) => handleBaseFileInput(event, "replace-active")}
       />
 
-      <section className="grid min-h-0 flex-1 grid-cols-[280px_minmax(0,1fr)_340px] gap-0 overflow-hidden">
-        <aside className="min-h-0 overflow-hidden border-r border-[var(--line)] bg-white">
-          {activeView === "dxf" ? (
-            <LayerPanel
-              counts={layerEntityCounts}
-              layers={drawing?.layers ?? []}
-              visibility={activeBase?.visibleLayers ?? {}}
-              onSetAll={setEveryLayer}
-              onToggle={toggleLayer}
-            />
-          ) : (
-            <PdfPanel
-              activePageNumber={activePdfPageNumber}
-              pdf={pdfModel}
-              onPageChange={handlePdfPageChange}
-            />
-          )}
-        </aside>
+      <section
+        className={`grid min-h-0 flex-1 gap-0 overflow-hidden ${
+          hasAnyBase ? "grid-cols-[280px_minmax(0,1fr)_340px]" : "grid-cols-1"
+        }`}
+      >
+        {hasAnyBase ? (
+          <aside className="min-h-0 overflow-hidden border-r border-[var(--line)] bg-white">
+            {activeBase ? (
+              activeView === "dxf" ? (
+                <LayerPanel
+                  counts={layerEntityCounts}
+                  layers={drawing?.layers ?? []}
+                  visibility={activeBase.visibleLayers}
+                  onSetAll={setEveryLayer}
+                  onToggle={toggleLayer}
+                />
+              ) : (
+                <PdfPanel
+                  activePageNumber={activePdfPageNumber}
+                  pdf={pdfModel}
+                  onPageChange={handlePdfPageChange}
+                />
+              )
+            ) : null}
+          </aside>
+        ) : null}
 
         <section className="flex min-h-0 min-w-0 flex-col overflow-hidden">
+          {hasAnyBase ? (
           <div className="shrink-0 border-b border-[var(--line)] bg-white px-3 py-2">
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               <span className="text-xs font-semibold uppercase text-[var(--muted)]">
@@ -6186,10 +6193,11 @@ export function DxfWorkbench() {
                   + Corte
                 </button>
               </div>
+              {activeBase ? (
               <div className="flex shrink-0 items-center gap-1">
                 <button
                   className="rounded border border-[var(--line)] bg-white px-2 py-1 text-xs hover:border-[var(--accent)]"
-                  disabled={!activeBase || isImporting}
+                  disabled={isImporting}
                   type="button"
                   onClick={() => replaceInputRef.current?.click()}
                 >
@@ -6197,13 +6205,14 @@ export function DxfWorkbench() {
                 </button>
                 <button
                   className="rounded border border-[var(--line)] bg-white px-2 py-1 text-xs hover:border-[var(--accent)]"
-                  disabled={!activeBase || isImporting}
+                  disabled={isImporting}
                   type="button"
                   onClick={handleRemoveActiveBase}
                 >
                   Quitar
                 </button>
               </div>
+              ) : null}
               {!planBase ? (
                 <span className="shrink-0 rounded border border-[#ecd5ad] bg-[#fff9ec] px-2 py-1 text-xs text-[var(--warning)]">
                   Falta agregar la planta
@@ -6211,7 +6220,9 @@ export function DxfWorkbench() {
               ) : null}
             </div>
           </div>
+          ) : null}
 
+          {hasAnyBase ? (
           <div className="shrink-0 flex items-center justify-between gap-3 border-b border-[var(--line)] bg-white px-4 py-2 text-sm">
             <div className="flex min-w-0 flex-1 items-center gap-2">
               <span className="min-w-0 truncate text-[var(--muted)]">
@@ -6310,6 +6321,7 @@ export function DxfWorkbench() {
               </span>
             </div>
           </div>
+          ) : null}
           {sessionError ? (
             <div className="m-4 rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
               {sessionError}
@@ -6335,6 +6347,14 @@ export function DxfWorkbench() {
             </div>
           ) : null}
           <div className="relative min-h-0 flex-1">
+          {!hasAnyBase ? (
+            <EmptyPlanStart
+              isImporting={isImporting}
+              onAddPlan={() => planInputRef.current?.click()}
+              onAddSection={() => sectionInputRef.current?.click()}
+            />
+          ) : (
+          <>
           {activeRouteDraftOverlay ? (
             <RouteContextCard
               draft={activeRouteDraftOverlay}
@@ -6688,9 +6708,12 @@ export function DxfWorkbench() {
                 hoveredSectionLinkId={hoveredSectionLinkId}
               />
             </div>
+          </>
+          )}
           </div>
         </section>
 
+        {hasAnyBase ? (
         <aside className="flex min-h-0 flex-col overflow-hidden border-l border-[var(--line)] bg-white">
           {activeWorkflowStage === "plan" ? (
             <PlanStagePanel
@@ -6711,8 +6734,46 @@ export function DxfWorkbench() {
             />
           </div>
         </aside>
+        ) : null}
       </section>
     </main>
+  );
+}
+
+function EmptyPlanStart({
+  isImporting,
+  onAddPlan,
+  onAddSection,
+}: {
+  isImporting: boolean;
+  onAddPlan: () => void;
+  onAddSection: () => void;
+}) {
+  return (
+    <div className="flex h-full min-h-[360px] items-center justify-center bg-[#eef0ec] px-6 py-10">
+      <div className="w-full max-w-sm text-center">
+        <h2 className="text-2xl font-semibold tracking-normal">
+          Comenzá cargando la Planta
+        </h2>
+        <p className="mt-2 text-sm text-[var(--muted)]">DXF o PDF</p>
+        <button
+          className="mt-6 w-full rounded border border-[var(--accent)] bg-[var(--accent)] px-4 py-3 text-sm font-semibold text-white hover:bg-[var(--accent-strong)] disabled:cursor-not-allowed disabled:border-[var(--line)] disabled:bg-white disabled:text-[var(--muted)]"
+          disabled={isImporting}
+          type="button"
+          onClick={onAddPlan}
+        >
+          Cargar Planta
+        </button>
+        <button
+          className="mt-2 w-full rounded border border-[var(--line)] bg-white px-4 py-2 text-sm font-medium text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--foreground)] disabled:cursor-not-allowed disabled:bg-[#f5f6f7]"
+          disabled={isImporting}
+          type="button"
+          onClick={onAddSection}
+        >
+          Agregar Corte (opcional)
+        </button>
+      </div>
+    </div>
   );
 }
 
