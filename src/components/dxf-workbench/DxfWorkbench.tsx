@@ -235,7 +235,6 @@ import {
 } from "@/lib/workbench/persistence";
 import {
   createPlanStageReadiness,
-  type PlanStageBaseReadiness,
   type PlanStageReadiness,
 } from "@/lib/workbench/planStageFlow";
 import { createRouteReviewState } from "@/lib/workbench/reviewStage";
@@ -399,7 +398,7 @@ const MAIN_WORKFLOW_PANEL_SECTIONS: Record<
   calculate: ["calculation"],
   deliver: ["calculation"],
   equipment: ["equipment"],
-  plan: ["geometry", "scale"],
+  plan: ["scale"],
   review: ["review"],
   route: ["route"],
 };
@@ -566,6 +565,20 @@ export function DxfWorkbench() {
     routeProposalMode,
     sectionPlanLinks,
   ]);
+
+  useEffect(() => {
+    if (persistenceNotice?.message !== "Proyecto local restablecido.") {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setPersistenceNotice((current) =>
+        current?.message === "Proyecto local restablecido." ? null : current,
+      );
+    }, 3200);
+
+    return () => window.clearTimeout(timer);
+  }, [persistenceNotice]);
 
   const activeBase = useMemo(
     () => bases.find((base) => base.id === activeBaseId) ?? null,
@@ -6196,7 +6209,7 @@ export function DxfWorkbench() {
               {activeBase ? (
               <div className="flex shrink-0 items-center gap-1">
                 <button
-                  className="rounded border border-[var(--line)] bg-white px-2 py-1 text-xs hover:border-[var(--accent)]"
+                  className="rounded px-2 py-1 text-xs text-[var(--muted)] hover:text-[var(--foreground)]"
                   disabled={isImporting}
                   type="button"
                   onClick={() => replaceInputRef.current?.click()}
@@ -6204,7 +6217,7 @@ export function DxfWorkbench() {
                   Reemplazar
                 </button>
                 <button
-                  className="rounded border border-[var(--line)] bg-white px-2 py-1 text-xs hover:border-[var(--accent)]"
+                  className="rounded px-2 py-1 text-xs text-[var(--muted)] hover:text-[var(--foreground)]"
                   disabled={isImporting}
                   type="button"
                   onClick={handleRemoveActiveBase}
@@ -6726,6 +6739,7 @@ export function DxfWorkbench() {
               onSectionAction={handlePlanStageSectionAction}
             />
           ) : null}
+          {activeWorkflowStage !== "plan" || activeRightPanelSection === "scale" ? (
           <div className="min-h-0 flex-1 overflow-hidden">
             <RightPanelSections
               activeSectionId={activeRightPanelSection}
@@ -6733,6 +6747,7 @@ export function DxfWorkbench() {
               onActiveSectionChange={setActiveRightPanelSection}
             />
           </div>
+          ) : null}
         </aside>
         ) : null}
       </section>
@@ -6815,78 +6830,94 @@ function PlanStagePanel({
   onOpenScale: (baseId: string | null) => void;
   onSectionAction: (baseId: string | null) => void;
 }) {
+  const planLoaded = readiness.plan.status !== "missing";
+  const scalePending = planLoaded && readiness.plan.status === "pending";
+  const sectionCount = readiness.sections.length;
+  const activeSection =
+    readiness.sections.find((section) => section.status !== "ready") ??
+    readiness.sections[0] ??
+    null;
+
   return (
     <section
       className="shrink-0 border-b border-[var(--line)] bg-white p-3 text-xs"
       data-plan-stage-flow="true"
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h2 className="text-sm font-semibold">Plano</h2>
-          <p className="mt-1 text-[var(--muted)]">
-            Planta, escala y corte opcional.
-          </p>
-        </div>
-        <span
-          className={`shrink-0 rounded border px-2 py-1 font-medium ${planStageStatusClassName(
-            readiness.canContinueToEquipment ? "ready" : "pending",
-          )}`}
-        >
-          {readiness.canContinueToEquipment ? "lista" : "pendiente"}
-        </span>
-      </div>
+      <h2 className="text-sm font-semibold">Plano</h2>
 
       <div className="mt-3 space-y-2">
-        <PlanStageBaseRow
-          actionLabel={planStagePlanActionLabel(readiness.plan)}
-          item={readiness.plan}
-          onAction={() =>
-            readiness.plan.status === "missing"
-              ? onAddPlan()
-              : onOpenScale(readiness.plan.baseId)
-          }
-        />
-        {readiness.sections.length > 0 ? (
-          readiness.sections.map((section) => (
-            <PlanStageBaseRow
-              actionLabel={planStageSectionActionLabel(section)}
-              item={section}
-              key={section.baseId ?? section.title}
-              onAction={() => onSectionAction(section.baseId)}
-            />
-          ))
-        ) : (
-          <PlanStageBaseRow
-            actionLabel="Agregar Corte"
-            item={{
-              baseId: null,
-              reason: "Opcional",
-              status: "missing",
-              title: "Corte",
-              type: "section",
-            }}
-            onAction={onAddSection}
-          />
-        )}
-      </div>
+        <div className="rounded border border-[var(--line)] px-3 py-2">
+          <div className="font-semibold">
+            {planLoaded ? "Planta cargada" : "Comenzá cargando la Planta"}
+          </div>
+          <div className="mt-1 truncate text-[var(--muted)]">
+            {planLoaded ? readiness.plan.title : "DXF o PDF"}
+          </div>
+          {!planLoaded ? (
+            <button
+              className="mt-2 w-full rounded border border-[var(--accent)] bg-[var(--accent)] px-3 py-2 font-semibold text-white hover:bg-[var(--accent-strong)] disabled:cursor-not-allowed disabled:border-[var(--line)] disabled:bg-white disabled:text-[var(--muted)]"
+              disabled={isImporting}
+              type="button"
+              onClick={onAddPlan}
+            >
+              Cargar Planta
+            </button>
+          ) : null}
+        </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-2">
-        <button
-          className="rounded border border-[var(--line)] bg-white px-2 py-1 font-medium hover:border-[var(--accent)] disabled:cursor-not-allowed disabled:bg-[#f5f6f7] disabled:text-[var(--muted)]"
-          disabled={isImporting}
-          type="button"
-          onClick={onAddPlan}
-        >
-          Cargar Planta
-        </button>
-        <button
-          className="rounded border border-[var(--line)] bg-white px-2 py-1 font-medium hover:border-[var(--accent)] disabled:cursor-not-allowed disabled:bg-[#f5f6f7] disabled:text-[var(--muted)]"
-          disabled={isImporting}
-          type="button"
-          onClick={onAddSection}
-        >
-          Agregar Corte
-        </button>
+        {planLoaded ? (
+          <div className="rounded border border-[var(--line)] px-3 py-2">
+            <div className={scalePending ? "font-semibold text-[var(--warning)]" : "font-semibold text-[#24713a]"}>
+              {scalePending ? "Escala pendiente" : "Escala confirmada"}
+            </div>
+            <button
+              className={`mt-2 w-full rounded border px-3 py-2 font-semibold disabled:cursor-not-allowed disabled:border-[var(--line)] disabled:bg-white disabled:text-[var(--muted)] ${
+                scalePending
+                  ? "border-[var(--accent)] bg-[var(--accent)] text-white hover:bg-[var(--accent-strong)]"
+                  : "border-[var(--line)] bg-white text-[var(--foreground)] hover:border-[var(--accent)]"
+              }`}
+              disabled={isImporting}
+              type="button"
+              onClick={() => onOpenScale(readiness.plan.baseId)}
+            >
+              {scalePending ? "Confirmar escala" : "Ver escala"}
+            </button>
+          </div>
+        ) : null}
+
+        <div className="rounded border border-[var(--line)] px-3 py-2">
+          <div className="font-semibold">Corte opcional</div>
+          <div className="mt-1 text-[var(--muted)]">
+            {sectionCount === 0
+              ? "Podés agregarlo ahora o más adelante."
+              : `${sectionCount} ${sectionCount === 1 ? "Corte cargado" : "Cortes cargados"}.`}
+          </div>
+          <div
+            className={`mt-2 grid gap-2 ${
+              activeSection ? "grid-cols-2" : "grid-cols-1"
+            }`}
+          >
+            {activeSection ? (
+              <button
+                className="rounded border border-[var(--line)] bg-white px-2 py-1 font-medium hover:border-[var(--accent)]"
+                type="button"
+                onClick={() => onSectionAction(activeSection.baseId)}
+              >
+                {activeSection.status === "ready"
+                  ? "Ver Corte"
+                  : activeSection.reason}
+              </button>
+            ) : null}
+            <button
+              className="rounded border border-[var(--line)] bg-white px-2 py-1 font-medium hover:border-[var(--accent)] disabled:cursor-not-allowed disabled:bg-[#f5f6f7] disabled:text-[var(--muted)]"
+              disabled={isImporting}
+              type="button"
+              onClick={onAddSection}
+            >
+              Agregar Corte
+            </button>
+          </div>
+        </div>
       </div>
 
       {readiness.canContinueToEquipment ? (
@@ -6897,84 +6928,9 @@ function PlanStagePanel({
         >
           Continuar a Artefactos
         </button>
-      ) : (
-        <p className="mt-3 rounded border border-[#ecd5ad] bg-[#fff9ec] px-2 py-1 text-[var(--warning)]">
-          Siguiente: {readiness.nextAction}
-        </p>
-      )}
+      ) : null}
     </section>
   );
-}
-
-function PlanStageBaseRow({
-  actionLabel,
-  item,
-  onAction,
-}: {
-  actionLabel: string;
-  item: PlanStageBaseReadiness;
-  onAction: () => void;
-}) {
-  return (
-    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded border border-[var(--line)] px-2 py-2">
-      <div className="min-w-0">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="min-w-0 truncate font-semibold">{item.title}</span>
-          <span
-            className={`shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium ${planStageStatusClassName(
-              item.status,
-            )}`}
-          >
-            {planStageStatusLabel(item.status)}
-          </span>
-        </div>
-        <div className="mt-1 truncate text-[var(--muted)]">{item.reason}</div>
-      </div>
-      <button
-        className="rounded border border-[var(--line)] bg-white px-2 py-1 font-medium hover:border-[var(--accent)]"
-        type="button"
-        onClick={onAction}
-      >
-        {actionLabel}
-      </button>
-    </div>
-  );
-}
-
-function planStagePlanActionLabel(item: PlanStageBaseReadiness) {
-  if (item.status === "missing") {
-    return "Cargar";
-  }
-
-  return item.status === "ready" ? "Ver escala" : item.reason;
-}
-
-function planStageSectionActionLabel(item: PlanStageBaseReadiness) {
-  if (item.status === "ready") {
-    return "Ver alineacion";
-  }
-
-  return item.reason;
-}
-
-function planStageStatusLabel(status: PlanStageBaseReadiness["status"]) {
-  if (status === "ready") {
-    return "lista";
-  }
-
-  return status === "pending" ? "pendiente" : "faltante";
-}
-
-function planStageStatusClassName(status: PlanStageBaseReadiness["status"]) {
-  if (status === "ready") {
-    return "border-[#b7dfc2] bg-[#effaf1] text-[#24713a]";
-  }
-
-  if (status === "pending") {
-    return "border-[#ecd5ad] bg-[#fff9ec] text-[var(--warning)]";
-  }
-
-  return "border-[var(--line)] bg-[#f5f6f7] text-[var(--muted)]";
 }
 
 async function createBaseFromFile(params: {
