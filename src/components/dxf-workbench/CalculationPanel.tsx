@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { type WorkbenchEquipment } from "@/lib/equipment/types";
 import type {
   PipeDiameterReference,
@@ -115,13 +115,69 @@ type CalculationPanelProps = {
 };
 
 type CalculationPendingSummary = {
-  accessoryProposalCount: number;
-  adoptedDiameterIssueCount: number;
-  blockingCount: number;
-  diameterTransitionCount: number;
-  materialPendingCount: number;
-  technicalIssueCount: number;
+  decisionCount: number;
+  deliveryBlockingCount: number;
   total: number;
+};
+
+type PendingAccessoryDecision = {
+  proposal: AccessoryProposal;
+  review: AccessoryProposalTechnicalReview | null;
+};
+
+type PendingTransitionDecision = {
+  proposal: DiameterTransitionProposal;
+  review: DiameterTransitionTechnicalReview | null;
+};
+
+type PendingAdoptedDiameterDecision = {
+  segment: TechnicalSegmentResult;
+  validation: TechnicalAdoptedDiameterSegmentValidation;
+};
+
+type PendingTechnicalDecision = {
+  issue: TechnicalCalculationIssue;
+};
+
+type PendingCombinedDecision = {
+  accessory: PendingAccessoryDecision;
+  sharedCandidates: SharedDecisionCandidate[];
+  transition: PendingTransitionDecision;
+};
+
+type PendingCalculationDecision =
+  | {
+      id: string;
+      kind: "accessory";
+      decision: PendingAccessoryDecision;
+    }
+  | {
+      id: string;
+      kind: "adopted_diameter";
+      decision: PendingAdoptedDiameterDecision;
+    }
+  | {
+      id: string;
+      kind: "combined";
+      decision: PendingCombinedDecision;
+    }
+  | {
+      id: string;
+      kind: "technical";
+      decision: PendingTechnicalDecision;
+    }
+  | {
+      id: string;
+      kind: "transition";
+      decision: PendingTransitionDecision;
+    };
+
+type SharedDecisionCandidate = {
+  accessoryCandidateId: string;
+  id: string;
+  label: string;
+  reason: string;
+  transitionCandidateId: string;
 };
 
 export function CalculationPanel({
@@ -256,31 +312,43 @@ export function CalculationPanel({
     result?.segments.find((segment) => segment.segmentId === selectedSegmentId) ??
     result?.segments[0] ??
     null;
-  const pendingSummary = useMemo(
+  const pendingDecisions = useMemo(
     () =>
-      createCalculationPendingSummary({
+      createPendingCalculationDecisions({
+        accessoryProposalReviews,
         accessoryProposals,
         adoptedDiameterValidation,
         diameterTransitionProposals,
-        materialTakeoff,
+        diameterTransitionReviews,
         result,
       }),
     [
+      accessoryProposalReviews,
       accessoryProposals,
       adoptedDiameterValidation,
       diameterTransitionProposals,
-      materialTakeoff,
+      diameterTransitionReviews,
       result,
     ],
   );
+  const pendingSummary = useMemo(
+    () =>
+      createCalculationPendingSummary({
+        decisions: pendingDecisions,
+        materialTakeoff,
+        result,
+      }),
+    [pendingDecisions, materialTakeoff, result],
+  );
   const isDeliverMode = mode === "deliver";
   const isCalculationComplete =
-    result?.status === "valid" && pendingSummary.blockingCount === 0;
+    result?.status === "valid" && pendingSummary.decisionCount === 0;
   const canExportDocuments =
     isDeliverMode &&
     isCalculationComplete &&
     result !== null &&
-    calculationSheet.rows.length > 0;
+    calculationSheet.rows.length > 0 &&
+    pendingSummary.deliveryBlockingCount === 0;
 
   const handleExportExcel = async () => {
     if (!canExportDocuments || isExportingExcel) {
@@ -344,13 +412,6 @@ export function CalculationPanel({
           <h2 className="text-sm font-semibold">
             {isDeliverMode ? "Entregar" : "Calcular"}
           </h2>
-          <p className="text-xs text-[var(--muted)]">
-            {result
-              ? isCalculationComplete
-                ? "Calculo completo"
-                : `Requiere revision - ${pendingSummary.blockingCount} pendientes`
-              : "Sin instalación calculable"}
-          </p>
         </div>
         <div className="flex items-center gap-2">
           {isDeliverMode && result ? (
@@ -412,7 +473,6 @@ export function CalculationPanel({
       {result ? (
         <>
           <CalculationSummary
-            adoptedDiameterValidation={adoptedDiameterValidation}
             pendingSummary={pendingSummary}
             result={result}
           />
@@ -422,30 +482,17 @@ export function CalculationPanel({
               result={result}
             />
           ) : null}
-          <CalculationIssues
-            accessoryProposalCount={pendingSummary.accessoryProposalCount}
-            adoptedDiameterValidation={adoptedDiameterValidation}
-            diameterTransitionCount={pendingSummary.diameterTransitionCount}
+          <PendingDecisionList
+            decisions={pendingDecisions}
             equipment={equipment}
-            materialTakeoff={materialTakeoff}
-            pendingSummary={pendingSummary}
             result={result}
+            onAdoptSegmentDiameter={onAdoptSegmentDiameter}
+            onConfirmAccessoryProposal={onConfirmAccessoryProposal}
+            onConfirmDiameterTransition={onConfirmDiameterTransition}
             onGoToEquipment={onGoToEquipment}
             onGoToPlan={onGoToPlan}
-          />
-          <AccessoryProposalList
-            proposals={accessoryProposals}
-            result={result}
-            reviews={accessoryProposalReviews}
-            onConfirm={onConfirmAccessoryProposal}
-            onReject={onRejectAccessoryProposal}
-          />
-          <DiameterTransitionProposalList
-            proposals={diameterTransitionProposals}
-            result={result}
-            reviews={diameterTransitionReviews}
-            onConfirm={onConfirmDiameterTransition}
-            onReject={onRejectDiameterTransition}
+            onRejectAccessoryProposal={onRejectAccessoryProposal}
+            onRejectDiameterTransition={onRejectDiameterTransition}
           />
           {isDeliverMode ? (
             <>
@@ -462,9 +509,6 @@ export function CalculationPanel({
             </>
           ) : (
             <>
-              <MaterialTakeoffCompactSummary
-                takeoff={materialTakeoff}
-              />
               <SegmentList
                 adoptedDiameterValidationBySegmentId={
                   adoptedDiameterValidationBySegmentId
@@ -472,8 +516,12 @@ export function CalculationPanel({
                 equipment={equipment}
                 result={result}
                 selectedSegmentId={selectedSegment?.segmentId ?? null}
-                onAdoptSegmentDiameter={onAdoptSegmentDiameter}
                 onSelectSegment={setSelectedSegmentId}
+              />
+              <MaterialTakeoffCompactSummary
+                isCalculationOpen={!isCalculationComplete}
+                pendingDecisionCount={pendingSummary.decisionCount}
+                takeoff={materialTakeoff}
               />
             </>
           )}
@@ -483,102 +531,154 @@ export function CalculationPanel({
   );
 }
 
-function AccessoryProposalList({
-  proposals,
+function PendingDecisionList({
+  decisions,
+  equipment,
   result,
-  reviews,
-  onConfirm,
-  onReject,
+  onAdoptSegmentDiameter,
+  onConfirmAccessoryProposal,
+  onConfirmDiameterTransition,
+  onGoToEquipment,
+  onGoToPlan,
+  onRejectAccessoryProposal,
+  onRejectDiameterTransition,
 }: {
-  proposals: AccessoryProposal[];
+  decisions: PendingCalculationDecision[];
+  equipment: WorkbenchEquipment[];
   result: TechnicalCalculationResult;
-  reviews: AccessoryProposalTechnicalReview[];
-  onConfirm: (proposalId: string, candidateId: string) => void;
-  onReject: (proposalId: string) => void;
+  onAdoptSegmentDiameter: (segmentId: string, diameterId: string | null) => void;
+  onConfirmAccessoryProposal: (proposalId: string, candidateId: string) => void;
+  onConfirmDiameterTransition: (transitionId: string, candidateId: string) => void;
+  onGoToEquipment: () => void;
+  onGoToPlan: () => void;
+  onRejectAccessoryProposal: (proposalId: string) => void;
+  onRejectDiameterTransition: (transitionId: string) => void;
 }) {
-  const [selectedCandidateByProposalId, setSelectedCandidateByProposalId] =
+  const [selectedAccessoryCandidateById, setSelectedAccessoryCandidateById] =
     useState<Record<string, string>>({});
-  const visibleProposals = proposals.filter(isActionableAccessoryProposal);
+  const [selectedTransitionCandidateById, setSelectedTransitionCandidateById] =
+    useState<Record<string, string>>({});
+  const [selectedSharedCandidateById, setSelectedSharedCandidateById] =
+    useState<Record<string, string>>({});
+  const equipmentById = new Map(equipment.map((item) => [item.id, item]));
 
-  if (visibleProposals.length === 0) {
+  if (decisions.length === 0) {
     return null;
   }
 
   return (
     <section className="mt-3">
-      <h3 className="mb-2 text-xs font-semibold uppercase text-[var(--muted)]">
-        Pendientes de accesorios
-      </h3>
-      <div className="space-y-1">
-        {visibleProposals.map((proposal) => {
-          const review =
-            reviews.find((item) => item.proposalId === proposal.id) ?? null;
-          const selectedCandidateId =
-            selectedCandidateByProposalId[proposal.id] ?? "";
-          const selectedCandidate =
-            review?.candidates.find((item) => item.id === selectedCandidateId) ??
-            null;
-          const canConfirm =
-            proposal.state !== "confirmed" &&
-            proposal.state !== "rejected" &&
-            selectedCandidate?.status === "compatible";
-          const canReject =
-            proposal.state !== "confirmed" && proposal.state !== "rejected";
+      <div className="mb-2 flex items-baseline justify-between gap-2">
+        <h3 className="text-xs font-semibold uppercase text-[var(--muted)]">
+          Decisiones pendientes
+        </h3>
+        <div className="text-[10px] text-[var(--muted)]">
+          {formatDecisionCount(decisions.length)}
+        </div>
+      </div>
+      <div className="space-y-2">
+        {decisions.map((item) => {
+          if (item.kind === "combined") {
+            return (
+              <CombinedDecisionCard
+                decision={item.decision}
+                equipmentById={equipmentById}
+                key={item.id}
+                result={result}
+                selectedCandidateId={selectedSharedCandidateById[item.id] ?? ""}
+                onConfirm={(candidate) => {
+                  onConfirmAccessoryProposal(
+                    item.decision.accessory.proposal.id,
+                    candidate.accessoryCandidateId,
+                  );
+                  onConfirmDiameterTransition(
+                    item.decision.transition.proposal.id,
+                    candidate.transitionCandidateId,
+                  );
+                }}
+                onRejectAccessoryProposal={onRejectAccessoryProposal}
+                onRejectDiameterTransition={onRejectDiameterTransition}
+                onSelect={(candidateId) =>
+                  setSelectedSharedCandidateById((current) => ({
+                    ...current,
+                    [item.id]: candidateId,
+                  }))
+                }
+              />
+            );
+          }
+
+          if (item.kind === "accessory") {
+            const proposal = item.decision.proposal;
+
+            return (
+              <AccessoryDecisionCard
+                decision={item.decision}
+                equipmentById={equipmentById}
+                key={item.id}
+                result={result}
+                selectedCandidateId={
+                  selectedAccessoryCandidateById[proposal.id] ?? ""
+                }
+                onConfirm={onConfirmAccessoryProposal}
+                onReject={onRejectAccessoryProposal}
+                onSelect={(candidateId) =>
+                  setSelectedAccessoryCandidateById((current) => ({
+                    ...current,
+                    [proposal.id]: candidateId,
+                  }))
+                }
+              />
+            );
+          }
+
+          if (item.kind === "transition") {
+            const proposal = item.decision.proposal;
+
+            return (
+              <TransitionDecisionCard
+                decision={item.decision}
+                equipmentById={equipmentById}
+                key={item.id}
+                result={result}
+                selectedCandidateId={
+                  selectedTransitionCandidateById[proposal.id] ??
+                  item.decision.review?.selectedCandidate?.id ??
+                  ""
+                }
+                onConfirm={onConfirmDiameterTransition}
+                onReject={onRejectDiameterTransition}
+                onSelect={(candidateId) =>
+                  setSelectedTransitionCandidateById((current) => ({
+                    ...current,
+                    [proposal.id]: candidateId,
+                  }))
+                }
+              />
+            );
+          }
+
+          if (item.kind === "adopted_diameter") {
+            return (
+              <AdoptedDiameterDecisionCard
+                decision={item.decision}
+                equipmentById={equipmentById}
+                key={item.id}
+                result={result}
+                onAdoptSegmentDiameter={onAdoptSegmentDiameter}
+              />
+            );
+          }
 
           return (
-            <div
-              className="rounded border border-[var(--line)] px-2 py-2 text-xs"
-              key={proposal.id}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="font-medium">
-                    {formatAccessoryProposalTitle(proposal, result)}
-                  </div>
-                  <div className="mt-0.5 text-[10px] text-[var(--muted)]">
-                    {formatAccessoryProposalDiameters(review)}
-                  </div>
-                  <div className="mt-0.5 text-[10px] text-[var(--warning)]">
-                    {formatAccessoryProposalProblem(proposal, review)}
-                  </div>
-                  {review ? (
-                    <CandidateSelector
-                      proposal={proposal}
-                      review={review}
-                      selectedCandidateId={selectedCandidateId}
-                      onSelect={(candidateId) =>
-                        setSelectedCandidateByProposalId((current) => ({
-                          ...current,
-                          [proposal.id]: candidateId,
-                        }))
-                      }
-                    />
-                  ) : null}
-                </div>
-                {canConfirm || canReject ? (
-                  <div className="flex shrink-0 gap-1">
-                    {canConfirm ? (
-                      <button
-                        className="rounded border border-[var(--line)] bg-white px-2 py-1 text-[11px] hover:border-[var(--accent)]"
-                        type="button"
-                        onClick={() => onConfirm(proposal.id, selectedCandidateId)}
-                      >
-                        Seleccionar tipo
-                      </button>
-                    ) : null}
-                    {canReject ? (
-                      <button
-                        className="rounded border border-[var(--line)] bg-white px-2 py-1 text-[11px] hover:border-[var(--accent)]"
-                        type="button"
-                        onClick={() => onReject(proposal.id)}
-                      >
-                        Rechazar
-                      </button>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-            </div>
+            <TechnicalDecisionCard
+              decision={item.decision}
+              equipmentById={equipmentById}
+              key={item.id}
+              result={result}
+              onGoToEquipment={onGoToEquipment}
+              onGoToPlan={onGoToPlan}
+            />
           );
         })}
       </div>
@@ -586,119 +686,378 @@ function AccessoryProposalList({
   );
 }
 
-function DiameterTransitionProposalList({
-  proposals,
+function AccessoryDecisionCard({
+  decision,
+  equipmentById,
   result,
-  reviews,
+  selectedCandidateId,
   onConfirm,
   onReject,
+  onSelect,
 }: {
-  proposals: DiameterTransitionProposal[];
+  decision: PendingAccessoryDecision;
+  equipmentById: Map<string, WorkbenchEquipment>;
   result: TechnicalCalculationResult;
-  reviews: DiameterTransitionTechnicalReview[];
-  onConfirm: (transitionId: string, candidateId: string) => void;
-  onReject: (transitionId: string) => void;
+  selectedCandidateId: string;
+  onConfirm: (proposalId: string, candidateId: string) => void;
+  onReject: (proposalId: string) => void;
+  onSelect: (candidateId: string) => void;
 }) {
-  const [selectedCandidateByTransitionId, setSelectedCandidateByTransitionId] =
-    useState<Record<string, string>>({});
-  const visibleProposals = proposals.filter(isActionableDiameterTransitionProposal);
-
-  if (visibleProposals.length === 0) {
-    return null;
-  }
+  const proposal = decision.proposal;
+  const review = decision.review;
+  const selectedCandidate =
+    review?.candidates.find((item) => item.id === selectedCandidateId) ?? null;
+  const canConfirm = selectedCandidate?.status === "compatible";
 
   return (
-    <section className="mt-3">
-      <h3 className="mb-2 text-xs font-semibold uppercase text-[var(--muted)]">
-        Pendientes de diámetro
-      </h3>
-      <div className="space-y-1">
-        {visibleProposals.map((proposal) => {
-          const review =
-            reviews.find((item) => item.transitionId === proposal.id) ?? null;
-          const selectedCandidateId =
-            selectedCandidateByTransitionId[proposal.id] ??
-            review?.selectedCandidate?.id ??
-            "";
-          const selectedCandidate =
-            review?.candidates.find((item) => item.id === selectedCandidateId) ??
-            null;
-          const selectedCandidateAlreadyConfirmed =
-            proposal.decision?.status === "confirmed" &&
-            selectedCandidate !== null &&
-            proposal.decision.catalogFamilyId === selectedCandidate.familyId &&
-            (!proposal.decision.pipeSystemId ||
-              proposal.decision.pipeSystemId === selectedCandidate.pipeSystem.id);
-          const canConfirm =
-            proposal.state !== "confirmed" &&
-            proposal.state !== "rejected" &&
-            proposal.state !== "not_required" &&
-            selectedCandidate?.status === "compatible" &&
-            !selectedCandidateAlreadyConfirmed;
-          const canReject =
-            proposal.state !== "confirmed" &&
-            proposal.state !== "rejected" &&
-            proposal.state !== "not_required";
-
-          return (
-            <div
-              className="rounded border border-[var(--line)] px-2 py-2 text-xs"
-              key={proposal.id}
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="font-medium">
-                    {diameterTransitionKindLabel(proposal.kind)} detectada ·{" "}
-                    {formatDiameterTransitionContext(proposal, result)}
-                  </div>
-                  <div className="mt-0.5 text-[10px] text-[var(--muted)]">
-                    {diameterTransitionMainLabel(proposal)}
-                  </div>
-                  <div className="mt-0.5 text-[10px] text-[var(--warning)]">
-                    {formatDiameterTransitionProblem(proposal, review)}
-                  </div>
-                  {review ? (
-                      <DiameterTransitionCandidateSelector
-                        proposal={proposal}
-                        review={review}
-                        selectedCandidateId={selectedCandidateId}
-                        onSelect={(candidateId) =>
-                          setSelectedCandidateByTransitionId((current) => ({
-                            ...current,
-                            [proposal.id]: candidateId,
-                          }))
-                        }
-                      />
-                    ) : null}
-                  </div>
-                  {canConfirm || canReject ? (
-                    <div className="flex shrink-0 gap-1">
-                      {canConfirm ? (
-                        <button
-                          className="rounded border border-[var(--line)] bg-white px-2 py-1 text-[11px] hover:border-[var(--accent)]"
-                          type="button"
-                          onClick={() => onConfirm(proposal.id, selectedCandidateId)}
-                      >
-                        Seleccionar tipo
-                      </button>
-                    ) : null}
-                      {canReject ? (
-                        <button
-                          className="rounded border border-[var(--line)] bg-white px-2 py-1 text-[11px] hover:border-[var(--accent)]"
-                          type="button"
-                          onClick={() => onReject(proposal.id)}
-                        >
-                          Rechazar
-                        </button>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-          );
-        })}
+    <DecisionCard
+      primaryAction={
+        <button
+          className="rounded border border-[var(--accent)] bg-[var(--accent)] px-2 py-1 text-[11px] text-white disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={!canConfirm}
+          type="button"
+          onClick={() => onConfirm(proposal.id, selectedCandidateId)}
+        >
+          Confirmar accesorio
+        </button>
+      }
+      secondaryAction={
+        <button
+          className="rounded border border-transparent px-2 py-1 text-[11px] text-[var(--muted)] hover:border-[var(--line)]"
+          type="button"
+          onClick={() => onReject(proposal.id)}
+        >
+          Rechazar
+        </button>
+      }
+      title={`Confirmar ${accessoryProposalKindLabel(proposal.kind).toLowerCase()}`}
+    >
+      <DecisionContext
+        diameters={formatAccessoryProposalDiameters(review)}
+        equipmentById={equipmentById}
+        result={result}
+        segmentIds={proposal.incidentSegmentIds}
+      />
+      <div className="mt-1 text-[10px] text-[var(--warning)]">
+        {formatAccessoryProposalProblem(proposal, review)}
       </div>
-    </section>
+      {review ? (
+        <CandidateSelector
+          proposal={proposal}
+          review={review}
+          selectedCandidateId={selectedCandidateId}
+          onSelect={onSelect}
+        />
+      ) : null}
+    </DecisionCard>
+  );
+}
+
+function TransitionDecisionCard({
+  decision,
+  equipmentById,
+  result,
+  selectedCandidateId,
+  onConfirm,
+  onReject,
+  onSelect,
+}: {
+  decision: PendingTransitionDecision;
+  equipmentById: Map<string, WorkbenchEquipment>;
+  result: TechnicalCalculationResult;
+  selectedCandidateId: string;
+  onConfirm: (transitionId: string, candidateId: string) => void;
+  onReject: (transitionId: string) => void;
+  onSelect: (candidateId: string) => void;
+}) {
+  const proposal = decision.proposal;
+  const review = decision.review;
+  const selectedCandidate =
+    review?.candidates.find((item) => item.id === selectedCandidateId) ?? null;
+  const selectedCandidateAlreadyConfirmed =
+    proposal.decision?.status === "confirmed" &&
+    selectedCandidate !== null &&
+    proposal.decision.catalogFamilyId === selectedCandidate.familyId &&
+    (!proposal.decision.pipeSystemId ||
+      proposal.decision.pipeSystemId === selectedCandidate.pipeSystem.id);
+  const canConfirm =
+    selectedCandidate?.status === "compatible" &&
+    !selectedCandidateAlreadyConfirmed;
+
+  return (
+    <DecisionCard
+      primaryAction={
+        <button
+          className="rounded border border-[var(--accent)] bg-[var(--accent)] px-2 py-1 text-[11px] text-white disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={!canConfirm}
+          type="button"
+          onClick={() => onConfirm(proposal.id, selectedCandidateId)}
+        >
+          Resolver transición
+        </button>
+      }
+      secondaryAction={
+        <button
+          className="rounded border border-transparent px-2 py-1 text-[11px] text-[var(--muted)] hover:border-[var(--line)]"
+          type="button"
+          onClick={() => onReject(proposal.id)}
+        >
+          Rechazar
+        </button>
+      }
+      title={diameterTransitionKindLabel(proposal.kind)}
+    >
+      <DecisionContext
+        diameters={diameterTransitionMainLabel(proposal)}
+        equipmentById={equipmentById}
+        result={result}
+        segmentIds={diameterTransitionSegmentIds(proposal)}
+      />
+      <div className="mt-1 text-[10px] text-[var(--warning)]">
+        {formatDiameterTransitionProblem(proposal, review)}
+      </div>
+      {review ? (
+        <DiameterTransitionCandidateSelector
+          proposal={proposal}
+          review={review}
+          selectedCandidateId={selectedCandidateId}
+          onSelect={onSelect}
+        />
+      ) : null}
+    </DecisionCard>
+  );
+}
+
+function CombinedDecisionCard({
+  decision,
+  equipmentById,
+  result,
+  selectedCandidateId,
+  onConfirm,
+  onRejectAccessoryProposal,
+  onRejectDiameterTransition,
+  onSelect,
+}: {
+  decision: PendingCombinedDecision;
+  equipmentById: Map<string, WorkbenchEquipment>;
+  result: TechnicalCalculationResult;
+  selectedCandidateId: string;
+  onConfirm: (candidate: SharedDecisionCandidate) => void;
+  onRejectAccessoryProposal: (proposalId: string) => void;
+  onRejectDiameterTransition: (transitionId: string) => void;
+  onSelect: (candidateId: string) => void;
+}) {
+  const selectedCandidate =
+    decision.sharedCandidates.find((item) => item.id === selectedCandidateId) ??
+    null;
+  const segmentIds = [
+    ...new Set([
+      ...decision.accessory.proposal.incidentSegmentIds,
+      ...diameterTransitionSegmentIds(decision.transition.proposal),
+    ]),
+  ];
+
+  return (
+    <DecisionCard
+      primaryAction={
+        <button
+          className="rounded border border-[var(--accent)] bg-[var(--accent)] px-2 py-1 text-[11px] text-white disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={!selectedCandidate}
+          type="button"
+          onClick={() => {
+            if (selectedCandidate) {
+              onConfirm(selectedCandidate);
+            }
+          }}
+        >
+          Confirmar familia
+        </button>
+      }
+      secondaryAction={
+        <div className="flex flex-wrap gap-1">
+          <button
+            className="rounded border border-transparent px-2 py-1 text-[11px] text-[var(--muted)] hover:border-[var(--line)]"
+            type="button"
+            onClick={() =>
+              onRejectAccessoryProposal(decision.accessory.proposal.id)
+            }
+          >
+            Rechazar accesorio
+          </button>
+          <button
+            className="rounded border border-transparent px-2 py-1 text-[11px] text-[var(--muted)] hover:border-[var(--line)]"
+            type="button"
+            onClick={() =>
+              onRejectDiameterTransition(decision.transition.proposal.id)
+            }
+          >
+            Rechazar transición
+          </button>
+        </div>
+      }
+      title="Confirmar familia técnica"
+    >
+      <DecisionContext
+        diameters={diameterTransitionMainLabel(decision.transition.proposal)}
+        equipmentById={equipmentById}
+        result={result}
+        segmentIds={segmentIds}
+      />
+      <label className="mt-2 block">
+        <span className="text-[10px] font-semibold uppercase text-[var(--muted)]">
+          Familia
+        </span>
+        <select
+          className="mt-1 w-full rounded border border-[var(--line)] bg-white px-2 py-1 text-xs"
+          value={selectedCandidateId}
+          onChange={(event) => onSelect(event.target.value)}
+        >
+          <option value="">Seleccionar familia</option>
+          {decision.sharedCandidates.map((candidate) => (
+            <option key={candidate.id} value={candidate.id}>
+              {candidate.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div className="mt-1 text-[10px] text-[var(--muted)]">
+        {selectedCandidate
+          ? selectedCandidate.reason
+          : "Una seleccion compatible resuelve accesorio y transicion."}
+      </div>
+    </DecisionCard>
+  );
+}
+
+function AdoptedDiameterDecisionCard({
+  decision,
+  equipmentById,
+  result,
+  onAdoptSegmentDiameter,
+}: {
+  decision: PendingAdoptedDiameterDecision;
+  equipmentById: Map<string, WorkbenchEquipment>;
+  result: TechnicalCalculationResult;
+  onAdoptSegmentDiameter: (segmentId: string, diameterId: string | null) => void;
+}) {
+  return (
+    <DecisionCard title="Ajustar diámetro adoptado">
+      <DecisionContext
+        diameters={`${formatDiameterSymbol(
+          decision.validation.adoptedDiameter,
+        )} adoptado / ${formatDiameterSymbol(
+          decision.validation.requiredDiameter,
+        )} requerido`}
+        equipmentById={equipmentById}
+        result={result}
+        segmentIds={[decision.segment.segmentId]}
+      />
+      <div className="mt-1 text-[10px] text-[var(--warning)]">
+        {decision.validation.reason ??
+          "El diámetro adoptado requiere revisión profesional."}
+      </div>
+      <div className="mt-2">
+        <SegmentAdoptedDiameterControl
+          validation={decision.validation}
+          onAdoptSegmentDiameter={onAdoptSegmentDiameter}
+        />
+      </div>
+    </DecisionCard>
+  );
+}
+
+function TechnicalDecisionCard({
+  decision,
+  equipmentById,
+  result,
+  onGoToEquipment,
+  onGoToPlan,
+}: {
+  decision: PendingTechnicalDecision;
+  equipmentById: Map<string, WorkbenchEquipment>;
+  result: TechnicalCalculationResult;
+  onGoToEquipment: () => void;
+  onGoToPlan: () => void;
+}) {
+  const targetsEquipment = technicalIssueTargetsEquipment(decision.issue);
+
+  return (
+    <DecisionCard
+      primaryAction={
+        <button
+          className="rounded border border-[var(--accent)] bg-[var(--accent)] px-2 py-1 text-[11px] text-white"
+          type="button"
+          onClick={targetsEquipment ? onGoToEquipment : onGoToPlan}
+        >
+          Revisar {targetsEquipment ? "artefactos" : "planta"}
+        </button>
+      }
+      title={targetsEquipment ? "Completar artefacto" : "Completar trazado"}
+    >
+      <div className="text-[10px] text-[var(--muted)]">
+        {technicalIssueLocation(decision.issue, result, equipmentById) ??
+          "Instalacion"}
+      </div>
+      <div className="mt-1 text-[10px] text-[var(--warning)]">
+        {technicalIssueAction(decision.issue)}
+      </div>
+    </DecisionCard>
+  );
+}
+
+function DecisionCard({
+  children,
+  primaryAction,
+  secondaryAction,
+  title,
+}: {
+  children: ReactNode;
+  primaryAction?: ReactNode;
+  secondaryAction?: ReactNode;
+  title: string;
+}) {
+  return (
+    <div className="rounded border border-[var(--line)] px-3 py-2 text-xs">
+      <div className="min-w-0">
+        <div className="font-medium">{title}</div>
+        {children}
+      </div>
+      {primaryAction || secondaryAction ? (
+        <div className="mt-2 flex flex-wrap items-center gap-1">
+          {primaryAction}
+          {secondaryAction}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function DecisionContext({
+  diameters,
+  equipmentById,
+  result,
+  segmentIds,
+}: {
+  diameters: string;
+  equipmentById: Map<string, WorkbenchEquipment>;
+  result: TechnicalCalculationResult;
+  segmentIds: string[];
+}) {
+  return (
+    <dl className="mt-1 grid gap-y-0.5 text-[10px]">
+      <div>
+        <dt className="text-[var(--muted)]">Tramo</dt>
+        <dd>{formatDecisionSegmentSummary(segmentIds, result, equipmentById)}</dd>
+      </div>
+      <div>
+        <dt className="text-[var(--muted)]">Alimenta</dt>
+        <dd>{formatDecisionApplianceSummary(segmentIds, result, equipmentById)}</dd>
+      </div>
+      <div>
+        <dt className="text-[var(--muted)]">Diámetros</dt>
+        <dd>{diameters}</dd>
+      </div>
+    </dl>
   );
 }
 
@@ -1326,75 +1685,53 @@ function formatNodeReference(
   nodeId: string,
   result: TechnicalCalculationResult,
 ) {
-  return result.nodeLabels[nodeId] ?? "nodo del trazado";
+  return readableNodeLabel(result.nodeLabels[nodeId]);
 }
 
 function CalculationSummary({
-  adoptedDiameterValidation,
   pendingSummary,
   result,
 }: {
-  adoptedDiameterValidation: TechnicalAdoptedDiameterValidation;
   pendingSummary: CalculationPendingSummary;
   result: TechnicalCalculationResult;
 }) {
-  const transitionAwareSizing = result.transitionAwareNetworkSizing;
-  const globalResolvedSegmentCount =
-    transitionAwareSizing?.status === "resolved"
-      ? transitionAwareSizing.segments.filter(
-          (segment) => segment.status === "resolved",
-        ).length
-      : result.totals.dimensionedSegmentCount;
   const totalFlow = formatTechnicalFlow(
     result.totals.accumulatedFlow,
     result.totals.accumulatedFlowUnit,
   );
   const calculationLength = formatTotalCalculationLength(result);
   const status =
-    result.status === "valid" && pendingSummary.blockingCount === 0
-      ? "Calculo completo"
-      : `Requiere revision - ${pendingSummary.blockingCount} pendientes`;
-  const adoptionLabel =
-    adoptedDiameterValidation.segments.length > 0
-      ? adoptedDiameterValidationStatusLabel(adoptedDiameterValidation.status)
-      : "Sin tramos";
+    result.status === "valid" && pendingSummary.decisionCount === 0
+      ? "Cálculo completo"
+      : `Requiere revisión · ${formatDecisionCount(
+          pendingSummary.decisionCount,
+        )}`;
 
   return (
     <section className="mt-3 rounded border border-[var(--line)] px-3 py-2 text-xs">
-      <div className="flex items-start justify-between gap-3">
+      <div className="font-semibold">{status}</div>
+      <dl className="mt-2 grid grid-cols-2 gap-2">
         <div>
-          <div className="font-semibold">{status}</div>
-          <div className="mt-0.5 text-[10px] text-[var(--muted)]">
-            {formatPipeSystemLabel(result)}
-          </div>
+          <dt className="text-[10px] uppercase text-[var(--muted)]">Tramos</dt>
+          <dd className="font-mono">{result.totals.segmentCount}</dd>
         </div>
-        <div className="text-right text-[10px] text-[var(--muted)]">
-          {formatTransitionAwareSizingStatus(result)}
+        <div>
+          <dt className="text-[10px] uppercase text-[var(--muted)]">
+            Artefactos
+          </dt>
+          <dd className="font-mono">{result.totals.applianceCount}</dd>
         </div>
-      </div>
-      <dl className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
-      <dt>Tramos dimensionados</dt>
-      <dd className="text-right font-mono">
-        {globalResolvedSegmentCount}/{result.totals.segmentCount}
-      </dd>
-      <dt>Artefactos</dt>
-      <dd className="text-right font-mono">{result.totals.applianceCount}</dd>
-      <dt>Caudal normalizado total</dt>
-      <dd className="text-right">{totalFlow}</dd>
-      <dt>Long. fisica + equiv. locales</dt>
-      <dd className="text-right">{calculationLength}</dd>
-    </dl>
-      <div className="mt-2 flex flex-wrap gap-1 text-[10px]">
-        <span className="rounded border border-[var(--line)] px-2 py-0.5">
-          Diametros: {adoptionLabel}
-        </span>
-        {transitionAwareSizing ? (
-          <span className="rounded border border-[var(--line)] px-2 py-0.5">
-            Estados: {transitionAwareSizing.evaluatedStateCount}/
-            {formatStateCount(transitionAwareSizing.theoreticalStateCount)}
-          </span>
-        ) : null}
-      </div>
+        <div>
+          <dt className="text-[10px] uppercase text-[var(--muted)]">Caudal</dt>
+          <dd>{totalFlow}</dd>
+        </div>
+        <div>
+          <dt className="text-[10px] uppercase text-[var(--muted)]">
+            Longitud cálculo
+          </dt>
+          <dd>{calculationLength}</dd>
+        </div>
+      </dl>
     </section>
   );
 }
@@ -1407,7 +1744,7 @@ function DeliverReadinessGate({
   result: TechnicalCalculationResult;
 }) {
   const isReady =
-    result.status === "valid" && pendingSummary.blockingCount === 0;
+    result.status === "valid" && pendingSummary.deliveryBlockingCount === 0;
 
   if (isReady) {
     return (
@@ -1424,141 +1761,12 @@ function DeliverReadinessGate({
     <div className="mt-3 rounded border border-[#f1d28a] bg-[#fffaf0] px-3 py-2 text-xs text-[var(--warning)]">
       <div className="font-semibold">Entrega bloqueada</div>
       <div className="mt-0.5">
-        Resolver {pendingSummary.blockingCount}{" "}
-        {pendingSummary.blockingCount === 1 ? "pendiente" : "pendientes"} antes
-        de exportar.
+        {pendingSummary.decisionCount > 0
+          ? `Resolver ${formatDecisionCount(
+              pendingSummary.decisionCount,
+            )} antes de exportar.`
+          : "Completar cálculo y materiales antes de exportar."}
       </div>
-    </div>
-  );
-}
-
-function CalculationIssues({
-  accessoryProposalCount,
-  adoptedDiameterValidation,
-  diameterTransitionCount,
-  equipment,
-  materialTakeoff,
-  pendingSummary,
-  result,
-  onGoToEquipment,
-  onGoToPlan,
-}: {
-  accessoryProposalCount: number;
-  adoptedDiameterValidation: TechnicalAdoptedDiameterValidation;
-  diameterTransitionCount: number;
-  equipment: WorkbenchEquipment[];
-  materialTakeoff: TechnicalMaterialTakeoff;
-  pendingSummary: CalculationPendingSummary;
-  result: TechnicalCalculationResult;
-  onGoToEquipment: () => void;
-  onGoToPlan: () => void;
-}) {
-  if (pendingSummary.blockingCount === 0) {
-    return null;
-  }
-
-  const tone =
-    result.status === "invalid"
-      ? "border-red-200 bg-red-50 text-red-800"
-      : "border-[#f1d28a] bg-[#fffaf0] text-[var(--warning)]";
-  const equipmentById = new Map(equipment.map((item) => [item.id, item]));
-  const visibleIssues = result.issues.filter(isVisibleTechnicalIssue);
-  const hasImplicitStatusIssue =
-    result.status !== "valid" && visibleIssues.length === 0;
-  const adoptionIssues = adoptedDiameterValidation.segments.filter(
-    (segment) => segment.status !== "valid",
-  );
-  const materialOnlyPendingItems = materialTakeoff.pendingItems.filter(
-    isMaterialOnlyPendingItem,
-  );
-  const hasEquipmentIssues = visibleIssues.some((issue) =>
-    technicalIssueTargetsEquipment(issue),
-  );
-  const hasPlanIssues =
-    hasImplicitStatusIssue ||
-    visibleIssues.some((issue) => !technicalIssueTargetsEquipment(issue)) ||
-    materialOnlyPendingItems.length > 0;
-
-  return (
-    <div className={`mt-3 rounded border px-3 py-2 text-xs ${tone}`}>
-      <div className="font-semibold">
-        {result.status === "invalid"
-          ? "Red no calculable"
-          : "Pendientes para cerrar"}
-      </div>
-      <ul className="mt-2 space-y-1">
-        {hasImplicitStatusIssue ? (
-          <li className="rounded bg-white/60 px-2 py-1">
-            Completar datos tecnicos del trazado para cerrar el calculo.
-          </li>
-        ) : null}
-        {visibleIssues.map((issue, index) => (
-          <li
-            className="rounded bg-white/60 px-2 py-1"
-            key={`${issue.code}:${issue.accessoryId ?? ""}:${issue.segmentId ?? ""}:${issue.equipmentId ?? ""}:${index}`}
-          >
-            {formatTechnicalIssueAction(issue, result, equipmentById)}
-          </li>
-        ))}
-        {accessoryProposalCount > 0 ? (
-          <li className="rounded bg-white/60 px-2 py-1">
-            Confirmar {accessoryProposalCount}{" "}
-            {accessoryProposalCount === 1
-              ? "accesorio detectado"
-              : "accesorios detectados"}
-            : elegir familia compatible o rechazar.
-          </li>
-        ) : null}
-        {diameterTransitionCount > 0 ? (
-          <li className="rounded bg-white/60 px-2 py-1">
-            Resolver {diameterTransitionCount}{" "}
-            {diameterTransitionCount === 1
-              ? "transicion de diametro"
-              : "transiciones de diametro"}
-            : elegir familia compatible o rechazar.
-          </li>
-        ) : null}
-        {adoptionIssues.map((validation) => (
-          <li
-            className="rounded bg-white/60 px-2 py-1"
-            key={validation.segmentId}
-          >
-            {formatSegmentReference(validation.segmentId, result)}:{" "}
-            {validation.reason ??
-              "validar el diametro adoptado antes de entregar."}
-          </li>
-        ))}
-        {materialOnlyPendingItems.map((item) => (
-          <li
-            className="rounded bg-white/60 px-2 py-1"
-            key={`${item.code}:${item.sourceId ?? item.segmentId ?? item.label}`}
-          >
-            {formatMaterialPendingItem(item, result)}
-          </li>
-        ))}
-      </ul>
-      {hasEquipmentIssues || hasPlanIssues ? (
-        <div className="mt-2 flex flex-wrap gap-1">
-          {hasEquipmentIssues ? (
-            <button
-              className="rounded border border-current bg-white px-2 py-1 text-[11px]"
-              type="button"
-              onClick={onGoToEquipment}
-            >
-              Revisar artefactos
-            </button>
-          ) : null}
-          {hasPlanIssues ? (
-            <button
-              className="rounded border border-current bg-white px-2 py-1 text-[11px]"
-              type="button"
-              onClick={onGoToPlan}
-            >
-              Revisar planta
-            </button>
-          ) : null}
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -1663,13 +1871,20 @@ function MaterialTakeoffSection({
 }
 
 function MaterialTakeoffCompactSummary({
+  isCalculationOpen,
+  pendingDecisionCount,
   takeoff,
 }: {
+  isCalculationOpen: boolean;
+  pendingDecisionCount: number;
   takeoff: TechnicalMaterialTakeoff;
 }) {
   const hasMaterials =
     takeoff.pipeItems.length > 0 || takeoff.accessoryItems.length > 0;
-  const pendingCount = takeoff.pendingSummary.total;
+  const openMessage =
+    pendingDecisionCount > 0
+      ? "Materiales incompletos · se completarán al resolver las decisiones pendientes."
+      : "Materiales incompletos · se completarán al cerrar el cálculo.";
 
   return (
     <section className="mt-3 rounded border border-[var(--line)] px-3 py-2 text-xs">
@@ -1678,34 +1893,35 @@ function MaterialTakeoffCompactSummary({
           Materiales
         </h3>
         <div className="text-[10px] text-[var(--muted)]">
-          {hasMaterials ? "Precomputo" : "Pendiente"}
+          {hasMaterials && !isCalculationOpen ? "Precomputo" : "Secundario"}
         </div>
       </div>
-      <dl className="grid grid-cols-2 gap-2">
-        <div>
-          <dt className="text-[10px] uppercase text-[var(--muted)]">Caneria</dt>
-          <dd className="font-mono">
-            {formatCalculationMeters(
-              takeoff.physicalMaterialQuantities.pipeLengthMeters,
-            )}
-          </dd>
-        </div>
-        <div>
-          <dt className="text-[10px] uppercase text-[var(--muted)]">
-            Accesorios
-          </dt>
-          <dd className="font-mono">
-            {formatMaterialQuantity(
-              takeoff.physicalMaterialQuantities.accessoryQuantity,
-            )}
-          </dd>
-        </div>
-      </dl>
-      {pendingCount > 0 ? (
-        <div className="mt-2 rounded border border-[#f1d28a] bg-[#fffaf0] px-2 py-1 text-[10px] text-[var(--warning)]">
-          {formatMaterialPendingSummary(takeoff)}
-        </div>
-      ) : null}
+      {isCalculationOpen ? (
+        <div className="text-[var(--muted)]">{openMessage}</div>
+      ) : (
+        <dl className="grid grid-cols-2 gap-2">
+          <div>
+            <dt className="text-[10px] uppercase text-[var(--muted)]">
+              Caneria
+            </dt>
+            <dd className="font-mono">
+              {formatCalculationMeters(
+                takeoff.physicalMaterialQuantities.pipeLengthMeters,
+              )}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-[10px] uppercase text-[var(--muted)]">
+              Accesorios
+            </dt>
+            <dd className="font-mono">
+              {formatMaterialQuantity(
+                takeoff.physicalMaterialQuantities.accessoryQuantity,
+              )}
+            </dd>
+          </div>
+        </dl>
+      )}
     </section>
   );
 }
@@ -2174,7 +2390,6 @@ function SegmentList({
   equipment,
   result,
   selectedSegmentId,
-  onAdoptSegmentDiameter,
   onSelectSegment,
 }: {
   adoptedDiameterValidationBySegmentId: Record<
@@ -2184,7 +2399,6 @@ function SegmentList({
   equipment: WorkbenchEquipment[];
   result: TechnicalCalculationResult;
   selectedSegmentId: string | null;
-  onAdoptSegmentDiameter: (segmentId: string, diameterId: string | null) => void;
   onSelectSegment: (segmentId: string) => void;
 }) {
   if (result.segments.length === 0) {
@@ -2208,67 +2422,35 @@ function SegmentList({
           {result.segments.length === 1 ? "tramo" : "tramos"}
         </div>
       </div>
-      <div className="overflow-x-auto rounded border border-[var(--line)]">
-        <table className="min-w-[760px] table-fixed border-collapse text-[10px]">
-          <thead className="bg-[#f8fafc] text-[var(--muted)]">
-            <tr>
-              <th className="w-32 border-b border-[var(--line)] px-2 py-1 text-left font-semibold">
-                Tramo
-              </th>
-              <th className="w-36 border-b border-[var(--line)] px-2 py-1 text-left font-semibold">
-                Alimenta
-              </th>
-              <th className="w-20 border-b border-[var(--line)] px-2 py-1 text-right font-semibold">
-                Caudal
-              </th>
-              <th className="w-24 border-b border-[var(--line)] px-2 py-1 text-right font-semibold">
-                Longitud
-              </th>
-              <th className="w-28 border-b border-[var(--line)] px-2 py-1 text-right font-semibold">
-                Diametro
-              </th>
-              <th className="w-28 border-b border-[var(--line)] px-2 py-1 text-left font-semibold">
-                Estado
-              </th>
-              <th className="w-36 border-b border-[var(--line)] px-2 py-1 text-left font-semibold">
-                Accion
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {result.segments.map((segment) => {
-              const validation =
-                adoptedDiameterValidationBySegmentId[segment.segmentId] ??
-                null;
-              const isSelected = segment.segmentId === selectedSegmentId;
+      <div className="space-y-2">
+        {result.segments.map((segment) => {
+          const validation =
+            adoptedDiameterValidationBySegmentId[segment.segmentId] ?? null;
+          const isSelected = segment.segmentId === selectedSegmentId;
 
-              return (
-                <SegmentTableRow
-                  equipmentById={equipmentById}
-                  isSelected={isSelected}
-                  key={segment.segmentId}
-                  result={result}
-                  segment={segment}
-                  validation={validation}
-                  onAdoptSegmentDiameter={onAdoptSegmentDiameter}
-                  onSelectSegment={onSelectSegment}
-                />
-              );
-            })}
-          </tbody>
-        </table>
+          return (
+            <SegmentCalculationRow
+              equipmentById={equipmentById}
+              isSelected={isSelected}
+              key={segment.segmentId}
+              result={result}
+              segment={segment}
+              validation={validation}
+              onSelectSegment={onSelectSegment}
+            />
+          );
+        })}
       </div>
     </section>
   );
 }
 
-function SegmentTableRow({
+function SegmentCalculationRow({
   equipmentById,
   isSelected,
   result,
   segment,
   validation,
-  onAdoptSegmentDiameter,
   onSelectSegment,
 }: {
   equipmentById: Map<string, WorkbenchEquipment>;
@@ -2276,72 +2458,67 @@ function SegmentTableRow({
   result: TechnicalCalculationResult;
   segment: TechnicalSegmentResult;
   validation: TechnicalAdoptedDiameterSegmentValidation | null;
-  onAdoptSegmentDiameter: (segmentId: string, diameterId: string | null) => void;
   onSelectSegment: (segmentId: string) => void;
 }) {
   const adoptedDiameter = validation?.adoptedDiameter ?? segment.calculatedDiameter;
   const status = validation
     ? adoptedDiameterValidationStatusLabel(validation.status)
     : technicalCalculationStatusLabel(result.status);
-  const needsManualAction =
-    validation !== null &&
-    (validation.status !== "valid" || validation.decision !== null);
-  const rowTone = isSelected ? "bg-[#f0f7ff]" : "";
+  const rowTone = isSelected
+    ? "border-[var(--accent)] bg-[#f0f7ff]"
+    : "border-[var(--line)]";
 
   return (
-    <tr className={`border-t border-[var(--line)] align-top first:border-t-0 ${rowTone}`}>
-      <td className="px-2 py-1">
-        <button
-          className="text-left font-medium hover:text-[var(--accent)]"
-          type="button"
-          onClick={() => onSelectSegment(segment.segmentId)}
-        >
-          {segmentLabel(segment, result.nodeLabels)}
-        </button>
-      </td>
-      <td className="px-2 py-1 text-[var(--muted)]">
-        {formatSegmentApplianceSummary(segment, equipmentById)}
-      </td>
-      <td className="px-2 py-1 text-right font-mono">
-        {formatSegmentConsumption(segment)}
-      </td>
-      <td className="px-2 py-1 text-right font-mono">
-        <div>
-          {formatCalculationMeters(segment.segmentPhysicalLengthMeters)}
-        </div>
-        <div className="text-[9px] text-[var(--muted)]">
-          calc. {formatSegmentCalculationLength(segment)}
-        </div>
-      </td>
-      <td className="px-2 py-1 text-right">
-        <div>{formatDiameterReference(adoptedDiameter)}</div>
-        {validation?.requiredDiameter ? (
-          <div className="text-[9px] text-[var(--muted)]">
-            req. {formatCompactDiameterReference(validation.requiredDiameter)}
+    <button
+      className={`w-full rounded border px-3 py-2 text-left text-xs hover:border-[var(--accent)] ${rowTone}`}
+      type="button"
+      onClick={() => onSelectSegment(segment.segmentId)}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="font-medium">
+            {formatProfessionalSegmentLabel(segment, result, equipmentById)}
           </div>
-        ) : null}
-      </td>
-      <td className="px-2 py-1">
-        <span className={segmentStatusTone(validation?.status ?? "valid")}>
+          <div className="mt-0.5 text-[10px] text-[var(--muted)]">
+            {segmentLabel(segment, result.nodeLabels)}
+          </div>
+        </div>
+        <div className={`shrink-0 text-right text-[10px] ${segmentStatusTone(validation?.status ?? "valid")}`}>
           {status}
-        </span>
-        {validation?.reason ? (
-          <div className="mt-0.5 line-clamp-2 text-[9px] text-[var(--warning)]">
-            {validation.reason}
-          </div>
-        ) : null}
-      </td>
-      <td className="px-2 py-1">
-        {needsManualAction ? (
-          <SegmentAdoptedDiameterControl
-            validation={validation}
-            onAdoptSegmentDiameter={onAdoptSegmentDiameter}
-          />
-        ) : (
-          <span className="text-[var(--muted)]">Automatico</span>
-        )}
-      </td>
-    </tr>
+        </div>
+      </div>
+      <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[10px]">
+        <div>
+          <dt className="text-[var(--muted)]">Alimenta</dt>
+          <dd>{formatSegmentApplianceSummary(segment, equipmentById)}</dd>
+        </div>
+        <div>
+          <dt className="text-[var(--muted)]">Caudal</dt>
+          <dd>{formatSegmentConsumption(segment)}</dd>
+        </div>
+        <div>
+          <dt className="text-[var(--muted)]">Longitud física</dt>
+          <dd>{formatCalculationMeters(segment.segmentPhysicalLengthMeters)}</dd>
+        </div>
+        <div>
+          <dt className="text-[var(--muted)]">Equivalentes</dt>
+          <dd>
+            {formatCalculationMeters(
+              segment.accessoryEquivalentLengthMeters,
+              "Pendiente",
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-[var(--muted)]">Longitud cálculo</dt>
+          <dd>{formatSegmentCalculationLength(segment)}</dd>
+        </div>
+        <div>
+          <dt className="text-[var(--muted)]">Diámetro adoptado</dt>
+          <dd>{formatDiameterReference(adoptedDiameter)}</dd>
+        </div>
+      </dl>
+    </button>
   );
 }
 
@@ -3349,51 +3526,233 @@ function AccessorySummaryRow({
   );
 }
 
-function createCalculationPendingSummary({
+function createPendingCalculationDecisions({
+  accessoryProposalReviews,
   accessoryProposals,
   adoptedDiameterValidation,
   diameterTransitionProposals,
-  materialTakeoff,
+  diameterTransitionReviews,
   result,
 }: {
+  accessoryProposalReviews: AccessoryProposalTechnicalReview[];
   accessoryProposals: AccessoryProposal[];
   adoptedDiameterValidation: TechnicalAdoptedDiameterValidation;
   diameterTransitionProposals: DiameterTransitionProposal[];
+  diameterTransitionReviews: DiameterTransitionTechnicalReview[];
+  result: TechnicalCalculationResult | null;
+}): PendingCalculationDecision[] {
+  const accessoryReviewById = new Map(
+    accessoryProposalReviews.map((review) => [review.proposalId, review]),
+  );
+  const transitionReviewById = new Map(
+    diameterTransitionReviews.map((review) => [review.transitionId, review]),
+  );
+  const accessoryDecisions = accessoryProposals
+    .filter(isActionableAccessoryProposal)
+    .map((proposal): PendingAccessoryDecision => ({
+      proposal,
+      review: accessoryReviewById.get(proposal.id) ?? null,
+    }))
+    .sort((first, second) =>
+      first.proposal.nodeId.localeCompare(second.proposal.nodeId),
+    );
+  const transitionDecisions = diameterTransitionProposals
+    .filter(isActionableDiameterTransitionProposal)
+    .map((proposal): PendingTransitionDecision => ({
+      proposal,
+      review: transitionReviewById.get(proposal.id) ?? null,
+    }))
+    .sort((first, second) =>
+      first.proposal.nodeId.localeCompare(second.proposal.nodeId),
+    );
+  const usedTransitionIds = new Set<string>();
+  const decisions: PendingCalculationDecision[] = [];
+
+  for (const accessory of accessoryDecisions) {
+    const combinedTransition = transitionDecisions.find((transition) => {
+      if (
+        usedTransitionIds.has(transition.proposal.id) ||
+        transition.proposal.nodeId !== accessory.proposal.nodeId
+      ) {
+        return false;
+      }
+
+      return sharedCandidatesForDecisions(accessory, transition).length > 0;
+    });
+
+    if (combinedTransition) {
+      usedTransitionIds.add(combinedTransition.proposal.id);
+      decisions.push({
+        decision: {
+          accessory,
+          sharedCandidates: sharedCandidatesForDecisions(
+            accessory,
+            combinedTransition,
+          ),
+          transition: combinedTransition,
+        },
+        id: `combined:${accessory.proposal.id}:${combinedTransition.proposal.id}`,
+        kind: "combined",
+      });
+      continue;
+    }
+
+    decisions.push({
+      decision: accessory,
+      id: `accessory:${accessory.proposal.id}`,
+      kind: "accessory",
+    });
+  }
+
+  for (const transition of transitionDecisions) {
+    if (usedTransitionIds.has(transition.proposal.id)) {
+      continue;
+    }
+
+    decisions.push({
+      decision: transition,
+      id: `transition:${transition.proposal.id}`,
+      kind: "transition",
+    });
+  }
+
+  if (result) {
+    const segmentById = new Map(
+      result.segments.map((segment) => [segment.segmentId, segment]),
+    );
+
+    for (const validation of adoptedDiameterValidation.segments) {
+      const segment = segmentById.get(validation.segmentId);
+
+      if (!segment || !isActionableAdoptedDiameterDecision(validation)) {
+        continue;
+      }
+
+      decisions.push({
+        decision: {
+          segment,
+          validation,
+        },
+        id: `adopted-diameter:${validation.segmentId}`,
+        kind: "adopted_diameter",
+      });
+    }
+
+    const seenTechnical = new Set<string>();
+
+    for (const issue of result.issues.filter(isActionableTechnicalDecisionIssue)) {
+      const key = technicalDecisionKey(issue);
+
+      if (seenTechnical.has(key)) {
+        continue;
+      }
+
+      seenTechnical.add(key);
+      decisions.push({
+        decision: { issue },
+        id: `technical:${key}`,
+        kind: "technical",
+      });
+    }
+
+  }
+
+  return decisions;
+}
+
+function createCalculationPendingSummary({
+  decisions,
+  materialTakeoff,
+  result,
+}: {
+  decisions: PendingCalculationDecision[];
   materialTakeoff: TechnicalMaterialTakeoff;
   result: TechnicalCalculationResult | null;
 }): CalculationPendingSummary {
-  const accessoryProposalCount = accessoryProposals.filter(
-    isActionableAccessoryProposal,
-  ).length;
-  const diameterTransitionCount = diameterTransitionProposals.filter(
-    isActionableDiameterTransitionProposal,
-  ).length;
-  const adoptedDiameterIssueCount = adoptedDiameterValidation.segments.filter(
-    (segment) => segment.status !== "valid",
-  ).length;
-  const materialPendingCount = materialTakeoff.pendingItems.filter(
+  const decisionCount = decisions.length;
+  const materialBlockingCount = materialTakeoff.pendingItems.filter(
     isMaterialOnlyPendingItem,
   ).length;
-  const visibleIssueCount = result?.issues.filter(isVisibleTechnicalIssue).length ?? 0;
-  const implicitStatusIssueCount =
-    result && result.status !== "valid" && visibleIssueCount === 0 ? 1 : 0;
-  const technicalIssueCount = visibleIssueCount + implicitStatusIssueCount;
-  const total =
-    accessoryProposalCount +
-    adoptedDiameterIssueCount +
-    diameterTransitionCount +
-    materialPendingCount +
-    technicalIssueCount;
+  const unresolvedCalculationCount =
+    result && result.status !== "valid" && decisionCount === 0 ? 1 : 0;
+  const deliveryBlockingCount =
+    decisionCount + materialBlockingCount + unresolvedCalculationCount;
 
   return {
-    accessoryProposalCount,
-    adoptedDiameterIssueCount,
-    blockingCount: total,
-    diameterTransitionCount,
-    materialPendingCount,
-    technicalIssueCount,
-    total,
+    decisionCount,
+    deliveryBlockingCount,
+    total: decisionCount,
   };
+}
+
+function sharedCandidatesForDecisions(
+  accessory: PendingAccessoryDecision,
+  transition: PendingTransitionDecision,
+): SharedDecisionCandidate[] {
+  if (!accessory.review || !transition.review) {
+    return [];
+  }
+
+  const transitionCandidatesByKey = new Map(
+    transition.review.candidates
+      .filter((candidate) => candidate.status === "compatible")
+      .map((candidate) => [sharedCandidateKey(candidate), candidate]),
+  );
+
+  return accessory.review.candidates
+    .filter((candidate) => candidate.status === "compatible")
+    .map((accessoryCandidate) => {
+      const transitionCandidate = transitionCandidatesByKey.get(
+        sharedCandidateKey(accessoryCandidate),
+      );
+
+      if (!transitionCandidate) {
+        return null;
+      }
+
+      return {
+        accessoryCandidateId: accessoryCandidate.id,
+        id: sharedCandidateKey(accessoryCandidate),
+        label: accessoryCandidate.label,
+        reason: accessoryCandidate.reason,
+        transitionCandidateId: transitionCandidate.id,
+      };
+    })
+    .filter(
+      (candidate): candidate is SharedDecisionCandidate => candidate !== null,
+    );
+}
+
+function sharedCandidateKey(candidate: AccessoryCatalogCandidate) {
+  return `${candidate.pipeSystem.id}:${candidate.familyId}`;
+}
+
+function isActionableAdoptedDiameterDecision(
+  validation: TechnicalAdoptedDiameterSegmentValidation,
+) {
+  return (
+    validation.decision !== null &&
+    (validation.status === "invalid" || validation.status === "unsupported")
+  );
+}
+
+function isActionableTechnicalDecisionIssue(issue: TechnicalCalculationIssue) {
+  return (
+    issue.code !== "pending_equivalent_length" &&
+    issue.code !== "pending_diameter_sizing" &&
+    issue.code !== "pending_route_sizing_length" &&
+    isVisibleTechnicalIssue(issue)
+  );
+}
+
+function technicalDecisionKey(issue: TechnicalCalculationIssue) {
+  return [
+    issue.code,
+    issue.equipmentId ?? "",
+    issue.nodeId ?? "",
+    issue.segmentId ?? "",
+    issue.accessoryId ?? "",
+  ].join("|");
 }
 
 function isVisibleTechnicalIssue(issue: TechnicalCalculationIssue) {
@@ -3528,6 +3887,99 @@ function materialPendingAction(
   return "validar diametro adoptado para computo final";
 }
 
+function formatDecisionCount(count: number) {
+  return count === 1 ? "1 decisión pendiente" : `${count} decisiones pendientes`;
+}
+
+function diameterTransitionSegmentIds(proposal: DiameterTransitionProposal) {
+  return [
+    ...new Set(
+      [
+        proposal.upstreamSegmentId,
+        ...proposal.downstreamSegmentIds,
+        ...proposal.incidentSegments.map((segment) => segment.segmentId),
+      ].filter((segmentId): segmentId is string => Boolean(segmentId)),
+    ),
+  ];
+}
+
+function formatDecisionSegmentSummary(
+  segmentIds: string[],
+  result: TechnicalCalculationResult,
+  equipmentById: Map<string, WorkbenchEquipment>,
+) {
+  const segments = segmentsByIds(segmentIds, result);
+
+  if (segments.length === 0) {
+    return "Tramo por ubicar";
+  }
+
+  const labels = segments
+    .slice(0, 2)
+    .map((segment) =>
+      formatProfessionalSegmentLabel(segment, result, equipmentById),
+    );
+  const remainingCount = segments.length - labels.length;
+
+  return remainingCount > 0
+    ? `${labels.join(" / ")} +${remainingCount}`
+    : labels.join(" / ");
+}
+
+function formatDecisionApplianceSummary(
+  segmentIds: string[],
+  result: TechnicalCalculationResult,
+  equipmentById: Map<string, WorkbenchEquipment>,
+) {
+  const names = [
+    ...new Set(
+      segmentsByIds(segmentIds, result).flatMap((segment) =>
+        segment.downstreamApplianceIds.map(
+          (equipmentId) => equipmentById.get(equipmentId)?.name ?? null,
+        ),
+      ),
+    ),
+  ].filter((name): name is string => Boolean(name));
+
+  if (names.length === 0) {
+    return "Sin artefactos asociados";
+  }
+
+  const visibleNames = names.slice(0, 2).join(", ");
+  const remainingCount = names.length - 2;
+
+  return remainingCount > 0
+    ? `${visibleNames} +${remainingCount}`
+    : visibleNames;
+}
+
+function segmentsByIds(
+  segmentIds: string[],
+  result: TechnicalCalculationResult,
+) {
+  const segmentById = new Map(
+    result.segments.map((segment) => [segment.segmentId, segment]),
+  );
+
+  return [...new Set(segmentIds)]
+    .map((segmentId) => segmentById.get(segmentId) ?? null)
+    .filter((segment): segment is TechnicalSegmentResult => segment !== null);
+}
+
+function formatProfessionalSegmentLabel(
+  segment: TechnicalSegmentResult,
+  result: TechnicalCalculationResult,
+  equipmentById: Map<string, WorkbenchEquipment>,
+) {
+  const applianceSummary = formatSegmentApplianceSummary(segment, equipmentById);
+
+  if (applianceSummary !== "Sin artefactos") {
+    return `Hacia ${applianceSummary}`;
+  }
+
+  return segmentLabel(segment, result.nodeLabels);
+}
+
 function formatSegmentApplianceSummary(
   segment: TechnicalSegmentResult,
   equipmentById: Map<string, WorkbenchEquipment>,
@@ -3565,9 +4017,25 @@ function segmentLabel(
   segment: TechnicalSegmentResult,
   labels: Record<string, string>,
 ) {
-  return `${labels[segment.fromNodeId] ?? "Nodo"} -> ${
-    labels[segment.toNodeId] ?? "Nodo"
+  return `${readableNodeLabel(labels[segment.fromNodeId])} -> ${
+    readableNodeLabel(labels[segment.toNodeId])
   }`;
+}
+
+function readableNodeLabel(label: string | undefined) {
+  if (!label) {
+    return "Nodo";
+  }
+
+  if (label === "M") {
+    return "Alimentación";
+  }
+
+  if (/^N\d+$/u.test(label)) {
+    return "Derivación";
+  }
+
+  return label;
 }
 
 function inventoryStatusLabel(inventory: TechnicalPhysicalAccessoryInventory) {
@@ -3587,7 +4055,7 @@ function formatPhysicalAccessorySummary(
   result: TechnicalCalculationResult,
 ) {
   const nodeLabel = item.nodeId
-    ? result.nodeLabels[item.nodeId] ?? "nodo del trazado"
+    ? readableNodeLabel(result.nodeLabels[item.nodeId])
     : "nodo pendiente";
 
   return `${technicalPhysicalAccessoryKindLabel(item.kind)} - ${nodeLabel} - ${formatPhysicalAccessoryDiameters(item)}`;
@@ -3957,7 +4425,7 @@ function formatTechnicalRoutePath(
   nodeIds: string[],
   labels: Record<string, string>,
 ) {
-  return nodeIds.map((nodeId) => labels[nodeId] ?? "Nodo").join(" -> ");
+  return nodeIds.map((nodeId) => readableNodeLabel(labels[nodeId])).join(" -> ");
 }
 
 function formatContributionDiameter(
