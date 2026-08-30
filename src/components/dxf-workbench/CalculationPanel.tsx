@@ -15,6 +15,7 @@ import {
   formatTechnicalFlow,
   routeAccessoryTypeLabel,
   technicalCalculationStatusLabel,
+  type TechnicalCalculationIssue,
   type TechnicalCalculationResult,
   type TechnicalTransitionAwareNetworkSizingSegmentResult,
   type TechnicalRouteAccessoryContribution,
@@ -86,6 +87,8 @@ import {
   downloadTechnicalPdf,
 } from "@/lib/calculation/technicalPdfDownload";
 
+type CalculationPanelMode = "calculate" | "deliver";
+
 type CalculationPanelProps = {
   adoptedDiameterDecisions: AdoptedDiameterDecision[];
   accessoryProposals: AccessoryProposal[];
@@ -95,6 +98,7 @@ type CalculationPanelProps = {
   equipment: WorkbenchEquipment[];
   hasPendingProposal: boolean;
   isPlanActive: boolean;
+  mode?: CalculationPanelMode;
   pipeSystem: PipeSystem;
   planReady: boolean;
   result: TechnicalCalculationResult | null;
@@ -104,6 +108,7 @@ type CalculationPanelProps = {
   onAdoptSegmentDiameter: (segmentId: string, diameterId: string | null) => void;
   onConfirmAccessoryProposal: (proposalId: string, candidateId: string) => void;
   onConfirmDiameterTransition: (transitionId: string, candidateId: string) => void;
+  onGoToEquipment: () => void;
   onGoToPlan: () => void;
   onRejectAccessoryProposal: (proposalId: string) => void;
   onRejectDiameterTransition: (transitionId: string) => void;
@@ -118,6 +123,7 @@ export function CalculationPanel({
   equipment,
   hasPendingProposal,
   isPlanActive,
+  mode = "calculate",
   pipeSystem,
   planReady,
   result,
@@ -127,6 +133,7 @@ export function CalculationPanel({
   onAdoptSegmentDiameter,
   onConfirmAccessoryProposal,
   onConfirmDiameterTransition,
+  onGoToEquipment,
   onGoToPlan,
   onRejectAccessoryProposal,
   onRejectDiameterTransition,
@@ -239,10 +246,34 @@ export function CalculationPanel({
     result?.segments.find((segment) => segment.segmentId === selectedSegmentId) ??
     result?.segments[0] ??
     null;
-  const canExportExcel = result !== null && calculationSheet.rows.length > 0;
+  const pendingSummary = useMemo(
+    () =>
+      createCalculationPendingSummary({
+        accessoryProposals,
+        adoptedDiameterValidation,
+        diameterTransitionProposals,
+        materialTakeoff,
+        result,
+      }),
+    [
+      accessoryProposals,
+      adoptedDiameterValidation,
+      diameterTransitionProposals,
+      materialTakeoff,
+      result,
+    ],
+  );
+  const isDeliverMode = mode === "deliver";
+  const isCalculationComplete =
+    result?.status === "valid" && pendingSummary.total === 0;
+  const canExportDocuments =
+    isDeliverMode &&
+    isCalculationComplete &&
+    result !== null &&
+    calculationSheet.rows.length > 0;
 
   const handleExportExcel = async () => {
-    if (!canExportExcel || isExportingExcel) {
+    if (!canExportDocuments || isExportingExcel) {
       return;
     }
 
@@ -266,7 +297,7 @@ export function CalculationPanel({
   };
 
   const handleExportPdf = async () => {
-    if (!canExportExcel || isExportingPdf) {
+    if (!canExportDocuments || isExportingPdf) {
       return;
     }
 
@@ -300,26 +331,32 @@ export function CalculationPanel({
     <section className="bg-white px-4 py-3 text-sm">
       <div className="flex items-start justify-between gap-2">
         <div>
-          <h2 className="sr-only">Cálculo</h2>
+          <h2 className="text-sm font-semibold">
+            {isDeliverMode ? "Entregar" : "Calcular"}
+          </h2>
           <p className="text-xs text-[var(--muted)]">
-            {result ? technicalCalculationStatusLabel(result.status) : "Sin Planta"}
+            {result
+              ? isCalculationComplete
+                ? "Cálculo completo"
+                : `Requiere revisión · ${pendingSummary.total} pendientes`
+              : "Sin instalación calculable"}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {result ? (
+          {isDeliverMode && result ? (
             <button
               className="rounded border border-[var(--line)] bg-white px-2 py-1 text-xs hover:border-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={!canExportExcel || isExportingExcel}
+              disabled={!canExportDocuments || isExportingExcel}
               type="button"
               onClick={handleExportExcel}
             >
               {isExportingExcel ? "Exportando..." : "Exportar Excel"}
             </button>
           ) : null}
-          {result ? (
+          {isDeliverMode && result ? (
             <button
               className="rounded border border-[var(--line)] bg-white px-2 py-1 text-xs hover:border-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={!canExportExcel || isExportingPdf}
+              disabled={!canExportDocuments || isExportingPdf}
               type="button"
               onClick={handleExportPdf}
             >
@@ -365,64 +402,47 @@ export function CalculationPanel({
       {result ? (
         <>
           <CalculationSummary
-            adoptedDiameterValidation={adoptedDiameterValidation}
+            pendingCount={pendingSummary.total}
             result={result}
           />
-          <CalculationIssues result={result} />
+          <CalculationIssues
+            accessoryProposalCount={pendingSummary.accessoryProposalCount}
+            adoptedDiameterValidation={adoptedDiameterValidation}
+            diameterTransitionCount={pendingSummary.diameterTransitionCount}
+            equipment={equipment}
+            result={result}
+            onGoToEquipment={onGoToEquipment}
+            onGoToPlan={onGoToPlan}
+          />
           <AccessoryProposalList
             proposals={accessoryProposals}
+            result={result}
             reviews={accessoryProposalReviews}
             onConfirm={onConfirmAccessoryProposal}
             onReject={onRejectAccessoryProposal}
           />
           <DiameterTransitionProposalList
-            isTransitionAwareResolved={
-              result.transitionAwareNetworkSizing?.status === "resolved"
-            }
-            nodeLabels={result.nodeLabels}
             proposals={diameterTransitionProposals}
-            routeTransitionResolutions={routeTransitionResolutions}
+            result={result}
             reviews={diameterTransitionReviews}
             onConfirm={onConfirmDiameterTransition}
             onReject={onRejectDiameterTransition}
           />
-          <MaterialTakeoffSection takeoff={materialTakeoff} />
-          <TechnicalAxonometricSection view={axonometricView} />
-          <PhysicalAccessoryInventorySection
-            inventory={physicalAccessoryInventory}
-            result={result}
-          />
-          <CalculationSheetSection
+          {isDeliverMode ? (
+            <MaterialTakeoffSection takeoff={materialTakeoff} />
+          ) : (
+            <MaterialTakeoffCompactSummary takeoff={materialTakeoff} />
+          )}
+          <SegmentList
             adoptedDiameterValidationBySegmentId={
               adoptedDiameterValidationBySegmentId
             }
-            sheet={calculationSheet}
-          />
-          <SegmentList
+            equipment={equipment}
             result={result}
             selectedSegmentId={selectedSegment?.segmentId ?? null}
+            onAdoptSegmentDiameter={onAdoptSegmentDiameter}
             onSelectSegment={setSelectedSegmentId}
           />
-          {selectedSegment ? (
-            <SegmentDetail
-              adoptedDiameterValidation={
-                adoptedDiameterValidationBySegmentId[
-                  selectedSegment.segmentId
-                ] ?? null
-              }
-              equivalentAccessoryVerification={
-                equivalentAccessoryVerificationBySegmentId[
-                  selectedSegment.segmentId
-                ] ?? null
-              }
-              equipment={equipment}
-              physicalAccessoryInventory={physicalAccessoryInventory}
-              result={result}
-              routeTransitionResolutions={routeTransitionResolutions}
-              segment={selectedSegment}
-              onAdoptSegmentDiameter={onAdoptSegmentDiameter}
-            />
-          ) : null}
         </>
       ) : null}
     </section>
@@ -431,33 +451,32 @@ export function CalculationPanel({
 
 function AccessoryProposalList({
   proposals,
+  result,
   reviews,
   onConfirm,
   onReject,
 }: {
   proposals: AccessoryProposal[];
+  result: TechnicalCalculationResult;
   reviews: AccessoryProposalTechnicalReview[];
   onConfirm: (proposalId: string, candidateId: string) => void;
   onReject: (proposalId: string) => void;
 }) {
   const [selectedCandidateByProposalId, setSelectedCandidateByProposalId] =
     useState<Record<string, string>>({});
+  const visibleProposals = proposals.filter(isActionableAccessoryProposal);
 
-  if (proposals.length === 0) {
-    return (
-      <section className="mt-3 rounded border border-[var(--line)] px-3 py-2 text-xs text-[var(--muted)]">
-        Sin accesorios geometricos detectados.
-      </section>
-    );
+  if (visibleProposals.length === 0) {
+    return null;
   }
 
   return (
     <section className="mt-3">
       <h3 className="mb-2 text-xs font-semibold uppercase text-[var(--muted)]">
-        Accesorios detectados
+        Pendientes de accesorios
       </h3>
       <div className="space-y-1">
-        {proposals.map((proposal) => {
+        {visibleProposals.map((proposal) => {
           const review =
             reviews.find((item) => item.proposalId === proposal.id) ?? null;
           const selectedCandidateId =
@@ -477,24 +496,18 @@ function AccessoryProposalList({
               className="rounded border border-[var(--line)] px-2 py-2 text-xs"
               key={proposal.id}
             >
-              <div className="flex items-start justify-between gap-2">
+              <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="font-medium">
-                    {proposalStateSymbol(proposal.state)}{" "}
-                    {accessoryProposalKindLabel(proposal.kind)} - nodo{" "}
-                    <span className="font-mono">{proposal.nodeId}</span> -{" "}
-                    {accessoryProposalStateLabel(proposal)}
+                    {formatAccessoryProposalTitle(proposal, result)}
                   </div>
                   <div className="mt-0.5 text-[10px] text-[var(--muted)]">
-                    {proposalEvidenceLabel(proposal)}
+                    {formatAccessoryProposalDiameters(review)}
                   </div>
-                  {review ? <ProposalTechnicalContext review={review} /> : null}
-                  {proposalReviewReason(proposal) ? (
-                    <div className="mt-0.5 text-[10px] text-[var(--warning)]">
-                      {proposalReviewReason(proposal)}
-                    </div>
-                  ) : null}
-                  {review && proposal.state !== "confirmed" && proposal.state !== "rejected" ? (
+                  <div className="mt-0.5 text-[10px] text-[var(--warning)]">
+                    {formatAccessoryProposalProblem(proposal, review)}
+                  </div>
+                  {review ? (
                     <CandidateSelector
                       proposal={proposal}
                       review={review}
@@ -516,7 +529,7 @@ function AccessoryProposalList({
                         type="button"
                         onClick={() => onConfirm(proposal.id, selectedCandidateId)}
                       >
-                        Confirmar
+                        Seleccionar tipo
                       </button>
                     ) : null}
                     {canReject ? (
@@ -540,113 +553,77 @@ function AccessoryProposalList({
 }
 
 function DiameterTransitionProposalList({
-  isTransitionAwareResolved,
-  nodeLabels,
   proposals,
-  routeTransitionResolutions,
+  result,
   reviews,
   onConfirm,
   onReject,
 }: {
-  isTransitionAwareResolved: boolean;
-  nodeLabels: Record<string, string>;
   proposals: DiameterTransitionProposal[];
-  routeTransitionResolutions: Record<string, TechnicalRouteTransitionResolution>;
+  result: TechnicalCalculationResult;
   reviews: DiameterTransitionTechnicalReview[];
   onConfirm: (transitionId: string, candidateId: string) => void;
   onReject: (transitionId: string) => void;
 }) {
   const [selectedCandidateByTransitionId, setSelectedCandidateByTransitionId] =
     useState<Record<string, string>>({});
-  const visibleProposals = proposals.filter(
-    (proposal) => proposal.state !== "not_required" || proposal.decision,
-  );
+  const visibleProposals = proposals.filter(isActionableDiameterTransitionProposal);
+
+  if (visibleProposals.length === 0) {
+    return null;
+  }
 
   return (
     <section className="mt-3">
       <h3 className="mb-2 text-xs font-semibold uppercase text-[var(--muted)]">
-        Transiciones de diametro
+        Pendientes de diámetro
       </h3>
-      <div className="mb-2 rounded border border-[#dbeafe] bg-[#eff6ff] px-3 py-2 text-xs text-[#1d4ed8]">
-        {isTransitionAwareResolved
-          ? "Las transiciones confirmadas participan del dimensionado completo; tees reductoras por recorrido."
-          : "Preview: incluye fisica, accesorios, transiciones simples y tees reductoras por recorrido."}
-      </div>
-      {visibleProposals.length === 0 ? (
-        <div className="rounded border border-[var(--line)] px-3 py-2 text-xs text-[var(--muted)]">
-          Sin transiciones de diametro activas.
-        </div>
-      ) : (
-        <div className="space-y-1">
-          {visibleProposals.map((proposal) => {
-            const review =
-              reviews.find((item) => item.transitionId === proposal.id) ?? null;
-            const selectedCandidateId =
-              selectedCandidateByTransitionId[proposal.id] ??
-              review?.selectedCandidate?.id ??
-              "";
-            const selectedCandidate =
-              review?.candidates.find((item) => item.id === selectedCandidateId) ??
-              null;
-            const selectedCandidateAlreadyConfirmed =
-              proposal.decision?.status === "confirmed" &&
-              selectedCandidate !== null &&
-              proposal.decision.catalogFamilyId === selectedCandidate.familyId &&
-              (!proposal.decision.pipeSystemId ||
-                proposal.decision.pipeSystemId === selectedCandidate.pipeSystem.id);
-            const canConfirm =
-              proposal.state !== "confirmed" &&
-              proposal.state !== "rejected" &&
-              proposal.state !== "not_required" &&
-              selectedCandidate?.status === "compatible" &&
-              !selectedCandidateAlreadyConfirmed;
-            const canReject =
-              proposal.state !== "confirmed" &&
-              proposal.state !== "rejected" &&
-              proposal.state !== "not_required";
+      <div className="space-y-1">
+        {visibleProposals.map((proposal) => {
+          const review =
+            reviews.find((item) => item.transitionId === proposal.id) ?? null;
+          const selectedCandidateId =
+            selectedCandidateByTransitionId[proposal.id] ??
+            review?.selectedCandidate?.id ??
+            "";
+          const selectedCandidate =
+            review?.candidates.find((item) => item.id === selectedCandidateId) ??
+            null;
+          const selectedCandidateAlreadyConfirmed =
+            proposal.decision?.status === "confirmed" &&
+            selectedCandidate !== null &&
+            proposal.decision.catalogFamilyId === selectedCandidate.familyId &&
+            (!proposal.decision.pipeSystemId ||
+              proposal.decision.pipeSystemId === selectedCandidate.pipeSystem.id);
+          const canConfirm =
+            proposal.state !== "confirmed" &&
+            proposal.state !== "rejected" &&
+            proposal.state !== "not_required" &&
+            selectedCandidate?.status === "compatible" &&
+            !selectedCandidateAlreadyConfirmed;
+          const canReject =
+            proposal.state !== "confirmed" &&
+            proposal.state !== "rejected" &&
+            proposal.state !== "not_required";
 
-            return (
-              <div
-                className="rounded border border-[var(--line)] px-2 py-2 text-xs"
-                key={proposal.id}
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="font-medium">
-                      {diameterTransitionStateSymbol(proposal.state)}{" "}
-                      {nodeLabels[proposal.nodeId] ?? proposal.nodeId} -{" "}
-                      {diameterTransitionMainLabel(proposal)}
-                    </div>
-                    <div className="mt-0.5 text-[10px] text-[var(--muted)]">
-                      {diameterTransitionKindLabel(proposal.kind)} -{" "}
-                      {diameterTransitionStateLabel(proposal)}
-                    </div>
-                    <div className="mt-0.5 text-[10px] text-[var(--muted)]">
-                      {diameterTransitionOrientationLabel(proposal)}
-                    </div>
-                    {proposal.downstreamDiameters.length > 1 ? (
-                      <div className="mt-0.5 text-[10px] text-[var(--muted)]">
-                        Ramas: {diameterTransitionBranchLabel(proposal)}
-                      </div>
-                    ) : null}
-                    {review?.reason ? (
-                      <div className="mt-0.5 text-[10px] text-[var(--warning)]">
-                        {review.reason}
-                      </div>
-                    ) : null}
-                    <DiameterTransitionPreview
-                      contributions={previewContributionsForTransition(
-                        proposal.id,
-                        routeTransitionResolutions,
-                      )}
-                      isTransitionAwareResolved={isTransitionAwareResolved}
-                      proposal={proposal}
-                      review={review}
-                    />
-                    {review &&
-                    proposal.state !== "confirmed" &&
-                    proposal.state !== "rejected" &&
-                    proposal.state !== "not_required" ? (
+          return (
+            <div
+              className="rounded border border-[var(--line)] px-2 py-2 text-xs"
+              key={proposal.id}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="font-medium">
+                    {diameterTransitionKindLabel(proposal.kind)} detectada ·{" "}
+                    {formatDiameterTransitionContext(proposal, result)}
+                  </div>
+                  <div className="mt-0.5 text-[10px] text-[var(--muted)]">
+                    {diameterTransitionMainLabel(proposal)}
+                  </div>
+                  <div className="mt-0.5 text-[10px] text-[var(--warning)]">
+                    {formatDiameterTransitionProblem(proposal, review)}
+                  </div>
+                  {review ? (
                       <DiameterTransitionCandidateSelector
                         proposal={proposal}
                         review={review}
@@ -667,10 +644,10 @@ function DiameterTransitionProposalList({
                           className="rounded border border-[var(--line)] bg-white px-2 py-1 text-[11px] hover:border-[var(--accent)]"
                           type="button"
                           onClick={() => onConfirm(proposal.id, selectedCandidateId)}
-                        >
-                          Confirmar
-                        </button>
-                      ) : null}
+                      >
+                        Seleccionar tipo
+                      </button>
+                    ) : null}
                       {canReject ? (
                         <button
                           className="rounded border border-[var(--line)] bg-white px-2 py-1 text-[11px] hover:border-[var(--accent)]"
@@ -684,10 +661,9 @@ function DiameterTransitionProposalList({
                   ) : null}
                 </div>
               </div>
-            );
-          })}
-        </div>
-      )}
+          );
+        })}
+      </div>
     </section>
   );
 }
@@ -1237,26 +1213,26 @@ function proposalReviewReason(proposal: AccessoryProposal) {
 }
 
 function CalculationSummary({
-  adoptedDiameterValidation,
+  pendingCount,
   result,
 }: {
-  adoptedDiameterValidation: TechnicalAdoptedDiameterValidation;
+  pendingCount: number;
   result: TechnicalCalculationResult;
 }) {
   const totalFlow = formatTechnicalFlow(
     result.totals.accumulatedFlow,
     result.totals.accumulatedFlowUnit,
   );
-  const globalResolvedSegmentCount =
-    result.networkSizing?.segments.filter((segment) => segment.status === "resolved")
-      .length ?? null;
   const physicalLength = formatCalculationMeters(result.totals.physicalLengthMeters);
   const equivalentLength = formatCalculationMeters(
     result.totals.accessoryEquivalentLengthMeters,
     "Pendiente",
   );
   const calculationLength = formatTotalCalculationLength(result);
-  const transitionAwareSizing = result.transitionAwareNetworkSizing;
+  const status =
+    result.status === "valid" && pendingCount === 0
+      ? "Cálculo completo"
+      : `Requiere revisión · ${pendingCount} pendientes`;
 
   return (
     <dl className="mt-3 grid grid-cols-[minmax(0,1fr)_96px] gap-x-2 gap-y-1 text-xs">
