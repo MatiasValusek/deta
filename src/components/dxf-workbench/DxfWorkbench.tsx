@@ -146,6 +146,7 @@ import {
   totalRouteLengthSource,
 } from "@/lib/routing/network";
 import { generateAutomaticRouteProposal } from "@/lib/routing/autoProposal";
+import { routeProposalCanBeAccepted } from "@/lib/routing/proposalAcceptance";
 import {
   buildProposalFromIntent,
   routeIntentConnectionKey,
@@ -255,6 +256,7 @@ import { PdfViewer } from "./PdfViewer";
 import { RouteContextCard } from "./RouteContextCard";
 import { RouteIntentContextCard } from "./RouteIntentContextCard";
 import { RoutePanel } from "./RoutePanel";
+import { ReviewPanel, type ReviewSectionItem } from "./ReviewPanel";
 import {
   RightPanelSections,
   type RightPanelSection,
@@ -397,7 +399,7 @@ const MAIN_WORKFLOW_PANEL_SECTIONS: Record<
   deliver: ["calculation"],
   equipment: ["equipment"],
   plan: ["geometry", "scale"],
-  review: ["obstacles"],
+  review: ["review"],
   route: ["route"],
 };
 const MAIN_WORKFLOW_DEFAULT_PANEL: Record<
@@ -408,7 +410,7 @@ const MAIN_WORKFLOW_DEFAULT_PANEL: Record<
   deliver: "calculation",
   equipment: "equipment",
   plan: "geometry",
-  review: "obstacles",
+  review: "review",
   route: "route",
 };
 
@@ -1754,12 +1756,60 @@ export function DxfWorkbench() {
       return;
     }
 
+    if (stage !== "review") {
+      setSectionRouteHeightEditor(null);
+    }
+
     setActiveMainStage(stage);
     setActiveRightPanelSection(MAIN_WORKFLOW_DEFAULT_PANEL[stage]);
 
     if (stage !== "plan" && planBase) {
       handleActivateBase(planBase.id);
     }
+  }
+
+  function handleReviewPlanOpen() {
+    if (!planBase) {
+      return;
+    }
+
+    setActiveMainStage("review");
+    setActiveRightPanelSection("review");
+    handleActivateBase(planBase.id);
+    updateBase(planBase.id, (base) => ({
+      ...base,
+      showEquipment: true,
+      showRoute: true,
+    }));
+  }
+
+  function handleReviewSectionOpen(sectionBaseId: string) {
+    const section = bases.find(
+      (base) => base.id === sectionBaseId && base.type === "section",
+    );
+
+    if (!section) {
+      return;
+    }
+
+    setActiveMainStage("review");
+    setActiveRightPanelSection("review");
+    handleActivateBase(section.id);
+    updateBase(section.id, (base) => ({
+      ...base,
+      showEquipment: true,
+      showRoute: true,
+    }));
+  }
+
+  function handleContinueToCalculateFromReview() {
+    if (!isRouteComplete) {
+      setActiveRightPanelSection("review");
+      setRouteError("Confirma un recorrido valido antes de calcular.");
+      return;
+    }
+
+    handleMainWorkflowStageChange("calculate");
   }
 
   function handleOpenPlanStageScale(baseId: string | null) {
@@ -2424,10 +2474,11 @@ export function DxfWorkbench() {
     target: SectionRouteHeightTarget,
     currentHeightMeters: number,
   ) {
-    if (activeBase?.type !== "section") {
+    if (activeBase?.type !== "section" || activeMainStage !== "review") {
       return;
     }
 
+    setActiveRightPanelSection("review");
     setSectionRouteHeightEditor({
       error: null,
       heightInput: formatElevationInputForEdit(currentHeightMeters),
@@ -2436,6 +2487,7 @@ export function DxfWorkbench() {
     });
     setSectionLinkDraft(null);
     setSectionRegistrationDraft(null);
+    setSectionRouteHeightEditor(null);
     setEquipmentDraft(null);
     setRouteDraft(null);
     setRouteIntentDraft(null);
@@ -3390,7 +3442,7 @@ export function DxfWorkbench() {
   }
 
   function handleSelectPhysicalRouteElement(selection: PhysicalRouteEditSelection) {
-    setActiveRightPanelSection("route");
+    setActiveRightPanelSection(activeMainStage === "review" ? "review" : "route");
     setSelectedRouteEdit(selection);
     setRouteDraft(null);
     setRouteIntentDraft(null);
@@ -3555,7 +3607,7 @@ export function DxfWorkbench() {
     result: ReturnType<typeof movePhysicalRouteNode>,
     selection: PhysicalRouteEditSelection,
   ) {
-    setActiveRightPanelSection("route");
+    setActiveRightPanelSection(activeMainStage === "review" ? "review" : "route");
     setSelectedRouteEdit(selection);
 
     if (!result.ok) {
@@ -4577,7 +4629,11 @@ export function DxfWorkbench() {
       return;
     }
 
-    if (!routeProposal.validation.canAccept) {
+    const requiredApplianceCount = planBase.equipment.filter(
+      (equipment) => equipment.role === "appliance",
+    ).length;
+
+    if (!routeProposalCanBeAccepted(routeProposal, requiredApplianceCount)) {
       setRouteError("La propuesta aun no cumple las condiciones para aceptarse.");
       return;
     }
@@ -5638,6 +5694,32 @@ export function DxfWorkbench() {
       ? "Confirmada"
       : "Pendiente"
     : "Sin base activa";
+  const activeWorkflowStage =
+    activeMainStage === "plan" || planStageReadiness.canContinueToEquipment
+      ? activeMainStage
+      : "plan";
+  const isReviewStage = activeWorkflowStage === "review";
+  const reviewSummaryText = !planBase
+    ? "Sin Planta"
+    : isRouteComplete
+      ? "Listo para calcular"
+      : "Falta recorrido confirmado";
+  const reviewSectionItems: ReviewSectionItem[] = bases
+    .filter((base) => base.type === "section")
+    .map((section) => {
+      const link =
+        sectionPlanLinks.find((item) => item.sectionBaseId === section.id) ??
+        null;
+      const isReady = Boolean(link?.registration);
+
+      return {
+        id: section.id,
+        isActive: activeBase?.id === section.id,
+        name: section.name,
+        status: isReady ? "ready" : "pending",
+        summary: isReady ? "Corte proyectado" : "Falta correspondencia",
+      };
+    });
   const planOnlyDisabledReason =
     activeBase?.type === "section" ? "Solo en Planta" : "Sin Planta";
   const isPlanSectionAvailable = activeBase?.type === "plan";
@@ -5749,7 +5831,9 @@ export function DxfWorkbench() {
       disabled: !isPlanSectionAvailable,
       disabledReason: planOnlyDisabledReason,
       hasActiveTool: Boolean(routeDraft || routeIntentDraft),
-      content: (
+      content: activeBase?.type === "section" ? (
+        <RouteSectionPreviewPanel onGoToPlan={handleGoToPlanForRoute} />
+      ) : (
         <RoutePanel
           applianceStatuses={routeApplianceStatuses}
           connectedCount={connectedApplianceIds.size}
@@ -5799,6 +5883,29 @@ export function DxfWorkbench() {
           onSelectDraftTarget={handleSelectRouteDraftTarget}
           onShowRouteChange={handleShowRouteChange}
           onSnapOptionChange={handleRouteSnapOptionChange}
+        />
+      ),
+    },
+    {
+      id: "review",
+      title: "Revisar",
+      summary: reviewSummaryText,
+      disabled: !planBase,
+      disabledReason: "Sin Planta",
+      hasActiveTool: Boolean(selectedRouteEdit || sectionRouteHeightEditor),
+      content: (
+        <ReviewPanel
+          activeBaseType={activeBase?.type ?? null}
+          connectedApplianceCount={connectedApplianceIds.size}
+          hasValidRoute={isRouteComplete}
+          isPlanActive={activeBase?.type === "plan"}
+          planName={planBase?.name ?? null}
+          routeRestrictionCount={routeRestrictionCount}
+          sections={reviewSectionItems}
+          totalApplianceCount={applianceEquipment.length}
+          onContinueToCalculate={handleContinueToCalculateFromReview}
+          onOpenPlan={handleReviewPlanOpen}
+          onOpenSection={handleReviewSectionOpen}
         />
       ),
     },
@@ -5891,10 +5998,6 @@ export function DxfWorkbench() {
       ),
     },
   ];
-  const activeWorkflowStage =
-    activeMainStage === "plan" || planStageReadiness.canContinueToEquipment
-      ? activeMainStage
-      : "plan";
   const activeStagePanelSections = rightPanelSections.filter((section) =>
     MAIN_WORKFLOW_PANEL_SECTIONS[activeWorkflowStage].includes(section.id),
   );
@@ -6211,7 +6314,7 @@ export function DxfWorkbench() {
               onSaveDraft={handleSaveRouteIntentDraft}
             />
           ) : null}
-          {sectionRouteHeightEditor && activeBase?.type === "section" ? (
+          {isReviewStage && sectionRouteHeightEditor && activeBase?.type === "section" ? (
             <div className="absolute left-4 top-4 z-10 w-[280px] rounded border border-[var(--line)] bg-white/95 px-3 py-2 text-xs shadow-sm">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
@@ -6421,7 +6524,9 @@ export function DxfWorkbench() {
                 sectionRegistrationMode={sectionRegistrationMode}
                 sectionRegistrationSaved={activeSectionRegistrationSavedOverlay}
                 sectionRouteProjection={activeSectionRouteProjection}
-                selectedSectionRouteHeightTarget={selectedSectionRouteHeightTarget}
+                selectedSectionRouteHeightTarget={
+                  isReviewStage ? selectedSectionRouteHeightTarget : null
+                }
                 selectionMode={activeBase?.selectionMode ?? "pan"}
                 semanticViewMode={activeBase?.semanticViewMode ?? "original"}
                 showConstraints={activeBase?.showConstraints ?? true}
@@ -6456,7 +6561,7 @@ export function DxfWorkbench() {
                 onSectionRegistrationPreview={handleSectionRegistrationPreview}
                 onSectionRegistrationSide={handleSectionRegistrationSide}
                 onSectionRouteHeightTargetSelect={
-                  handleSectionRouteHeightTargetSelect
+                  isReviewStage ? handleSectionRouteHeightTargetSelect : undefined
                 }
                 onSourcePoint={(point) => handleSourcePoint("dxf", point)}
                 onViewChange={handleDxfViewChange}
@@ -6504,7 +6609,9 @@ export function DxfWorkbench() {
                 sectionRegistrationMode={sectionRegistrationMode}
                 sectionRegistrationSaved={activeSectionRegistrationSavedOverlay}
                 sectionRouteProjection={activeSectionRouteProjection}
-                selectedSectionRouteHeightTarget={selectedSectionRouteHeightTarget}
+                selectedSectionRouteHeightTarget={
+                  isReviewStage ? selectedSectionRouteHeightTarget : null
+                }
                 showConstraints={activeBase?.showConstraints ?? true}
                 showEquipment={activeBase?.showEquipment ?? true}
                 showRoute={activeBase?.showRoute ?? true}
@@ -6534,7 +6641,7 @@ export function DxfWorkbench() {
                 onSectionRegistrationPreview={handleSectionRegistrationPreview}
                 onSectionRegistrationSide={handleSectionRegistrationSide}
                 onSectionRouteHeightTargetSelect={
-                  handleSectionRouteHeightTargetSelect
+                  isReviewStage ? handleSectionRouteHeightTargetSelect : undefined
                 }
                 onSourcePoint={(point) => handleSourcePoint("pdf", point)}
                 onViewChange={handlePdfViewChange}
@@ -6567,6 +6674,27 @@ export function DxfWorkbench() {
         </aside>
       </section>
     </main>
+  );
+}
+
+function RouteSectionPreviewPanel({ onGoToPlan }: { onGoToPlan: () => void }) {
+  return (
+    <section className="bg-white px-4 py-3 text-sm">
+      <h2 className="sr-only">Recorrido</h2>
+      <div className="rounded border border-[var(--line)] px-3 py-2 text-xs">
+        <div className="font-semibold">Corte en preview</div>
+        <p className="mt-1 text-[var(--muted)]">
+          El recorrido se genera y edita desde la Planta.
+        </p>
+        <button
+          className="mt-2 rounded border border-[var(--line)] bg-white px-2 py-1 hover:border-[var(--accent)]"
+          type="button"
+          onClick={onGoToPlan}
+        >
+          Ir a Planta
+        </button>
+      </div>
+    </section>
   );
 }
 

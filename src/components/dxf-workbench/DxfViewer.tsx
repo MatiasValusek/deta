@@ -159,7 +159,7 @@ type DxfViewerProps = {
   onSectionRegistrationPoint: (point: Point2D) => void;
   onSectionRegistrationPreview: (point: Point2D | null) => void;
   onSectionRegistrationSide: (side: SectionViewSide) => void;
-  onSectionRouteHeightTargetSelect: (
+  onSectionRouteHeightTargetSelect?: (
     target: SectionRouteHeightTarget,
     currentHeightMeters: number,
   ) => void;
@@ -890,6 +890,7 @@ export function DxfViewer({
               onChooseDraftSide={onSectionRegistrationSide}
             />
             <SectionRouteProjectionOverlay
+              detailsVisible={Boolean(selectedSectionRouteHeightTarget)}
               projection={sectionRouteProjection}
               selectedHeightTarget={selectedSectionRouteHeightTarget}
               sourceToScreen={(point) => worldToScreen(point, view)}

@@ -4,6 +4,7 @@ export type RightPanelSectionId =
   | "geometry"
   | "equipment"
   | "route"
+  | "review"
   | "calculation"
   | "obstacles"
   | "scale";

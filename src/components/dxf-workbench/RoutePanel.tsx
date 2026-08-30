@@ -16,6 +16,7 @@ import type {
   RouteIntentDraft,
   RouteIntentEndpoint,
 } from "@/lib/routing/types";
+import { routeProposalCanBeAccepted } from "@/lib/routing/proposalAcceptance";
 
 type RouteApplianceStatus = {
   equipment: WorkbenchEquipment;
@@ -619,8 +620,11 @@ function RouteMainFlow({
   }
 
   if (routeState === "proposal" && proposal) {
-    const canAcceptProposal =
-      !proposalOutdated && proposal.validation.canAccept;
+    const canAcceptProposal = routeProposalCanBeAccepted(
+      proposal,
+      totalAppliances,
+      proposalOutdated,
+    );
     const unreachedNames = proposal.unreachedEquipmentIds
       .map(
         (equipmentId) =>
@@ -758,6 +762,11 @@ function ProposalSummary({
           ?.equipment.name ?? equipmentId,
     )
     .sort();
+  const canAcceptProposal = routeProposalCanBeAccepted(
+    proposal,
+    applianceStatuses.length,
+    isOutdated,
+  );
 
   return (
     <section className="mt-3 border-t border-[var(--line)] pt-2">
@@ -804,7 +813,7 @@ function ProposalSummary({
       <div className="mt-2 grid grid-cols-3 gap-1">
         <button
           className="rounded border border-[var(--accent)] bg-[var(--accent)] px-2 py-1 font-medium text-white hover:bg-[var(--accent-strong)] disabled:border-[var(--line)] disabled:bg-white disabled:text-[var(--muted)]"
-          disabled={isOutdated || !proposal.validation.canAccept}
+          disabled={!canAcceptProposal}
           type="button"
           onClick={onAcceptProposal}
         >

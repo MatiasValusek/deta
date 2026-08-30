@@ -13,6 +13,7 @@ import {
 } from "@/lib/sections/routeHeightEditing";
 
 type SectionRouteProjectionOverlayProps = {
+  detailsVisible?: boolean;
   selectedHeightTarget?: SectionRouteHeightTarget | null;
   projection: SectionRouteProjection | null;
   sourceToScreen: (point: Point2D) => Point2D;
@@ -23,6 +24,7 @@ type SectionRouteProjectionOverlayProps = {
 };
 
 export function SectionRouteProjectionOverlay({
+  detailsVisible = false,
   selectedHeightTarget,
   projection,
   sourceToScreen,
@@ -42,6 +44,7 @@ export function SectionRouteProjectionOverlay({
       {projection.segments.map((segment) => (
         <ProjectedSegment
           key={segment.id}
+          detailsVisible={detailsVisible}
           selectedHeightTarget={selectedHeightTarget}
           segment={segment}
           sourceToScreen={sourceToScreen}
@@ -51,6 +54,7 @@ export function SectionRouteProjectionOverlay({
       {projection.accessories.map((accessory) => (
         <ProjectedAccessory
           accessory={accessory}
+          detailsVisible={detailsVisible}
           key={accessory.id}
           sourceToScreen={sourceToScreen}
         />
@@ -94,11 +98,13 @@ function ProjectionBlockedNotice({ reason }: { reason: string | undefined }) {
 }
 
 function ProjectedSegment({
+  detailsVisible,
   selectedHeightTarget,
   segment,
   sourceToScreen,
   onHeightTargetSelect,
 }: {
+  detailsVisible: boolean;
   selectedHeightTarget?: SectionRouteHeightTarget | null;
   segment: SectionRouteProjectedSegment;
   sourceToScreen: (point: Point2D) => Point2D;
@@ -142,7 +148,7 @@ function ProjectedSegment({
         strokeWidth="1.2"
         pointerEvents="none"
       />
-      {labelPoint ? (
+      {detailsVisible && labelPoint ? (
         <ProjectionLabel
           fill={segment.status === "pending" ? "#92400e" : "#134e4a"}
           point={labelPoint}
@@ -181,9 +187,11 @@ function ProjectedSegment({
 
 function ProjectedAccessory({
   accessory,
+  detailsVisible,
   sourceToScreen,
 }: {
   accessory: SectionRouteProjectedAccessory;
+  detailsVisible: boolean;
   sourceToScreen: (point: Point2D) => Point2D;
 }) {
   if (!accessory.sectionPoint) {
@@ -213,11 +221,13 @@ function ProjectedAccessory({
           strokeWidth="2"
         />
       )}
-      <ProjectionLabel
-        fill={stroke}
-        point={{ x: 0, y: -12 }}
-        text={accessory.label}
-      />
+      {detailsVisible ? (
+        <ProjectionLabel
+          fill={stroke}
+          point={{ x: 0, y: -12 }}
+          text={accessory.label}
+        />
+      ) : null}
     </g>
   );
 }

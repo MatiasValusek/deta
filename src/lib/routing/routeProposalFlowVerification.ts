@@ -1,6 +1,7 @@
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
 import type { Point2D } from "@/lib/geometry/types";
 import { generateAutomaticRouteProposal } from "@/lib/routing/autoProposal";
+import { routeProposalCanBeAccepted } from "@/lib/routing/proposalAcceptance";
 import {
   applianceNodesAreTerminal,
   findRouteNodeByEquipment,
@@ -28,7 +29,7 @@ export function runRouteProposalFlowVerifications() {
 
   verify(
     results,
-    "10.8C sin recorrido genera propuesta 2/2 y acepta routeNetwork terminal",
+    "10.8C1 propuesta valida 3/3 habilita aceptar y confirma routeNetwork",
     () => {
       const fixture = routeProposalFlowFixture();
 
@@ -39,15 +40,22 @@ export function runRouteProposalFlowVerifications() {
         ).size,
         0,
       );
-      assertEqual(fixture.proposal.reachedEquipmentIds.length, 2);
+      assertEqual(fixture.proposal.reachedEquipmentIds.length, 3);
       assertEqual(fixture.proposal.unreachedEquipmentIds.length, 0);
-      assertEqual(fixture.proposal.validation.canAccept, true);
+      assertEqual(routeProposalCanBeAccepted(fixture.proposal, 3), true);
+      assertEqual(
+        routeProposalCanBeAccepted(
+          proposalWithStaleAcceptFlag(fixture.proposal),
+          3,
+        ),
+        true,
+      );
       assertEqual(
         getConnectedApplianceEquipmentIds(
           fixture.acceptedNetwork,
           fixture.equipment,
         ).size,
-        2,
+        3,
       );
       assertEqual(applianceNodesAreTerminal(fixture.acceptedNetwork), true);
       assertProposalTargetsTerminalStarts(fixture);
@@ -91,6 +99,19 @@ function routeProposalFlowFixture() {
   };
 }
 
+function proposalWithStaleAcceptFlag(
+  proposal: ReturnType<typeof generateAutomaticRouteProposal>,
+) {
+  return {
+    ...proposal,
+    validation: {
+      ...proposal.validation,
+      allConnected: false,
+      canAccept: false,
+    },
+  };
+}
+
 function fixtureEquipment(): WorkbenchEquipment[] {
   return [
     {
@@ -104,6 +125,7 @@ function fixtureEquipment(): WorkbenchEquipment[] {
     },
     appliance("stove-1", "Cocina", 6, 1),
     appliance("heater-1", "Calefactor", 6, 3),
+    appliance("boiler-1", "Caldera", 3, 4),
   ];
 }
 
@@ -194,7 +216,8 @@ function terminalStartPoint(equipment: WorkbenchEquipment): Point2D {
   const wallPoint = equipment.wallAnchor?.wallPoint ?? equipment.connectionPoint;
   const orientation = equipment.wallAnchor?.orientationRadians ?? 0;
   const config = equipment.terminalConfig;
-  const sideSign = config?.outletSide === "left" ? -1 : config?.outletSide === "right" ? 1 : 0;
+  const sideSign =
+    config?.outletSide === "left" ? -1 : config?.outletSide === "right" ? 1 : 0;
   const offsetSource =
     config && SCALE_METERS_PER_SOURCE_UNIT > 0
       ? config.lateralOffsetMeters / SCALE_METERS_PER_SOURCE_UNIT
@@ -217,7 +240,7 @@ function assertProposalTargetsTerminalStarts(
 
   assert(supplyNode, "Falta nodo de alimentacion.");
 
-  for (const equipmentId of ["stove-1", "heater-1"]) {
+  for (const equipmentId of ["stove-1", "heater-1", "boiler-1"]) {
     const terminalStart = findTerminalStartNodeByEquipment(
       fixture.acceptedNetwork,
       equipmentId,
@@ -238,7 +261,10 @@ function assertProposalTargetsTerminalStarts(
       terminalStart,
       equipmentIndex(fixture.equipment),
     );
-    assertPoint(terminalPoint, terminalStartPoint(applianceNodeEquipment(fixture, equipmentId)));
+    assertPoint(
+      terminalPoint,
+      terminalStartPoint(applianceNodeEquipment(fixture, equipmentId)),
+    );
     assertEqual(
       fixture.acceptedNetwork.segments.some(
         (segment) =>
