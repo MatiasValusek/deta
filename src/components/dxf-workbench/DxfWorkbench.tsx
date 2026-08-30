@@ -1860,7 +1860,7 @@ export function DxfWorkbench() {
     handleMainWorkflowStageChange("calculate");
   }
 
-  function handleOpenPlanStageScale(baseId: string | null) {
+  function handleOpenPlanStageScale(baseId: string | null, startCalibration = true) {
     if (!baseId) {
       return;
     }
@@ -1868,6 +1868,28 @@ export function DxfWorkbench() {
     setActiveMainStage("plan");
     setActiveRightPanelSection("scale");
     handleActivateBase(baseId);
+    if (!startCalibration) {
+      return;
+    }
+
+    setSectionRegistrationDraft(null);
+    setEquipmentDraft(null);
+    setEquipmentError(null);
+    setRouteDraft(null);
+    setRouteProposal(null);
+    setRouteError(null);
+    updateBase(baseId, (base) =>
+      updateCalibrationForBase(base, (state) => ({
+        ...state,
+        toolMode: "calibrate",
+        draft: {
+          ...state.draft,
+          points: [],
+        },
+        measurementPoints: [],
+        error: null,
+      })),
+    );
   }
 
   function handlePlanStageSectionAction(sectionBaseId: string | null) {
@@ -5527,14 +5549,6 @@ export function DxfWorkbench() {
     );
   }
 
-  function handleResetCalibration() {
-    setActiveRightPanelSection("scale");
-    updateActiveBase((base) => ({
-      ...base,
-      calibration: createInitialCalibrationState(),
-    }));
-  }
-
   function handleDistanceChange(value: string) {
     updateActiveBase((base) =>
       updateCalibrationForBase(base, (state) => ({
@@ -6035,15 +6049,12 @@ export function DxfWorkbench() {
       hasActiveTool: activeCalibration.toolMode !== "idle",
       content: (
         <CalibrationPanel
-          isSectionContent
-          sourceLabel={constraintsSourceLabel}
           sourceReady={Boolean(activeBase)}
           state={activeCalibration}
           onCancel={handleCancelCalibrationTool}
           onConfirm={handleConfirmCalibration}
           onDistanceChange={handleDistanceChange}
           onModeChange={handleCalibrationMode}
-          onReset={handleResetCalibration}
           onUnitChange={handleUnitChange}
         />
       ),
@@ -6728,7 +6739,7 @@ export function DxfWorkbench() {
 
         {hasAnyBase ? (
         <aside className="flex min-h-0 flex-col overflow-hidden border-l border-[var(--line)] bg-white">
-          {activeWorkflowStage === "plan" ? (
+          {activeWorkflowStage === "plan" && activeRightPanelSection !== "scale" ? (
             <PlanStagePanel
               isImporting={isImporting}
               readiness={planStageReadiness}
@@ -6739,7 +6750,11 @@ export function DxfWorkbench() {
               onSectionAction={handlePlanStageSectionAction}
             />
           ) : null}
-          {activeWorkflowStage !== "plan" || activeRightPanelSection === "scale" ? (
+          {activeWorkflowStage === "plan" && activeRightPanelSection === "scale" ? (
+          <div className="min-h-0 flex-1 overflow-auto">
+            {rightPanelSections.find((section) => section.id === "scale")?.content}
+          </div>
+          ) : activeWorkflowStage !== "plan" ? (
           <div className="min-h-0 flex-1 overflow-hidden">
             <RightPanelSections
               activeSectionId={activeRightPanelSection}
@@ -6827,7 +6842,7 @@ function PlanStagePanel({
   onAddPlan: () => void;
   onAddSection: () => void;
   onContinue: () => void;
-  onOpenScale: (baseId: string | null) => void;
+  onOpenScale: (baseId: string | null, startCalibration?: boolean) => void;
   onSectionAction: (baseId: string | null) => void;
 }) {
   const planLoaded = readiness.plan.status !== "missing";
@@ -6878,9 +6893,9 @@ function PlanStagePanel({
               }`}
               disabled={isImporting}
               type="button"
-              onClick={() => onOpenScale(readiness.plan.baseId)}
+              onClick={() => onOpenScale(readiness.plan.baseId, scalePending)}
             >
-              {scalePending ? "Confirmar escala" : "Ver escala"}
+              {scalePending ? "Calibrar escala" : "Ver escala"}
             </button>
           </div>
         ) : null}
