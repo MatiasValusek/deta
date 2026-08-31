@@ -176,6 +176,7 @@ type ConstraintDragState =
 
 const ROUTE_POINTER_TOLERANCE_PX = 14;
 const ROUTE_EQUIPMENT_HITBOX_RADIUS_PX = 22;
+const VIEW_REPORT_DEBOUNCE_MS = 120;
 
 export function PdfViewer({
   activePage,
@@ -263,6 +264,11 @@ export function PdfViewer({
     baseId: string;
     view: PdfViewTransform | null;
   } | null>(null);
+  const pendingReportedViewRef = useRef<{
+    baseId: string;
+    view: PdfViewTransform | null;
+  } | null>(null);
+  const viewReportTimerRef = useRef<number | null>(null);
 
   const overlayDraft = useMemo(() => {
     if (!rectDraft) {
@@ -339,6 +345,14 @@ export function PdfViewer({
     viewRef.current = view;
   }, [view]);
 
+  useEffect(() => {
+    return () => {
+      if (viewReportTimerRef.current !== null) {
+        window.clearTimeout(viewReportTimerRef.current);
+      }
+    };
+  }, []);
+
   function commitLocalView(
     nextView: PdfViewTransform | null,
     shouldNotify: boolean,
@@ -352,8 +366,42 @@ export function PdfViewer({
     }
 
     if (shouldNotify) {
-      reportViewChange(baseId, nextView);
+      scheduleViewChangeReport(baseId, nextView);
     }
+  }
+
+  function scheduleViewChangeReport(
+    ownerBaseId: string,
+    nextView: PdfViewTransform | null,
+  ) {
+    pendingReportedViewRef.current = {
+      baseId: ownerBaseId,
+      view: nextView ? { ...nextView } : null,
+    };
+
+    if (viewReportTimerRef.current !== null) {
+      window.clearTimeout(viewReportTimerRef.current);
+    }
+
+    viewReportTimerRef.current = window.setTimeout(() => {
+      flushViewChangeReport();
+    }, VIEW_REPORT_DEBOUNCE_MS);
+  }
+
+  function flushViewChangeReport() {
+    const pending = pendingReportedViewRef.current;
+
+    if (!pending) {
+      return;
+    }
+
+    if (viewReportTimerRef.current !== null) {
+      window.clearTimeout(viewReportTimerRef.current);
+      viewReportTimerRef.current = null;
+    }
+
+    pendingReportedViewRef.current = null;
+    reportViewChange(pending.baseId, pending.view);
   }
 
   function reportViewChange(
@@ -577,6 +625,7 @@ export function PdfViewer({
 
     if (panStateRef.current?.pointerId === event.pointerId) {
       panStateRef.current = null;
+      flushViewChangeReport();
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
   }

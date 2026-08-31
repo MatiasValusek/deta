@@ -173,12 +173,10 @@ export function RoutePanel({
     marginIsValid;
 
   function handleEditInstallation() {
-    onShowRouteChange(true);
     onEditInstallation();
   }
 
   function handleEditProposal() {
-    onShowRouteChange(true);
     onEditProposal();
   }
 

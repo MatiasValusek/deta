@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { Point2D } from "@/lib/geometry/types";
 import { pointZMeters } from "@/lib/geometry/height";
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
@@ -81,9 +81,18 @@ export function RouteOverlay({
   onVertexMove,
 }: RouteOverlayProps) {
   const [dragState, setDragState] = useState<RouteDragState | null>(null);
-  const equipmentById = buildEquipmentIndex(equipment);
-  const resolvedSegments = resolveRouteSegments(network, equipment);
-  const nodeById = new Map(network.nodes.map((node) => [node.id, node]));
+  const equipmentById = useMemo(
+    () => buildEquipmentIndex(equipment),
+    [equipment],
+  );
+  const resolvedSegments = useMemo(
+    () => resolveRouteSegments(network, equipment),
+    [equipment, network],
+  );
+  const nodeById = useMemo(
+    () => new Map(network.nodes.map((node) => [node.id, node])),
+    [network],
+  );
   const hasProposal = Boolean(proposal);
   const canEdit =
     isEditingEnabled && showRoute && !draft && !intentDraft && !proposal;
@@ -775,17 +784,30 @@ function RouteProposalPreview({
   proposal: AutomaticRouteProposal;
   sourceToScreen: (point: Point2D) => Point2D;
 }) {
-  const network = {
-    nodes: proposal.nodes,
-    segments: proposal.segments,
-  };
-  const equipmentById = buildEquipmentIndex(equipment);
+  const network = useMemo(
+    () => ({
+      nodes: proposal.nodes,
+      segments: proposal.segments,
+    }),
+    [proposal.nodes, proposal.segments],
+  );
+  const equipmentById = useMemo(
+    () => buildEquipmentIndex(equipment),
+    [equipment],
+  );
+  const resolvedSegments = useMemo(
+    () => resolveRouteSegments(network, equipment),
+    [equipment, network],
+  );
   const opacity = isOutdated ? 0.48 : 1;
-  const unreached = new Set(proposal.unreachedEquipmentIds);
+  const unreached = useMemo(
+    () => new Set(proposal.unreachedEquipmentIds),
+    [proposal.unreachedEquipmentIds],
+  );
 
   return (
     <g data-route-proposal="true" opacity={opacity} pointerEvents="none">
-      {resolveRouteSegments(network, equipment).map((segment) => (
+      {resolvedSegments.map((segment) => (
         <g key={segment.id}>
           <RouteProposalSegmentLine
             points={routeSegmentPlanLegs(segment).flatMap((leg, index) =>

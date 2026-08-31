@@ -116,6 +116,7 @@ import {
   createEmptyRouteNetwork,
   detectRouteCycle,
   distanceBetween as routeDistanceBetween,
+  EMPTY_ROUTE_NETWORK,
   applianceNodesAreTerminal,
   findTerminalStartNodeByEquipment,
   findRouteNodeByEquipment,
@@ -746,14 +747,25 @@ export function DxfWorkbench() {
   const applianceEquipment = planEquipment.filter(
     (item) => item.role === "appliance",
   );
-  const routeNetwork = planBase?.routeNetwork ?? createEmptyRouteNetwork();
+  const routeNetwork = planBase?.routeNetwork ?? EMPTY_ROUTE_NETWORK;
+  const planScaleMetersPerSourceUnit = useMemo(
+    () => (planBase ? calibrationScaleMetersPerSourceUnit(planBase) : null),
+    [planBase?.calibration.calibration, planBase?.id],
+  );
   const activeRouteNetwork = useMemo(() => {
     if (!activeBase || activeBase.type !== "plan") {
-      return createEmptyRouteNetwork();
+      return EMPTY_ROUTE_NETWORK;
     }
 
     return routeNetworkForActivePage(activeBase);
-  }, [activeBase, activePdfPageNumber]);
+  }, [
+    activeBase?.equipment,
+    activeBase?.id,
+    activeBase?.routeNetwork,
+    activeBase?.sourceType,
+    activeBase?.type,
+    activeBase?.visual.activePdfPageNumber,
+  ]);
   const routeInvalidSegmentIds = useMemo(
     () =>
       planBase
@@ -763,25 +775,33 @@ export function DxfWorkbench() {
             planClassificationIndex,
           )
         : new Set<string>(),
-    [planBase, planClassificationIndex],
+    [
+      planBase?.constraints,
+      planBase?.id,
+      planBase?.sourceType,
+      planBase?.visual.activePdfPageNumber,
+      planClassificationIndex,
+      planEquipment,
+      routeNetwork,
+    ],
   );
   const connectedApplianceIds = useMemo(
     () =>
       planBase
-        ? getConnectedApplianceEquipmentIds(planBase.routeNetwork, planEquipment)
+        ? getConnectedApplianceEquipmentIds(routeNetwork, planEquipment)
         : new Set<string>(),
-    [planBase, planEquipment],
+    [planBase?.id, planEquipment, routeNetwork],
   );
   const routeCycleDetected = useMemo(
-    () => (planBase ? detectRouteCycle(planBase.routeNetwork) : false),
-    [planBase],
+    () => (planBase ? detectRouteCycle(routeNetwork) : false),
+    [planBase?.id, routeNetwork],
   );
   const routeCrossingDetected = useMemo(
     () =>
       planBase
-        ? hasRouteCrossingsWithoutNode(planBase.routeNetwork, planEquipment)
+        ? hasRouteCrossingsWithoutNode(routeNetwork, planEquipment)
         : false,
-    [planBase, planEquipment],
+    [planBase?.id, planEquipment, routeNetwork],
   );
   const routeApplianceStatuses = useMemo(() => {
     if (!planBase) {
@@ -790,20 +810,20 @@ export function DxfWorkbench() {
 
     const supply = planEquipment.find((item) => item.role === "supply") ?? null;
     const supplyNode = supply
-      ? findRouteNodeByEquipment(planBase.routeNetwork, supply.id)
+      ? findRouteNodeByEquipment(routeNetwork, supply.id)
       : null;
 
     return applianceEquipment.map((equipment) => {
       const applianceNode = findRouteNodeByEquipment(
-        planBase.routeNetwork,
+        routeNetwork,
         equipment.id,
       );
       const isConnected = connectedApplianceIds.has(equipment.id);
       const path =
         isConnected && supplyNode && applianceNode
-          ? getRoutePath(planBase.routeNetwork, supplyNode.id, applianceNode.id)
+          ? getRoutePath(routeNetwork, supplyNode.id, applianceNode.id)
           : [];
-      const segmentIds = segmentIdsForNodePath(planBase.routeNetwork, path);
+      const segmentIds = segmentIdsForNodePath(routeNetwork, path);
 
       return {
         equipment,
@@ -814,26 +834,43 @@ export function DxfWorkbench() {
   }, [
     applianceEquipment,
     connectedApplianceIds,
-    planBase,
+    planBase?.id,
     planEquipment,
+    routeNetwork,
     routeInvalidSegmentIds,
   ]);
-  const routeRestrictionCount =
-    routeInvalidSegmentIds.size +
-    (routeCycleDetected ? 1 : 0) +
-    (routeCrossingDetected ? 1 : 0) +
-    (hasDuplicateNodeIds(routeNetwork) || hasDuplicateSegmentIds(routeNetwork)
-      ? 1
-      : 0) +
-    (hasSegmentsWithMissingEndpoints(routeNetwork) ? 1 : 0) +
-    (!applianceNodesAreTerminal(routeNetwork) ? 1 : 0) +
-    (hasDuplicateSegments(routeNetwork) ? 1 : 0) +
-    (hasZeroLengthSegments(routeNetwork, planEquipment, MIN_SECTION_LINK_LENGTH)
-      ? 1
-      : 0);
-  const routeLengthLabel = planBase
-    ? routeLengthLabelForBase(planBase)
-    : "Escala pendiente";
+  const routeRestrictionCount = useMemo(
+    () =>
+      routeInvalidSegmentIds.size +
+      (routeCycleDetected ? 1 : 0) +
+      (routeCrossingDetected ? 1 : 0) +
+      (hasDuplicateNodeIds(routeNetwork) || hasDuplicateSegmentIds(routeNetwork)
+        ? 1
+        : 0) +
+      (hasSegmentsWithMissingEndpoints(routeNetwork) ? 1 : 0) +
+      (!applianceNodesAreTerminal(routeNetwork) ? 1 : 0) +
+      (hasDuplicateSegments(routeNetwork) ? 1 : 0) +
+      (hasZeroLengthSegments(routeNetwork, planEquipment, MIN_SECTION_LINK_LENGTH)
+        ? 1
+        : 0),
+    [
+      planEquipment,
+      routeCrossingDetected,
+      routeCycleDetected,
+      routeInvalidSegmentIds,
+      routeNetwork,
+    ],
+  );
+  const routeLengthLabel = useMemo(() => {
+    if (!planBase || planScaleMetersPerSourceUnit === null) {
+      return "Escala pendiente";
+    }
+
+    return formatMeters(
+      totalRouteLengthSource(routeNetwork, planEquipment) *
+        planScaleMetersPerSourceUnit,
+    );
+  }, [planBase?.id, planEquipment, planScaleMetersPerSourceUnit, routeNetwork]);
   const isRouteComplete =
     supplyCount === 1 &&
     applianceEquipment.length > 0 &&
@@ -892,7 +929,13 @@ export function DxfWorkbench() {
     }
 
     return routeIntentConnectionsForActivePage(activeBase);
-  }, [activeBase, activePdfPageNumber]);
+  }, [
+    activeBase?.id,
+    activeBase?.routeIntentConnections,
+    activeBase?.sourceType,
+    activeBase?.type,
+    activeBase?.visual.activePdfPageNumber,
+  ]);
   const routeDraftTarget = useMemo(() => {
     if (!activeRouteDraftOverlay?.targetEquipmentId) {
       return null;
@@ -927,7 +970,16 @@ export function DxfWorkbench() {
             routeProposalMarginMeters,
           )
         : null,
-    [planBase, planClassificationIndex, routeProposalMarginMeters],
+    [
+      planBase?.calibration.calibration,
+      planBase?.constraints,
+      planBase?.id,
+      planBase?.sourceType,
+      planBase?.visual.activePdfPageNumber,
+      planEquipment,
+      planClassificationIndex,
+      routeProposalMarginMeters,
+    ],
   );
   const routeIntentProposalFingerprint = useMemo(
     () =>
@@ -938,7 +990,18 @@ export function DxfWorkbench() {
             routeProposalMarginMeters,
           )
         : null,
-    [planBase, planClassificationIndex, routeProposalMarginMeters],
+    [
+      planBase?.calibration.calibration,
+      planBase?.constraints,
+      planBase?.id,
+      planBase?.routeIntentConnections,
+      planBase?.sourceType,
+      planBase?.visual.activePdfPageNumber,
+      planEquipment,
+      planClassificationIndex,
+      routeNetwork,
+      routeProposalMarginMeters,
+    ],
   );
   const expectedRouteProposalFingerprint =
     routeProposalMode === "intent"
@@ -957,7 +1020,7 @@ export function DxfWorkbench() {
     }
 
     return routeProposal;
-  }, [activeBase, activePdfPageNumber, routeProposal]);
+  }, [activeBase?.id, activeBase?.sourceType, activePdfPageNumber, routeProposal]);
   const isRouteProposalOutdated = Boolean(
     routeProposal &&
       (!expectedRouteProposalFingerprint ||
@@ -976,15 +1039,21 @@ export function DxfWorkbench() {
       planBase
         ? calculateTechnicalTree({
             diameterTransitionDecisions: planBase.diameterTransitionDecisions,
-            equipment: planBase.equipment,
+            equipment: planEquipment,
             minSegmentLengthSource: MIN_SECTION_LINK_LENGTH,
-            network: planBase.routeNetwork,
+            network: routeNetwork,
             pipeSystem: SIGAS_PIPE_SYSTEM,
             projectGas: DEFAULT_PROJECT_GAS_CONFIG,
-            scaleMetersPerSourceUnit: calibrationScaleMetersPerSourceUnit(planBase),
+            scaleMetersPerSourceUnit: planScaleMetersPerSourceUnit,
           })
         : null,
-    [planBase],
+    [
+      planBase?.diameterTransitionDecisions,
+      planBase?.id,
+      planEquipment,
+      planScaleMetersPerSourceUnit,
+      routeNetwork,
+    ],
   );
   const finalDiameterBySegmentId = useMemo(() => {
     const finalDiameters =
@@ -1009,15 +1078,21 @@ export function DxfWorkbench() {
     return detectRouteAccessoryProposals({
       decisions: planBase.routeAccessoryProposalDecisions,
       diameterBySegmentId: accessoryProposalDiameterBySegmentId,
-      equipment: planBase.equipment,
-      network: planBase.routeNetwork,
+      equipment: planEquipment,
+      network: routeNetwork,
     }).map((proposal) =>
       withAccessoryProposalSystemMatch(
         proposal,
         matchSigasAccessoryProposal(proposal),
       ),
     );
-  }, [accessoryProposalDiameterBySegmentId, planBase]);
+  }, [
+    accessoryProposalDiameterBySegmentId,
+    planBase?.id,
+    planBase?.routeAccessoryProposalDecisions,
+    planEquipment,
+    routeNetwork,
+  ]);
   const routeAccessoryProposalReviews = useMemo(() => {
     if (!planBase) {
       return [];
@@ -1026,11 +1101,11 @@ export function DxfWorkbench() {
     return routeAccessoryProposals.map((proposal): AccessoryProposalTechnicalReview => {
       const ownerResolution = resolveAccessoryProposalTechnicalOwner({
         diameterBySegmentId: accessoryProposalDiameterBySegmentId,
-        network: planBase.routeNetwork,
+        network: routeNetwork,
         proposal,
       });
       const hasManualAccessory = routeAccessoryProposalHasManualAccessory({
-        network: planBase.routeNetwork,
+        network: routeNetwork,
         proposal,
         type: proposal.domainAccessory?.type,
       });
@@ -1078,7 +1153,12 @@ export function DxfWorkbench() {
               : "requires_more_information",
       };
     });
-  }, [accessoryProposalDiameterBySegmentId, planBase, routeAccessoryProposals]);
+  }, [
+    accessoryProposalDiameterBySegmentId,
+    planBase?.id,
+    routeAccessoryProposals,
+    routeNetwork,
+  ]);
   const rawDiameterTransitionProposals = useMemo(() => {
     if (!planBase) {
       return [];
@@ -1087,10 +1167,16 @@ export function DxfWorkbench() {
     return detectDiameterTransitionProposals({
       decisions: planBase.diameterTransitionDecisions,
       diameterBySegmentId: finalDiameterBySegmentId,
-      equipment: planBase.equipment,
-      network: planBase.routeNetwork,
+      equipment: planEquipment,
+      network: routeNetwork,
     });
-  }, [finalDiameterBySegmentId, planBase]);
+  }, [
+    finalDiameterBySegmentId,
+    planBase?.diameterTransitionDecisions,
+    planBase?.id,
+    planEquipment,
+    routeNetwork,
+  ]);
   const diameterTransitionProposalReviews = useMemo(
     () =>
       rawDiameterTransitionProposals.map(
@@ -1104,7 +1190,7 @@ export function DxfWorkbench() {
               ? resolveCompoundTurnTransitionPreview({
                   diameterBySegmentId: finalDiameterBySegmentId,
                   directCandidates: directCompoundCandidates,
-                  network: planBase.routeNetwork,
+                  network: routeNetwork,
                   pipeSystem: SIGAS_PIPE_SYSTEM,
                   proposal,
                 })
@@ -1149,7 +1235,12 @@ export function DxfWorkbench() {
           };
         },
       ),
-    [finalDiameterBySegmentId, planBase, rawDiameterTransitionProposals],
+    [
+      finalDiameterBySegmentId,
+      planBase?.id,
+      rawDiameterTransitionProposals,
+      routeNetwork,
+    ],
   );
   const diameterTransitionProposals = useMemo(() => {
     const reviewById = new Map(
@@ -1193,7 +1284,7 @@ export function DxfWorkbench() {
             routeAccessoryResolutions[route.id]
               ?.governingRouteAccessoryEquivalentLengthMeters ?? null,
           includeBranchTransitions: true,
-          network: planBase?.routeNetwork,
+          network: planBase ? routeNetwork : undefined,
           pipeSystem: SIGAS_PIPE_SYSTEM,
           route,
           transitions: diameterTransitionProposals,
@@ -1203,7 +1294,9 @@ export function DxfWorkbench() {
   }, [
     diameterTransitionProposals,
     finalDiameterBySegmentId,
-    planBase,
+    planBase?.id,
+    planEquipment,
+    routeNetwork,
     technicalCalculationResult,
   ]);
   const technicalPhysicalAccessoryInventory = useMemo(
@@ -1249,14 +1342,21 @@ export function DxfWorkbench() {
     () =>
       planBase
         ? relatedRouteSegmentIds({
-            equipment: planBase.equipment,
-            network: planBase.routeNetwork,
+            equipment: planEquipment,
+            network: routeNetwork,
             result: technicalCalculationResult,
             selectedEquipmentId: planBase.selectedEquipmentId,
             selection: selectedRouteEdit,
           })
         : new Set<string>(),
-    [planBase, selectedRouteEdit, technicalCalculationResult],
+    [
+      planBase?.id,
+      planBase?.selectedEquipmentId,
+      planEquipment,
+      routeNetwork,
+      selectedRouteEdit,
+      technicalCalculationResult,
+    ],
   );
 
   useEffect(() => {
@@ -1285,7 +1385,12 @@ export function DxfWorkbench() {
       routeAccessoryProposalDecisions: reconciled.decisions,
       routeNetwork: reconciled.network,
     }));
-  }, [planBase, routeAccessoryProposals]);
+  }, [
+    planBase?.id,
+    planBase?.routeAccessoryProposalDecisions,
+    routeAccessoryProposals,
+    routeNetwork,
+  ]);
 
   useEffect(() => {
     if (!planBase) {
@@ -1310,7 +1415,11 @@ export function DxfWorkbench() {
       ...base,
       diameterTransitionDecisions: decisions,
     }));
-  }, [planBase, rawDiameterTransitionProposals]);
+  }, [
+    planBase?.diameterTransitionDecisions,
+    planBase?.id,
+    rawDiameterTransitionProposals,
+  ]);
 
   const activePdfPage = useMemo(() => {
     return (
@@ -1359,6 +1468,13 @@ export function DxfWorkbench() {
 
     return createSectionRegistrationSummary(activeSectionLink, planBase, activeBase);
   }, [activeBase, activeSectionLink, planBase]);
+  const activeSectionScaleMetersPerSourceUnit = useMemo(
+    () =>
+      activeBase?.type === "section"
+        ? calibrationScaleMetersPerSourceUnit(activeBase)
+        : null,
+    [activeBase?.calibration.calibration, activeBase?.id, activeBase?.type],
+  );
   const activeSectionRouteProjection = useMemo(() => {
     if (!activeBase || activeBase.type !== "section" || !planBase) {
       return null;
@@ -1378,20 +1494,24 @@ export function DxfWorkbench() {
 
     return createSectionRouteProjection({
       adoptedDiameterValidation: technicalAdoptedDiameterValidation,
-      equipment: planBase.equipment,
+      equipment: planEquipment,
       inventory: technicalPhysicalAccessoryInventory,
       link: activeSectionLink,
-      network: planBase.routeNetwork,
+      network: routeNetwork,
       result: technicalCalculationResult,
-      sectionScaleMetersPerSourceUnit:
-        calibrationScaleMetersPerSourceUnit(activeBase),
+      sectionScaleMetersPerSourceUnit: activeSectionScaleMetersPerSourceUnit,
       toleranceSource: MIN_SECTION_LINK_LENGTH,
     });
   }, [
-    activeBase,
+    activeBase?.id,
+    activeBase?.showRoute,
+    activeBase?.sourceType,
+    activeBase?.type,
     activePdfPageNumber,
     activeSectionLink,
-    planBase,
+    activeSectionScaleMetersPerSourceUnit,
+    planBase?.id,
+    routeNetwork,
     technicalAdoptedDiameterValidation,
     technicalCalculationResult,
     technicalPhysicalAccessoryInventory,
@@ -3529,10 +3649,14 @@ export function DxfWorkbench() {
     setRouteError(null);
 
     if (planBase) {
-      updateBase(planBase.id, (base) => ({
-        ...base,
-        showRoute: true,
-      }));
+      updateBase(planBase.id, (base) =>
+        base.showRoute
+          ? base
+          : {
+              ...base,
+              showRoute: true,
+            },
+      );
     }
   }
 
@@ -3545,10 +3669,14 @@ export function DxfWorkbench() {
     setCursor(null);
 
     if (planBase) {
-      updateBase(planBase.id, (base) => ({
-        ...base,
-        showRoute: true,
-      }));
+      updateBase(planBase.id, (base) =>
+        base.showRoute
+          ? base
+          : {
+              ...base,
+              showRoute: true,
+            },
+      );
     }
   }
 
@@ -3561,10 +3689,14 @@ export function DxfWorkbench() {
       setSelectedRouteEdit(null);
     }
 
-    updateBase(planBase.id, (base) => ({
-      ...base,
-      showRoute: show,
-    }));
+    updateBase(planBase.id, (base) =>
+      base.showRoute === show
+        ? base
+        : {
+            ...base,
+            showRoute: show,
+          },
+    );
   }
 
   function handleSelectPhysicalRouteElement(selection: PhysicalRouteEditSelection) {
@@ -3579,12 +3711,20 @@ export function DxfWorkbench() {
       return;
     }
 
-    updateBase(planBase.id, (base) => ({
-      ...base,
-      selectedEquipmentId:
-        selection.kind === "terminal" ? selection.equipmentId : null,
-      showRoute: true,
-    }));
+    updateBase(planBase.id, (base) => {
+      const selectedEquipmentId =
+        selection.kind === "terminal" ? selection.equipmentId : null;
+
+      if (base.selectedEquipmentId === selectedEquipmentId && base.showRoute) {
+        return base;
+      }
+
+      return {
+        ...base,
+        selectedEquipmentId,
+        showRoute: true,
+      };
+    });
   }
 
   function handleClearPhysicalRouteSelection() {
@@ -3596,10 +3736,14 @@ export function DxfWorkbench() {
     option: keyof PhysicalRouteSnapOptions,
     enabled: boolean,
   ) {
-    setRouteSnapOptions((current) => ({
-      ...current,
-      [option]: enabled,
-    }));
+    setRouteSnapOptions((current) =>
+      current[option] === enabled
+        ? current
+        : {
+            ...current,
+            [option]: enabled,
+          },
+    );
   }
 
   function handleMovePhysicalRouteNode(
@@ -4517,10 +4661,14 @@ export function DxfWorkbench() {
     setRouteError(null);
     setIsRouteEditing(false);
     setIsRouteProposalGenerating(true);
-    updateBase(planBase.id, (base) => ({
-      ...base,
-      showRoute: true,
-    }));
+    updateBase(planBase.id, (base) =>
+      base.showRoute
+        ? base
+        : {
+            ...base,
+            showRoute: true,
+          },
+    );
 
     window.setTimeout(() => {
       const plan = basesRef.current.find(
@@ -4621,10 +4769,14 @@ export function DxfWorkbench() {
     setRouteError(null);
     setIsRouteEditing(false);
     setIsRouteProposalGenerating(true);
-    updateBase(planBase.id, (base) => ({
-      ...base,
-      showRoute: true,
-    }));
+    updateBase(planBase.id, (base) =>
+      base.showRoute
+        ? base
+        : {
+            ...base,
+            showRoute: true,
+          },
+    );
 
     window.setTimeout(() => {
       const plan = basesRef.current.find(
