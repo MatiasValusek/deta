@@ -515,12 +515,13 @@ export function DxfWorkbench() {
       );
       setRouteProposalMarginInput(result.project.routeProposalMarginInput);
 
-      setPersistenceNotice({
-        message: restoredProject.hasPdfPlaceholders
-          ? "Proyecto local restaurado. Los PDF quedan como referencia y deben volver a cargarse para ver la pagina original."
-          : "Proyecto local restaurado.",
-        tone: "info",
-      });
+      if (restoredProject.hasPdfPlaceholders) {
+        setPersistenceNotice({
+          message:
+            "Los PDF locales quedan como referencia y deben volver a cargarse para ver la pagina original.",
+          tone: "warning",
+        });
+      }
     } else if (result.status === "invalid") {
       clearPersistedWorkbenchProject();
       setPersistenceNotice({
