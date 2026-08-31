@@ -207,6 +207,11 @@ import {
   type SectionRouteHeightTarget,
 } from "@/lib/sections/routeHeightEditing";
 import {
+  createStandardTechnicalAxonometricView,
+  createStandardTechnicalSectionView,
+  type StandardTechnicalReviewViewId,
+} from "@/lib/sections/standardTechnicalViews";
+import {
   buildClassificationIndex,
   createClassificationFromProposal,
   createManualClassification,
@@ -257,7 +262,7 @@ import { PdfViewer } from "./PdfViewer";
 import { RouteContextCard } from "./RouteContextCard";
 import { RouteIntentContextCard } from "./RouteIntentContextCard";
 import { RoutePanel } from "./RoutePanel";
-import { ReviewPanel, type ReviewSectionItem } from "./ReviewPanel";
+import { ReviewPanel, type ReviewTechnicalViewItem } from "./ReviewPanel";
 import {
   RightPanelSections,
   type RightPanelSection,
@@ -274,6 +279,7 @@ import type {
   SectionRegistrationSavedOverlay,
   SectionRegistrationToolMode,
 } from "./SectionRegistrationOverlay";
+import { TechnicalReviewCanvas } from "./TechnicalReviewCanvas";
 import type { SourceOverlayData } from "./SourceOverlay";
 
 export type LayerVisibility = Record<string, boolean>;
@@ -448,6 +454,8 @@ export function DxfWorkbench() {
     useState<RightPanelSectionId>("geometry");
   const [activeMainStage, setActiveMainStage] =
     useState<MainWorkflowStageId>("plan");
+  const [activeReviewViewId, setActiveReviewViewId] =
+    useState<StandardTechnicalReviewViewId>("plan");
   const [highlightedSectionLinkId, setHighlightedSectionLinkId] =
     useState<string | null>(null);
   const [highlightedRegistrationLinkId, setHighlightedRegistrationLinkId] =
@@ -1516,8 +1524,63 @@ export function DxfWorkbench() {
     technicalCalculationResult,
     technicalPhysicalAccessoryInventory,
   ]);
+  const standardTechnicalSectionViews = useMemo(
+    () => ({
+      "section-aa": createStandardTechnicalSectionView({
+        adoptedDiameterValidation: technicalAdoptedDiameterValidation,
+        axis: "x",
+        equipment: planEquipment,
+        id: "section-aa",
+        inventory: technicalPhysicalAccessoryInventory,
+        network: routeNetwork,
+        result: technicalCalculationResult,
+        scaleMetersPerSourceUnit: planScaleMetersPerSourceUnit,
+        title: "Corte A-A",
+      }),
+      "section-bb": createStandardTechnicalSectionView({
+        adoptedDiameterValidation: technicalAdoptedDiameterValidation,
+        axis: "y",
+        equipment: planEquipment,
+        id: "section-bb",
+        inventory: technicalPhysicalAccessoryInventory,
+        network: routeNetwork,
+        result: technicalCalculationResult,
+        scaleMetersPerSourceUnit: planScaleMetersPerSourceUnit,
+        title: "Corte B-B",
+      }),
+    }),
+    [
+      planEquipment,
+      planScaleMetersPerSourceUnit,
+      routeNetwork,
+      technicalAdoptedDiameterValidation,
+      technicalCalculationResult,
+      technicalPhysicalAccessoryInventory,
+    ],
+  );
+  const standardTechnicalAxonometricView = useMemo(
+    () =>
+      createStandardTechnicalAxonometricView({
+        adoptedDiameterValidation: technicalAdoptedDiameterValidation,
+        equipment: planEquipment,
+        inventory: technicalPhysicalAccessoryInventory,
+        network: routeNetwork,
+        result: technicalCalculationResult,
+        scaleMetersPerSourceUnit: planScaleMetersPerSourceUnit,
+      }),
+    [
+      planEquipment,
+      planScaleMetersPerSourceUnit,
+      routeNetwork,
+      technicalAdoptedDiameterValidation,
+      technicalCalculationResult,
+      technicalPhysicalAccessoryInventory,
+    ],
+  );
   const selectedSectionRouteHeightTarget =
-    activeBase?.type === "section" ? sectionRouteHeightEditor?.target ?? null : null;
+    activeMainStage === "review" || activeBase?.type === "section"
+      ? sectionRouteHeightEditor?.target ?? null
+      : null;
   const visiblePlanLinks = useMemo(() => {
     if (activeBase?.type !== "plan") {
       return [];
@@ -1646,8 +1709,25 @@ export function DxfWorkbench() {
     if (activeMainStage === "review" && !canOpenReviewStage) {
       setActiveMainStage("route");
       setActiveRightPanelSection("route");
+      setActiveReviewViewId("plan");
     }
   }, [activeMainStage, canOpenReviewStage]);
+
+  useEffect(() => {
+    if (activeMainStage !== "review" && activeReviewViewId !== "plan") {
+      setActiveReviewViewId("plan");
+    }
+  }, [activeMainStage, activeReviewViewId]);
+
+  useEffect(() => {
+    if (
+      activeMainStage === "review" &&
+      planBase &&
+      activeBase?.id !== planBase.id
+    ) {
+      setActiveBaseId(planBase.id);
+    }
+  }, [activeBase?.id, activeMainStage, planBase?.id]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -1932,10 +2012,15 @@ export function DxfWorkbench() {
 
     if (stage !== "review") {
       setSectionRouteHeightEditor(null);
+      setActiveReviewViewId("plan");
     }
 
     if (stage !== "route") {
       setIsRouteEditing(false);
+    }
+
+    if (stage === "review") {
+      setActiveReviewViewId("plan");
     }
 
     setActiveMainStage(stage);
@@ -1943,41 +2028,39 @@ export function DxfWorkbench() {
 
     if (stage !== "plan" && planBase) {
       handleActivateBase(planBase.id);
+      if (stage === "review") {
+        updateBase(planBase.id, (base) =>
+          base.showEquipment && base.showRoute
+            ? base
+            : {
+                ...base,
+                showEquipment: true,
+                showRoute: true,
+              },
+        );
+      }
     }
   }
 
-  function handleReviewPlanOpen() {
+  function handleReviewViewOpen(viewId: StandardTechnicalReviewViewId) {
     if (!planBase) {
       return;
     }
 
     setActiveMainStage("review");
     setActiveRightPanelSection("review");
+    setActiveReviewViewId(viewId);
+    setSectionRouteHeightEditor(null);
     handleActivateBase(planBase.id);
-    updateBase(planBase.id, (base) => ({
-      ...base,
-      showEquipment: true,
-      showRoute: true,
-    }));
-  }
-
-  function handleReviewSectionOpen(sectionBaseId: string) {
-    const section = bases.find(
-      (base) => base.id === sectionBaseId && base.type === "section",
+    updateBase(planBase.id, (base) =>
+      base.showEquipment && base.showRoute
+        ? base
+        : {
+            ...base,
+            showEquipment: true,
+            showRoute: true,
+          },
     );
-
-    if (!section) {
-      return;
-    }
-
-    setActiveMainStage("review");
-    setActiveRightPanelSection("review");
-    handleActivateBase(section.id);
-    updateBase(section.id, (base) => ({
-      ...base,
-      showEquipment: true,
-      showRoute: true,
-    }));
   }
 
   function handleContinueToCalculateFromReview() {
@@ -2677,7 +2760,11 @@ export function DxfWorkbench() {
     target: SectionRouteHeightTarget,
     currentHeightMeters: number,
   ) {
-    if (activeBase?.type !== "section" || activeMainStage !== "review") {
+    const canEditHeight =
+      activeMainStage === "review" &&
+      (activeReviewViewId !== "plan" || activeBase?.type === "section");
+
+    if (!canEditHeight) {
       return;
     }
 
@@ -2690,7 +2777,6 @@ export function DxfWorkbench() {
     });
     setSectionLinkDraft(null);
     setSectionRegistrationDraft(null);
-    setSectionRouteHeightEditor(null);
     setEquipmentDraft(null);
     setRouteDraft(null);
     setRouteIntentDraft(null);
@@ -6012,22 +6098,39 @@ export function DxfWorkbench() {
     : canOpenReviewStage
       ? "Listo para calcular"
       : "Falta recorrido confirmado";
-  const reviewSectionItems: ReviewSectionItem[] = bases
-    .filter((base) => base.type === "section")
-    .map((section) => {
-      const link =
-        sectionPlanLinks.find((item) => item.sectionBaseId === section.id) ??
-        null;
-      const isReady = Boolean(link?.registration);
-
-      return {
-        id: section.id,
-        isActive: activeBase?.id === section.id,
-        name: section.name,
-        status: isReady ? "ready" : "pending",
-        summary: isReady ? "Corte proyectado" : "Falta correspondencia",
-      };
-    });
+  const reviewTechnicalViewItems: ReviewTechnicalViewItem[] = useMemo(
+    () => [
+      {
+        id: "plan",
+        label: "Planta",
+        summary: planBase?.name ?? "Sin planta",
+      },
+      {
+        id: "section-aa",
+        label: "Corte A-A",
+        summary: "Vista tecnica",
+      },
+      {
+        id: "section-bb",
+        label: "Corte B-B",
+        summary: "Vista tecnica",
+      },
+      {
+        id: "axo",
+        label: "Axo",
+        summary: "Vista tecnica",
+      },
+    ],
+    [planBase?.name],
+  );
+  const activeStandardTechnicalSectionView =
+    activeReviewViewId === "section-aa"
+      ? standardTechnicalSectionViews["section-aa"]
+      : activeReviewViewId === "section-bb"
+        ? standardTechnicalSectionViews["section-bb"]
+        : null;
+  const isTechnicalReviewCanvasVisible =
+    isReviewStage && activeReviewViewId !== "plan";
   const planOnlyDisabledReason =
     activeBase?.type === "section" ? "Solo en Planta" : "Sin Planta";
   const isPlanSectionAvailable = activeBase?.type === "plan";
@@ -6207,17 +6310,14 @@ export function DxfWorkbench() {
       hasActiveTool: Boolean(selectedRouteEdit || sectionRouteHeightEditor),
       content: (
         <ReviewPanel
-          activeBaseType={activeBase?.type ?? null}
+          activeViewId={activeReviewViewId}
           connectedApplianceCount={routeReviewState.connectedApplianceCount}
           hasValidRoute={canOpenReviewStage}
-          isPlanActive={activeBase?.type === "plan"}
-          planName={planBase?.name ?? null}
           routeRestrictionCount={routeRestrictionCount}
-          sections={reviewSectionItems}
           totalApplianceCount={routeReviewState.totalApplianceCount}
+          views={reviewTechnicalViewItems}
           onContinueToCalculate={handleContinueToCalculateFromReview}
-          onOpenPlan={handleReviewPlanOpen}
-          onOpenSection={handleReviewSectionOpen}
+          onOpenView={handleReviewViewOpen}
         />
       ),
     },
@@ -6498,7 +6598,7 @@ export function DxfWorkbench() {
               onSaveDraft={handleSaveRouteIntentDraft}
             />
           ) : null}
-          {isReviewStage && sectionRouteHeightEditor && activeBase?.type === "section" ? (
+          {isReviewStage && sectionRouteHeightEditor ? (
             <div className="absolute left-4 top-4 z-10 w-[280px] rounded border border-[var(--line)] bg-white/95 px-3 py-2 text-xs shadow-sm">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
@@ -6666,6 +6766,16 @@ export function DxfWorkbench() {
                 )}
               </div>
             ) : null}
+            {isTechnicalReviewCanvasVisible ? (
+              <TechnicalReviewCanvas
+                axonometricView={standardTechnicalAxonometricView}
+                sectionView={activeStandardTechnicalSectionView}
+                selectedHeightTarget={selectedSectionRouteHeightTarget}
+                viewId={activeReviewViewId}
+                onHeightTargetSelect={handleSectionRouteHeightTargetSelect}
+              />
+            ) : (
+              <>
             <div
               className={`absolute inset-0 ${activeView === "dxf" ? "visible" : "invisible pointer-events-none"}`}
             >
@@ -6835,6 +6945,8 @@ export function DxfWorkbench() {
                 hoveredSectionLinkId={hoveredSectionLinkId}
               />
             </div>
+              </>
+            )}
           </>
           )}
           </div>

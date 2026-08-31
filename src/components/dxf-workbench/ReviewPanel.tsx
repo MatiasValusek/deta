@@ -1,37 +1,31 @@
-export type ReviewSectionItem = {
-  id: string;
-  isActive: boolean;
-  name: string;
-  status: "pending" | "ready";
+import type { StandardTechnicalReviewViewId } from "@/lib/sections/standardTechnicalViews";
+
+export type ReviewTechnicalViewItem = {
+  id: StandardTechnicalReviewViewId;
+  label: string;
   summary: string;
 };
 
 type ReviewPanelProps = {
-  activeBaseType: "plan" | "section" | null;
+  activeViewId: StandardTechnicalReviewViewId;
   connectedApplianceCount: number;
   hasValidRoute: boolean;
-  isPlanActive: boolean;
-  planName: string | null;
   routeRestrictionCount: number;
-  sections: ReviewSectionItem[];
   totalApplianceCount: number;
+  views: ReviewTechnicalViewItem[];
   onContinueToCalculate: () => void;
-  onOpenPlan: () => void;
-  onOpenSection: (sectionId: string) => void;
+  onOpenView: (viewId: StandardTechnicalReviewViewId) => void;
 };
 
 export function ReviewPanel({
-  activeBaseType,
+  activeViewId,
   connectedApplianceCount,
   hasValidRoute,
-  isPlanActive,
-  planName,
   routeRestrictionCount,
-  sections,
   totalApplianceCount,
+  views,
   onContinueToCalculate,
-  onOpenPlan,
-  onOpenSection,
+  onOpenView,
 }: ReviewPanelProps) {
   const generalStatus = hasValidRoute
     ? "Instalacion lista para calcular"
@@ -42,72 +36,25 @@ export function ReviewPanel({
       <h2 className="sr-only">Revisar</h2>
 
       <div className="grid grid-cols-2 gap-1">
-        <button
-          className={`rounded border px-2 py-2 text-left text-xs ${
-            isPlanActive
-              ? "border-[var(--accent)] bg-[#f0f7ff]"
-              : "border-[var(--line)] bg-white hover:border-[var(--accent)]"
-          }`}
-          disabled={!planName}
-          type="button"
-          onClick={onOpenPlan}
-        >
-          <span className="block font-semibold">Planta</span>
-          <span className="mt-1 block truncate text-[var(--muted)]">
-            {planName ?? "Sin planta"}
-          </span>
-        </button>
-        {sections.length === 0 ? (
-          <button
-            className="rounded border border-[var(--line)] bg-[#f5f6f7] px-2 py-2 text-left text-xs text-[var(--muted)]"
-            disabled
-            type="button"
-          >
-            <span className="block font-semibold">Corte</span>
-            <span className="mt-1 block">Sin corte vinculado</span>
-          </button>
-        ) : (
+        {views.map((view) => (
           <button
             className={`rounded border px-2 py-2 text-left text-xs ${
-              activeBaseType === "section"
+              activeViewId === view.id
                 ? "border-[var(--accent)] bg-[#f0f7ff]"
                 : "border-[var(--line)] bg-white hover:border-[var(--accent)]"
             }`}
+            data-review-view-id={view.id}
+            key={view.id}
             type="button"
-            onClick={() => onOpenSection(sections[0]?.id ?? "")}
+            onClick={() => onOpenView(view.id)}
           >
-            <span className="block font-semibold">Corte</span>
+            <span className="block font-semibold">{view.label}</span>
             <span className="mt-1 block truncate text-[var(--muted)]">
-              {activeBaseType === "section"
-                ? sections.find((section) => section.isActive)?.name ??
-                  sections[0]?.name
-                : sections[0]?.name}
+              {view.summary}
             </span>
           </button>
-        )}
+        ))}
       </div>
-
-      {sections.length > 1 ? (
-        <div className="mt-2 space-y-1">
-          {sections.map((section) => (
-            <button
-              className={`w-full rounded border px-2 py-1 text-left text-xs ${
-                section.isActive
-                  ? "border-[var(--accent)] bg-[#f0f7ff]"
-                  : "border-[var(--line)] bg-white hover:border-[var(--accent)]"
-              }`}
-              key={section.id}
-              type="button"
-              onClick={() => onOpenSection(section.id)}
-            >
-              <span className="block truncate font-medium">{section.name}</span>
-              <span className="block truncate text-[10px] text-[var(--muted)]">
-                {section.summary}
-              </span>
-            </button>
-          ))}
-        </div>
-      ) : null}
 
       <section className="mt-3 rounded border border-[var(--line)] px-3 py-2 text-xs">
         <div className="font-semibold">Estado general</div>
