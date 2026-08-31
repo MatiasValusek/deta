@@ -622,11 +622,8 @@ function RouteMainFlow({
             ?.equipment.name ?? equipmentId,
       )
       .sort();
-    const validationLabel = proposalValidationLabel({
-      acceptBlockReason,
-      canAcceptProposal,
-      isOutdated: proposalOutdated,
-    });
+    const hasProblem =
+      !canAcceptProposal || proposalOutdated || unreachedNames.length > 0;
 
     return (
       <section className="mt-3 rounded border border-[#8db7e8] bg-[#f1f7ff] px-3 py-2 text-xs">
@@ -634,26 +631,28 @@ function RouteMainFlow({
           Propuesta de recorrido
         </div>
 
-        <dl className="mt-2 grid grid-cols-[minmax(0,1fr)_72px] gap-x-2 gap-y-1">
-          <dt>Conectados</dt>
-          <dd className="text-right font-mono">
-            {proposalConnectedCount} de {totalAppliances}
-          </dd>
-          <dt>Pendientes</dt>
-          <dd className="text-right font-mono">{unreachedNames.length}</dd>
-          <dt>Validacion</dt>
-          <dd className="text-right">{validationLabel}</dd>
-        </dl>
-
-        {unreachedNames.length > 0 ? (
-          <div className="mt-2 rounded border border-[#f1d28a] bg-[#fffaf0] px-2 py-1 text-[var(--warning)]">
-            Pendientes: {unreachedNames.join(", ")}
+        <div className="mt-2 space-y-1 font-medium text-[#1f6f3a]">
+          <div>
+            {proposalConnectedCount === totalAppliances
+              ? `✓ ${proposalConnectedCount} artefactos conectados`
+              : `${proposalConnectedCount} de ${totalAppliances} artefactos conectados`}
           </div>
-        ) : null}
+          <div>{canAcceptProposal ? "✓ Recorrido válido" : "Recorrido a revisar"}</div>
+        </div>
 
-        {proposalOutdated ? (
-          <div className="mt-2 rounded border border-[#f1d28a] bg-[#fffaf0] px-2 py-1 text-[var(--warning)]">
-            La propuesta esta desactualizada. Regenerala antes de aceptar.
+        {hasProblem ? (
+          <div className="mt-2 space-y-1 rounded border border-[#f1d28a] bg-[#fffaf0] px-2 py-1 text-[var(--warning)]">
+            {unreachedNames.length > 0 ? (
+              <div>Pendientes: {unreachedNames.join(", ")}</div>
+            ) : null}
+
+            {proposalOutdated ? (
+              <div>La propuesta esta desactualizada. Regenerala antes de aceptar.</div>
+            ) : null}
+
+            {!canAcceptProposal && acceptBlockReason ? (
+              <div>{acceptBlockReason}</div>
+            ) : null}
           </div>
         ) : null}
 
@@ -675,11 +674,6 @@ function RouteMainFlow({
             Aceptar recorrido
           </button>
         </div>
-        {!canAcceptProposal && acceptBlockReason ? (
-          <div className="mt-2 rounded border border-[#f1d28a] bg-[#fffaf0] px-2 py-1 text-[var(--warning)]">
-            {acceptBlockReason}
-          </div>
-        ) : null}
       </section>
     );
   }
@@ -727,26 +721,6 @@ function RouteMainFlow({
       </button>
     </section>
   );
-}
-
-function proposalValidationLabel({
-  acceptBlockReason,
-  canAcceptProposal,
-  isOutdated,
-}: {
-  acceptBlockReason: string | null;
-  canAcceptProposal: boolean;
-  isOutdated: boolean;
-}) {
-  if (isOutdated) {
-    return "Revisar";
-  }
-
-  if (canAcceptProposal) {
-    return "Lista";
-  }
-
-  return acceptBlockReason ? "Pendiente" : "Revisar";
 }
 
 function ProposalSummary({

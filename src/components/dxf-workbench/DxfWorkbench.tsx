@@ -209,6 +209,7 @@ import {
 import {
   createStandardTechnicalAxonometricView,
   createStandardTechnicalSectionView,
+  routeInstallationBounds,
   type StandardTechnicalReviewViewId,
 } from "@/lib/sections/standardTechnicalViews";
 import {
@@ -6057,7 +6058,7 @@ export function DxfWorkbench() {
     : "Sin base activa";
   const canOpenEquipmentStage = planStageReadiness.canContinueToEquipment;
   const canOpenRouteStage =
-    canOpenEquipmentStage && supplyCount === 1 && applianceEquipment.length > 0;
+    canOpenEquipmentStage && isEquipmentTraceReady;
   const canOpenCalculateStage = canOpenReviewStage;
   const canOpenDeliverStage = technicalCalculationResult?.status === "valid";
 
@@ -6132,6 +6133,13 @@ export function DxfWorkbench() {
         : null;
   const isTechnicalReviewCanvasVisible =
     isReviewStage && activeReviewViewId !== "plan";
+  const reviewPlanFitBounds = useMemo(() => {
+    if (!isReviewStage || activeReviewViewId !== "plan") {
+      return null;
+    }
+
+    return routeInstallationBounds(routeNetwork, planEquipment);
+  }, [activeReviewViewId, isReviewStage, planEquipment, routeNetwork]);
   const planOnlyDisabledReason =
     activeBase?.type === "section" ? "Solo en Planta" : "Sin Planta";
   const isPlanSectionAvailable = activeBase?.type === "plan";
@@ -6513,7 +6521,7 @@ export function DxfWorkbench() {
         ) : null}
 
         <section className="flex min-h-0 min-w-0 flex-col overflow-hidden">
-          {hasAnyBase ? (
+          {hasAnyBase && !isReviewStage ? (
           <div className="shrink-0 border-b border-[var(--line)] bg-white px-3 py-2">
             <div className="flex min-w-0 items-center gap-1 overflow-x-auto">
                 {orderedBases.map((base) => (
@@ -6770,6 +6778,7 @@ export function DxfWorkbench() {
             {isTechnicalReviewCanvasVisible ? (
               <TechnicalReviewCanvas
                 axonometricView={standardTechnicalAxonometricView}
+                equipment={planEquipment}
                 sectionView={activeStandardTechnicalSectionView}
                 selectedHeightTarget={selectedSectionRouteHeightTarget}
                 viewId={activeReviewViewId}
@@ -6790,6 +6799,7 @@ export function DxfWorkbench() {
                 equipment={visibleEquipment}
                 equipmentDraft={activeEquipmentDraftOverlay}
                 equipmentPlacementMode={equipmentPlacementMode}
+                fitBounds={reviewPlanFitBounds}
                 fitNonce={activeBase?.visual.dxfFitNonce ?? 0}
                 hoveredEquipmentId={hoveredEquipmentId}
                 highlightedRouteSegmentIds={highlightedRouteSegmentIds}
@@ -6878,6 +6888,7 @@ export function DxfWorkbench() {
                 equipment={visibleEquipment}
                 equipmentDraft={activeEquipmentDraftOverlay}
                 equipmentPlacementMode={equipmentPlacementMode}
+                fitBounds={reviewPlanFitBounds}
                 fitNonce={activeBase?.visual.pdfFitNonce ?? 0}
                 hoveredEquipmentId={hoveredEquipmentId}
                 highlightedRouteSegmentIds={highlightedRouteSegmentIds}

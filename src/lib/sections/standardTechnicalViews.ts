@@ -151,7 +151,7 @@ function createAutomaticSectionProjectionLink(params: {
   };
 }
 
-function routeInstallationBounds(
+export function routeInstallationBounds(
   network: ManualRouteNetwork,
   equipment: WorkbenchEquipment[],
 ): Bounds | null {

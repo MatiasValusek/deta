@@ -10,7 +10,7 @@ import {
   zoomPdfTransformAt,
   type PdfViewTransform,
 } from "@/lib/pdf/pdfViewport";
-import type { Point2D } from "@/lib/geometry/types";
+import type { Bounds, Point2D } from "@/lib/geometry/types";
 import type { PdfPageModel } from "@/lib/pdf/types";
 import {
   createRectanglePolygon,
@@ -64,6 +64,7 @@ type PdfViewerProps = {
   constraints: ManualConstraint[];
   constraintToolMode: ConstraintToolMode;
   documentProxy: PDFDocumentProxy | null;
+  fitBounds?: Bounds | null;
   fitNonce: number;
   isPointSelectionActive: boolean;
   overlay: SourceOverlayData;
@@ -185,6 +186,7 @@ export function PdfViewer({
   constraints,
   constraintToolMode,
   documentProxy,
+  fitBounds,
   fitNonce,
   isPointSelectionActive,
   overlay,
@@ -254,6 +256,7 @@ export function PdfViewer({
   const panStateRef = useRef<PanState | null>(null);
   const constraintDragRef = useRef<ConstraintDragState | null>(null);
   const previousBaseIdRef = useRef<string | null>(null);
+  const previousFitBoundsKeyRef = useRef<string | null>(null);
   const previousFitNonceRef = useRef(fitNonce);
   const [rectDraft, setRectDraft] = useState<RectDraft | null>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -324,22 +327,28 @@ export function PdfViewer({
     if (!pageSize || size.width <= 0 || size.height <= 0) {
       commitLocalView(null, true);
       previousBaseIdRef.current = baseId;
+      previousFitBoundsKeyRef.current = null;
       previousFitNonceRef.current = fitNonce;
       return;
     }
 
+    const targetFitBoundsKey = fitBounds ? boundsKey(fitBounds) : null;
     const shouldRefit =
       previousBaseIdRef.current === baseId &&
-      previousFitNonceRef.current !== fitNonce;
+      (previousFitNonceRef.current !== fitNonce ||
+        previousFitBoundsKeyRef.current !== targetFitBoundsKey);
     const nextView =
       savedView && !shouldRefit
         ? savedView
-        : createPdfFitTransform(pageSize, size, 36);
+        : fitBounds
+          ? createPdfBoundsFitTransform(fitBounds, size, 36)
+          : createPdfFitTransform(pageSize, size, 36);
 
     commitLocalView(nextView, !savedView || shouldRefit);
     previousBaseIdRef.current = baseId;
+    previousFitBoundsKeyRef.current = targetFitBoundsKey;
     previousFitNonceRef.current = fitNonce;
-  }, [baseId, fitNonce, pageSize, savedView, size.height, size.width]);
+  }, [baseId, fitBounds, fitNonce, pageSize, savedView, size.height, size.width]);
 
   useEffect(() => {
     viewRef.current = view;
@@ -952,4 +961,39 @@ function pdfViewTransformsEqual(
     first.offsetX === second.offsetX &&
     first.offsetY === second.offsetY
   );
+}
+
+function createPdfBoundsFitTransform(
+  bounds: Bounds,
+  size: { width: number; height: number },
+  padding = 32,
+): PdfViewTransform {
+  const boundsWidth = Math.max(bounds.maxX - bounds.minX, 1);
+  const boundsHeight = Math.max(bounds.maxY - bounds.minY, 1);
+  const availableWidth = Math.max(size.width - padding * 2, 1);
+  const availableHeight = Math.max(size.height - padding * 2, 1);
+  const scale = Math.min(
+    availableWidth / boundsWidth,
+    availableHeight / boundsHeight,
+  );
+  const fittedWidth = boundsWidth * scale;
+  const fittedHeight = boundsHeight * scale;
+
+  return {
+    ...size,
+    scale,
+    offsetX: (size.width - fittedWidth) / 2 - bounds.minX * scale,
+    offsetY: (size.height - fittedHeight) / 2 - bounds.minY * scale,
+  };
+}
+
+function boundsKey(bounds: Bounds) {
+  return [
+    bounds.minX,
+    bounds.minY,
+    bounds.maxX,
+    bounds.maxY,
+  ]
+    .map((value) => value.toFixed(3))
+    .join(":");
 }

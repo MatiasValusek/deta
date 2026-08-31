@@ -3,6 +3,7 @@ import {
   DEMAND_UNITS,
   equipmentCode,
   equipmentTypeLabel,
+  hasPendingDemand,
   type DemandUnit,
   type EquipmentDraft,
   type EquipmentType,
@@ -77,6 +78,7 @@ export function EquipmentPanel({
     formatEquipmentDemandWithNormalization(
       demandNormalizationByEquipmentId.get(item.id),
     );
+  const pendingDemandEquipment = equipment.filter(hasPendingDemand);
 
   return (
     <section
@@ -124,6 +126,17 @@ export function EquipmentPanel({
         </div>
       ) : null}
 
+      {pendingDemandEquipment.length > 0 ? (
+        <div className="mt-3 rounded border border-[#f1d28a] bg-[#fffaf0] px-3 py-2 text-xs text-[var(--warning)]">
+          <div className="font-semibold">Falta consumo</div>
+          <div className="mt-1">
+            {pendingDemandEquipment
+              .map((item) => `${equipmentCode(item.type)} ${item.name}`)
+              .join(", ")}
+          </div>
+        </div>
+      ) : null}
+
       {draft ? (
         <DraftEditor
           canSaveDraft={canSaveDraft}
@@ -150,12 +163,15 @@ export function EquipmentPanel({
           <div className="space-y-1">
             {equipment.map((item) => {
               const isSelected = selectedEquipment?.id === item.id;
+              const demandPending = hasPendingDemand(item);
 
               return (
                 <div
                   className={`rounded border px-2 py-1 text-xs ${
                     isSelected
                       ? "border-[#6d28d9]"
+                      : demandPending
+                        ? "border-[#f1d28a] bg-[#fffaf0]"
                       : "border-[var(--line)]"
                   }`}
                   key={item.id}
@@ -176,7 +192,11 @@ export function EquipmentPanel({
                     <span className="mt-0.5 block text-[10px] text-[var(--muted)]">
                       {equipmentTypeLabel(item.type)}
                       {item.role === "appliance"
-                        ? ` - ${equipmentDemandLabel(item)}`
+                        ? ` - ${
+                            demandPending
+                              ? "Falta consumo"
+                              : equipmentDemandLabel(item)
+                          }`
                         : ""}
                     </span>
                   </button>

@@ -11,6 +11,7 @@ import {
 } from "@/lib/geometry/viewport";
 import type {
   ArcPrimitive,
+  Bounds,
   DrawingLayer,
   DrawingPrimitive,
   NormalizedDrawing,
@@ -76,6 +77,7 @@ import type { PhysicalRouteEditSelection } from "@/lib/routing/physicalRouteEdit
 type DxfViewerProps = {
   baseId: string;
   drawing: NormalizedDrawing | null;
+  fitBounds?: Bounds | null;
   visibleLayers: LayerVisibility;
   classificationIndex: ClassificationIndex;
   constraintDraft: ConstraintDraft | null;
@@ -224,6 +226,7 @@ export function DxfViewer({
   constraintDraft,
   constraints,
   constraintToolMode,
+  fitBounds,
   fitNonce,
   isPointSelectionActive,
   overlay,
@@ -298,6 +301,7 @@ export function DxfViewer({
   const panStateRef = useRef<PanState | null>(null);
   const constraintDragRef = useRef<ConstraintDragState | null>(null);
   const previousBaseIdRef = useRef<string | null>(null);
+  const previousFitBoundsKeyRef = useRef<string | null>(null);
   const previousFitNonceRef = useRef(fitNonce);
   const [rectDraft, setRectDraft] = useState<RectDraft | null>(null);
   const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
@@ -383,22 +387,27 @@ export function DxfViewer({
     if (!drawing?.bounds || size.width <= 0 || size.height <= 0) {
       commitLocalView(null, true);
       previousBaseIdRef.current = baseId;
+      previousFitBoundsKeyRef.current = null;
       previousFitNonceRef.current = fitNonce;
       return;
     }
 
+    const targetFitBounds = fitBounds ?? drawing.bounds;
+    const targetFitBoundsKey = boundsKey(targetFitBounds);
     const shouldRefit =
       previousBaseIdRef.current === baseId &&
-      previousFitNonceRef.current !== fitNonce;
+      (previousFitNonceRef.current !== fitNonce ||
+        previousFitBoundsKeyRef.current !== targetFitBoundsKey);
     const nextView =
       savedView && !shouldRefit
         ? savedView
-        : createFitTransform(drawing.bounds, size, 36);
+        : createFitTransform(targetFitBounds, size, 36);
 
     commitLocalView(nextView, !savedView || shouldRefit);
     previousBaseIdRef.current = baseId;
+    previousFitBoundsKeyRef.current = targetFitBoundsKey;
     previousFitNonceRef.current = fitNonce;
-  }, [baseId, drawing, fitNonce, savedView, size.height, size.width]);
+  }, [baseId, drawing, fitBounds, fitNonce, savedView, size.height, size.width]);
 
   useEffect(() => {
     viewRef.current = view;
@@ -1309,6 +1318,17 @@ function viewTransformsEqual(
     first.offsetX === second.offsetX &&
     first.offsetY === second.offsetY
   );
+}
+
+function boundsKey(bounds: Bounds) {
+  return [
+    bounds.minX,
+    bounds.minY,
+    bounds.maxX,
+    bounds.maxY,
+  ]
+    .map((value) => value.toFixed(3))
+    .join(":");
 }
 
 function arcToPath(entity: ArcPrimitive, view: ViewTransform) {
