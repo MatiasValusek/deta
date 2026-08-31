@@ -1,4 +1,3 @@
-import { useState } from "react";
 import {
   equipmentCode,
   formatEquipmentDemand,
@@ -38,6 +37,7 @@ type RoutePanelProps = {
   hasSupply: boolean;
   isGeneratingProposal: boolean;
   isComplete: boolean;
+  isEditingRoute: boolean;
   isPlanActive: boolean;
   isSectionContent?: boolean;
   lengthLabel: string;
@@ -67,6 +67,7 @@ type RoutePanelProps = {
   onDisconnectAppliance: (equipmentId: string) => void;
   onEditInstallation: () => void;
   onEditProposal: () => void;
+  onExitEditRoute: () => void;
   onGenerateProposal: () => void;
   onGoToPlan: () => void;
   onGoToScale: () => void;
@@ -92,6 +93,7 @@ export function RoutePanel({
   hasSupply,
   isGeneratingProposal,
   isComplete,
+  isEditingRoute,
   isPlanActive,
   isSectionContent = false,
   lengthLabel,
@@ -121,6 +123,7 @@ export function RoutePanel({
   onDisconnectAppliance,
   onEditInstallation,
   onEditProposal,
+  onExitEditRoute,
   onGenerateProposal,
   onGoToPlan,
   onGoToScale,
@@ -131,7 +134,6 @@ export function RoutePanel({
   onShowRouteChange,
   onSnapOptionChange,
 }: RoutePanelProps) {
-  const [advancedOpen, setAdvancedOpen] = useState(false);
   const marginIsValid = parseProposalMarginInput(proposalMarginInput);
   const totalAppliances = applianceStatuses.length;
   const pendingStatuses = applianceStatuses.filter(
@@ -146,18 +148,8 @@ export function RoutePanel({
     hasAppliances &&
     !draft &&
     !intentDraft &&
-    !proposal;
+    (!proposal || isEditingRoute);
   const canGenerateProposal =
-    planReady &&
-    isPlanActive &&
-    hasSupply &&
-    hasAppliances &&
-    !draft &&
-    !intentDraft &&
-    !isGeneratingProposal &&
-    !proposalRequiresScale &&
-    marginIsValid;
-  const canRegenerateProposal =
     planReady &&
     isPlanActive &&
     hasSupply &&
@@ -177,17 +169,16 @@ export function RoutePanel({
     !intentDraft &&
     !isGeneratingProposal &&
     !proposalRequiresScale &&
-    !proposal &&
+    (!proposal || isEditingRoute) &&
     marginIsValid;
 
   function handleEditInstallation() {
-    setAdvancedOpen(true);
     onShowRouteChange(true);
     onEditInstallation();
   }
 
   function handleEditProposal() {
-    setAdvancedOpen(true);
+    onShowRouteChange(true);
     onEditProposal();
   }
 
@@ -206,7 +197,7 @@ export function RoutePanel({
           </h2>
           <p className="mt-1 text-xs text-[var(--muted)]">
             {routeState === "proposal"
-              ? "Propuesta lista"
+              ? "Propuesta de recorrido"
               : routeState === "confirmed"
                 ? "Recorrido confirmado"
                 : "Recorrido pendiente"}
@@ -227,47 +218,48 @@ export function RoutePanel({
         </div>
       ) : null}
 
-      <RouteMainFlow
-        applianceStatuses={applianceStatuses}
-        canGenerateProposal={canGenerateProposal}
-        canRegenerateProposal={canRegenerateProposal}
-        isGeneratingProposal={isGeneratingProposal}
-        pendingStatuses={pendingStatuses}
-        proposal={proposal}
-        proposalConnectedCount={proposalConnectedCount}
-        proposalOutdated={proposalOutdated}
-        proposalRequiresScale={proposalRequiresScale}
-        routeState={routeState}
-        totalAppliances={totalAppliances}
-        onAcceptProposal={onAcceptProposal}
-        onContinueToReview={onContinueToReview}
-        onEditInstallation={handleEditInstallation}
-        onEditProposal={handleEditProposal}
-        onGenerateProposal={onGenerateProposal}
-        onGoToScale={onGoToScale}
-        onRegenerateProposal={onRegenerateProposal}
-      />
+      {isEditingRoute ? null : (
+        <RouteMainFlow
+          applianceStatuses={applianceStatuses}
+          canGenerateProposal={canGenerateProposal}
+          connectedCount={connectedCount}
+          isGeneratingProposal={isGeneratingProposal}
+          pendingStatuses={pendingStatuses}
+          proposal={proposal}
+          proposalConnectedCount={proposalConnectedCount}
+          proposalOutdated={proposalOutdated}
+          routeState={routeState}
+          totalAppliances={totalAppliances}
+          onAcceptProposal={onAcceptProposal}
+          onContinueToReview={onContinueToReview}
+          onEditInstallation={handleEditInstallation}
+          onEditProposal={handleEditProposal}
+          onGenerateProposal={onGenerateProposal}
+        />
+      )}
 
-      {pendingDemandCount > 0 ? (
-        <p className="mt-2 text-xs text-[var(--warning)]">
-          Consumos pendientes: {pendingDemandCount}
-        </p>
-      ) : null}
-
-      {error && !draft && !intentDraft ? (
+      {!isEditingRoute && error && !draft && !intentDraft ? (
         <div className="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
           {error}
         </div>
       ) : null}
 
-      <details
+      {isEditingRoute ? (
+      <section
         className="mt-3 rounded border border-[var(--line)] px-3 py-2 text-xs"
-        open={advancedOpen}
-        onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}
       >
-        <summary className="cursor-pointer font-semibold">
-          Opciones avanzadas
-        </summary>
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <div className="font-semibold">Editar recorrido</div>
+          </div>
+          <button
+            className="shrink-0 rounded border border-[var(--line)] bg-white px-2 py-1 hover:border-[var(--accent)]"
+            type="button"
+            onClick={onExitEditRoute}
+          >
+            {proposal ? "Volver a propuesta" : "Salir de Editar"}
+          </button>
+        </div>
 
         <label className="mt-3 flex items-center justify-between gap-2 text-xs">
           <span>Mostrar red</span>
@@ -296,7 +288,7 @@ export function RoutePanel({
       </dl>
 
       <RoutePhysicalEditControls
-        disabled={!planReady || !isPlanActive || Boolean(draft) || Boolean(intentDraft) || Boolean(proposal)}
+        disabled={!planReady || !isPlanActive || Boolean(draft) || Boolean(intentDraft)}
         equipment={equipment}
         selectedEdit={selectedEdit}
         snapOptions={snapOptions}
@@ -320,8 +312,7 @@ export function RoutePanel({
             !planReady ||
             segmentCount === 0 ||
             Boolean(draft) ||
-            Boolean(intentDraft) ||
-            Boolean(proposal)
+            Boolean(intentDraft)
           }
           type="button"
           onClick={onClearNetwork}
@@ -446,7 +437,7 @@ export function RoutePanel({
           className="mt-2 w-full rounded border border-[var(--accent)] bg-[var(--accent)] px-2 py-1 font-medium text-white hover:bg-[var(--accent-strong)] disabled:border-[var(--line)] disabled:bg-white disabled:text-[var(--muted)]"
           disabled={!canGenerateProposal}
           type="button"
-          onClick={onGenerateProposal}
+          onClick={proposal ? onRegenerateProposal : onGenerateProposal}
         >
           {isGeneratingProposal ? "Generando propuesta..." : proposal ? "Regenerar" : "Generar propuesta"}
         </button>
@@ -537,9 +528,7 @@ export function RoutePanel({
                   {status.isConnected ? (
                     <button
                       className="shrink-0 rounded border border-[var(--line)] px-2 py-1 hover:border-[var(--accent)]"
-                      disabled={
-                        Boolean(draft) || Boolean(intentDraft) || Boolean(proposal)
-                      }
+                      disabled={Boolean(draft) || Boolean(intentDraft)}
                       type="button"
                       onClick={() => onDisconnectAppliance(status.equipment.id)}
                     >
@@ -552,7 +541,8 @@ export function RoutePanel({
           </div>
         )}
       </section>
-      </details>
+      </section>
+      ) : null}
     </section>
   );
 }
@@ -560,13 +550,12 @@ export function RoutePanel({
 function RouteMainFlow({
   applianceStatuses,
   canGenerateProposal,
-  canRegenerateProposal,
+  connectedCount,
   isGeneratingProposal,
   pendingStatuses,
   proposal,
   proposalConnectedCount,
   proposalOutdated,
-  proposalRequiresScale,
   routeState,
   totalAppliances,
   onAcceptProposal,
@@ -574,18 +563,15 @@ function RouteMainFlow({
   onEditInstallation,
   onEditProposal,
   onGenerateProposal,
-  onGoToScale,
-  onRegenerateProposal,
 }: {
   applianceStatuses: RouteApplianceStatus[];
   canGenerateProposal: boolean;
-  canRegenerateProposal: boolean;
+  connectedCount: number;
   isGeneratingProposal: boolean;
   pendingStatuses: RouteApplianceStatus[];
   proposal: AutomaticRouteProposal | null;
   proposalConnectedCount: number;
   proposalOutdated: boolean;
-  proposalRequiresScale: boolean;
   routeState: "setup" | "proposal" | "confirmed";
   totalAppliances: number;
   onAcceptProposal: () => void;
@@ -593,8 +579,6 @@ function RouteMainFlow({
   onEditInstallation: () => void;
   onEditProposal: () => void;
   onGenerateProposal: () => void;
-  onGoToScale: () => void;
-  onRegenerateProposal: () => void;
 }) {
   if (routeState === "confirmed") {
     return (
@@ -608,7 +592,7 @@ function RouteMainFlow({
             type="button"
             onClick={onEditInstallation}
           >
-            Editar instalacion
+            Editar
           </button>
           <button
             className="rounded border border-[var(--accent)] bg-[var(--accent)] px-2 py-1 font-medium text-white hover:bg-[var(--accent-strong)]"
@@ -640,20 +624,28 @@ function RouteMainFlow({
             ?.equipment.name ?? equipmentId,
       )
       .sort();
+    const validationLabel = proposalValidationLabel({
+      acceptBlockReason,
+      canAcceptProposal,
+      isOutdated: proposalOutdated,
+    });
 
     return (
       <section className="mt-3 rounded border border-[#8db7e8] bg-[#f1f7ff] px-3 py-2 text-xs">
-        <div className="flex items-start justify-between gap-2">
-          <div>
-            <div className="font-semibold text-[#15599f]">Propuesta lista</div>
-            <p className="mt-1 text-[var(--muted)]">
-              La propuesta conecta {proposalConnectedCount} de {totalAppliances} artefactos
-            </p>
-          </div>
-          <span className="rounded border border-[#8db7e8] bg-white px-2 py-0.5 font-mono text-[10px] uppercase text-[#15599f]">
-            propuesta
-          </span>
+        <div className="font-semibold text-[#15599f]">
+          Propuesta de recorrido
         </div>
+
+        <dl className="mt-2 grid grid-cols-[minmax(0,1fr)_72px] gap-x-2 gap-y-1">
+          <dt>Conectados</dt>
+          <dd className="text-right font-mono">
+            {proposalConnectedCount} de {totalAppliances}
+          </dd>
+          <dt>Pendientes</dt>
+          <dd className="text-right font-mono">{unreachedNames.length}</dd>
+          <dt>Validacion</dt>
+          <dd className="text-right">{validationLabel}</dd>
+        </dl>
 
         {unreachedNames.length > 0 ? (
           <div className="mt-2 rounded border border-[#f1d28a] bg-[#fffaf0] px-2 py-1 text-[var(--warning)]">
@@ -667,15 +659,7 @@ function RouteMainFlow({
           </div>
         ) : null}
 
-        <div className="mt-2 grid grid-cols-3 gap-1">
-          <button
-            className="rounded border border-[var(--accent)] bg-[var(--accent)] px-2 py-1 font-medium text-white hover:bg-[var(--accent-strong)] disabled:border-[var(--line)] disabled:bg-white disabled:text-[var(--muted)]"
-            disabled={!canAcceptProposal}
-            type="button"
-            onClick={onAcceptProposal}
-          >
-            Aceptar
-          </button>
+        <div className="mt-2 grid grid-cols-2 gap-1">
           <button
             className="rounded border border-[var(--line)] bg-white px-2 py-1 hover:border-[var(--accent)] disabled:text-[var(--muted)]"
             disabled={proposalOutdated || proposal.segmentCount === 0}
@@ -685,12 +669,12 @@ function RouteMainFlow({
             Editar
           </button>
           <button
-            className="rounded border border-[var(--line)] bg-white px-2 py-1 hover:border-[var(--accent)] disabled:text-[var(--muted)]"
-            disabled={!canRegenerateProposal}
+            className="rounded border border-[var(--accent)] bg-[var(--accent)] px-2 py-1 font-medium text-white hover:bg-[var(--accent-strong)] disabled:border-[var(--line)] disabled:bg-white disabled:text-[var(--muted)]"
+            disabled={!canAcceptProposal}
             type="button"
-            onClick={onRegenerateProposal}
+            onClick={onAcceptProposal}
           >
-            Regenerar
+            Aceptar recorrido
           </button>
         </div>
         {!canAcceptProposal && acceptBlockReason ? (
@@ -704,7 +688,14 @@ function RouteMainFlow({
 
   return (
     <section className="mt-3 rounded border border-[var(--line)] px-3 py-2 text-xs">
-      <div className="font-semibold">Artefactos pendientes</div>
+      <div className="flex items-center justify-between gap-2">
+        <div className="font-semibold">Estado</div>
+        <div className="font-mono">
+          {connectedCount} de {totalAppliances} conectados
+        </div>
+      </div>
+
+      <div className="mt-3 font-semibold">Artefactos pendientes</div>
       {pendingStatuses.length === 0 ? (
         <p className="mt-1 text-[var(--muted)]">
           No hay artefactos pendientes.
@@ -728,19 +719,6 @@ function RouteMainFlow({
         </div>
       )}
 
-      {proposalRequiresScale ? (
-        <div className="mt-2 flex items-center justify-between gap-2 rounded border border-[#ecd5ad] bg-[#fff9ec] px-2 py-1 text-[var(--warning)]">
-          <span>Confirma la escala de la Planta.</span>
-          <button
-            className="shrink-0 rounded border border-[var(--line)] bg-white px-2 py-1 hover:border-[var(--accent)]"
-            type="button"
-            onClick={onGoToScale}
-          >
-            Ir a Escala
-          </button>
-        </div>
-      ) : null}
-
       <button
         className="mt-2 w-full rounded border border-[var(--accent)] bg-[var(--accent)] px-2 py-1 font-medium text-white hover:bg-[var(--accent-strong)] disabled:border-[var(--line)] disabled:bg-white disabled:text-[var(--muted)]"
         disabled={!canGenerateProposal}
@@ -751,6 +729,26 @@ function RouteMainFlow({
       </button>
     </section>
   );
+}
+
+function proposalValidationLabel({
+  acceptBlockReason,
+  canAcceptProposal,
+  isOutdated,
+}: {
+  acceptBlockReason: string | null;
+  canAcceptProposal: boolean;
+  isOutdated: boolean;
+}) {
+  if (isOutdated) {
+    return "Revisar";
+  }
+
+  if (canAcceptProposal) {
+    return "Lista";
+  }
+
+  return acceptBlockReason ? "Pendiente" : "Revisar";
 }
 
 function ProposalSummary({

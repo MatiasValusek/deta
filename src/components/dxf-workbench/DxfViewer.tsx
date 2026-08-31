@@ -90,6 +90,7 @@ type DxfViewerProps = {
   hoveredEquipmentId: string | null;
   highlightedRouteSegmentIds: Set<string>;
   invalidRouteSegmentIds: Set<string>;
+  isRouteEditing: boolean;
   pendingEntityIds: string[];
   routeProposal: AutomaticRouteProposal | null;
   routeProposalOutdated: boolean;
@@ -231,6 +232,7 @@ export function DxfViewer({
   hoveredEquipmentId,
   highlightedRouteSegmentIds,
   invalidRouteSegmentIds,
+  isRouteEditing,
   pendingEntityIds,
   routeProposal,
   routeProposalOutdated,
@@ -902,6 +904,7 @@ export function DxfViewer({
               highlightedSegmentIds={highlightedRouteSegmentIds}
               invalidSegmentIds={invalidRouteSegmentIds}
               isEditingEnabled={
+                isRouteEditing &&
                 routeToolMode === "inactive" &&
                 equipmentPlacementMode === "inactive" &&
                 constraintToolMode === "none" &&

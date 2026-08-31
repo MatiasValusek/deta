@@ -73,6 +73,7 @@ type PdfViewerProps = {
   hoveredEquipmentId: string | null;
   highlightedRouteSegmentIds: Set<string>;
   invalidRouteSegmentIds: Set<string>;
+  isRouteEditing: boolean;
   routeProposal: AutomaticRouteProposal | null;
   routeProposalOutdated: boolean;
   routeDraft: RouteDraft | null;
@@ -192,6 +193,7 @@ export function PdfViewer({
   hoveredEquipmentId,
   highlightedRouteSegmentIds,
   invalidRouteSegmentIds,
+  isRouteEditing,
   routeProposal,
   routeProposalOutdated,
   routeDraft,
@@ -823,6 +825,7 @@ export function PdfViewer({
                 highlightedSegmentIds={highlightedRouteSegmentIds}
                 invalidSegmentIds={invalidRouteSegmentIds}
                 isEditingEnabled={
+                  isRouteEditing &&
                   routeToolMode === "inactive" &&
                   equipmentPlacementMode === "inactive" &&
                   constraintToolMode === "none" &&

@@ -434,6 +434,7 @@ export function DxfWorkbench() {
     useState<AutomaticRouteProposal | null>(null);
   const [routeProposalMode, setRouteProposalMode] =
     useState<"automatic" | "intent" | null>(null);
+  const [isRouteEditing, setIsRouteEditing] = useState(false);
   const [isRouteProposalGenerating, setIsRouteProposalGenerating] =
     useState(false);
   const [routeProposalMarginInput, setRouteProposalMarginInput] =
@@ -962,6 +963,11 @@ export function DxfWorkbench() {
       (!expectedRouteProposalFingerprint ||
         routeProposal.params.fingerprint !== expectedRouteProposalFingerprint),
   );
+  const visibleRouteProposalOverlay = isRouteEditing
+    ? null
+    : activeRouteProposalOverlay;
+  const routePhysicalEditingEnabled =
+    isRouteEditing || activeMainStage === "review";
   const routeProposalRequiresScale = Boolean(
     planBase && !planBase.calibration.calibration,
   );
@@ -1783,6 +1789,7 @@ export function DxfWorkbench() {
     setRouteIntentDraft(null);
     setRouteProposal(null);
     setRouteProposalMode(null);
+    setIsRouteEditing(false);
     setSelectedRouteEdit(null);
     setEquipmentError(null);
     setRouteError(null);
@@ -1805,6 +1812,10 @@ export function DxfWorkbench() {
 
     if (stage !== "review") {
       setSectionRouteHeightEditor(null);
+    }
+
+    if (stage !== "route") {
+      setIsRouteEditing(false);
     }
 
     setActiveMainStage(stage);
@@ -1984,6 +1995,7 @@ export function DxfWorkbench() {
     if (routeProposal?.baseId === activeBase.id) {
       setRouteProposalMode(null);
     }
+    setIsRouteEditing(false);
     setHighlightedSectionLinkId(null);
     setHighlightedRegistrationLinkId(null);
     setHoveredSectionLinkId(null);
@@ -2026,6 +2038,7 @@ export function DxfWorkbench() {
     setRouteIntentDraft(null);
     setRouteProposal(null);
     setRouteProposalMode(null);
+    setIsRouteEditing(false);
     setRouteProposalMarginInput(DEFAULT_ROUTE_PROPOSAL_MARGIN_INPUT);
     setActiveMainStage("plan");
     setActiveRightPanelSection("geometry");
@@ -3507,6 +3520,38 @@ export function DxfWorkbench() {
     handleActivateBase(planBase.id);
   }
 
+  function handleEnterRouteEditing() {
+    setActiveRightPanelSection("route");
+    setIsRouteEditing(true);
+    setRouteDraft(null);
+    setRouteIntentDraft(null);
+    setSelectedRouteEdit(null);
+    setRouteError(null);
+
+    if (planBase) {
+      updateBase(planBase.id, (base) => ({
+        ...base,
+        showRoute: true,
+      }));
+    }
+  }
+
+  function handleExitRouteEditing() {
+    setIsRouteEditing(false);
+    setRouteDraft(null);
+    setRouteIntentDraft(null);
+    setSelectedRouteEdit(null);
+    setRouteError(null);
+    setCursor(null);
+
+    if (planBase) {
+      updateBase(planBase.id, (base) => ({
+        ...base,
+        showRoute: true,
+      }));
+    }
+  }
+
   function handleShowRouteChange(show: boolean) {
     if (!planBase) {
       return;
@@ -3722,6 +3767,7 @@ export function DxfWorkbench() {
 
   function handleStartRouteConnection() {
     setActiveRightPanelSection("route");
+    setIsRouteEditing(true);
 
     if (!planBase) {
       setRouteError("Agregue una Planta antes de trazar la red.");
@@ -4417,6 +4463,7 @@ export function DxfWorkbench() {
 
   function handleGoToScaleForRouteProposal() {
     setActiveRightPanelSection("scale");
+    setIsRouteEditing(false);
 
     if (planBase && activeBaseId !== planBase.id) {
       handleActivateBase(planBase.id);
@@ -4468,6 +4515,7 @@ export function DxfWorkbench() {
     setRouteDraft(null);
     setRouteIntentDraft(null);
     setRouteError(null);
+    setIsRouteEditing(false);
     setIsRouteProposalGenerating(true);
     updateBase(planBase.id, (base) => ({
       ...base,
@@ -4571,6 +4619,7 @@ export function DxfWorkbench() {
     setRouteDraft(null);
     setRouteIntentDraft(null);
     setRouteError(null);
+    setIsRouteEditing(false);
     setIsRouteProposalGenerating(true);
     updateBase(planBase.id, (base) => ({
       ...base,
@@ -4636,6 +4685,7 @@ export function DxfWorkbench() {
   function handleDiscardRouteProposal() {
     setRouteProposal(null);
     setRouteProposalMode(null);
+    setIsRouteEditing(false);
     setRouteError(null);
   }
 
@@ -4659,14 +4709,7 @@ export function DxfWorkbench() {
   }
 
   function handleEditConfirmedRoute() {
-    setActiveRightPanelSection("route");
-
-    if (planBase) {
-      updateBase(planBase.id, (base) => ({
-        ...base,
-        showRoute: true,
-      }));
-    }
+    handleEnterRouteEditing();
 
     setRouteProposal(null);
     setRouteProposalMode(null);
@@ -4677,25 +4720,12 @@ export function DxfWorkbench() {
   }
 
   function handleEditRouteProposal() {
-    setActiveRightPanelSection("route");
-
-    if (planBase) {
-      updateBase(planBase.id, (base) => ({
-        ...base,
-        showRoute: true,
-      }));
-    }
-
-    setRouteProposal(null);
-    setRouteProposalMode(null);
-    setRouteDraft(null);
-    setRouteIntentDraft(null);
-    setSelectedRouteEdit(null);
-    setRouteError(null);
+    handleEnterRouteEditing();
   }
 
   function handleAcceptRouteProposal() {
     setActiveRightPanelSection("route");
+    setIsRouteEditing(false);
 
     if (!planBase || !routeProposal) {
       return;
@@ -5956,7 +5986,7 @@ export function DxfWorkbench() {
       summary: routeSummaryText,
       disabled: !isPlanSectionAvailable,
       disabledReason: planOnlyDisabledReason,
-      hasActiveTool: Boolean(routeDraft || routeIntentDraft),
+      hasActiveTool: isRouteEditing || Boolean(routeDraft || routeIntentDraft),
       content: activeBase?.type === "section" ? (
         <RouteSectionPreviewPanel onGoToPlan={handleGoToPlanForRoute} />
       ) : (
@@ -5971,6 +6001,7 @@ export function DxfWorkbench() {
           hasSupply={supplyCount === 1}
           isGeneratingProposal={isRouteProposalGenerating}
           isComplete={canOpenReviewStage}
+          isEditingRoute={isRouteEditing}
           isPlanActive={activeBase?.type === "plan"}
           isSectionContent
           lengthLabel={routeLengthLabel}
@@ -6000,6 +6031,7 @@ export function DxfWorkbench() {
           onContinueToReview={handleContinueToReviewFromRoute}
           onEditInstallation={handleEditConfirmedRoute}
           onEditProposal={handleEditRouteProposal}
+          onExitEditRoute={handleExitRouteEditing}
           onGenerateProposal={handleGenerateRouteProposal}
           onGoToPlan={handleGoToPlanForRoute}
           onGoToScale={handleGoToScaleForRouteProposal}
@@ -6499,6 +6531,7 @@ export function DxfWorkbench() {
                 hoveredEquipmentId={hoveredEquipmentId}
                 highlightedRouteSegmentIds={highlightedRouteSegmentIds}
                 invalidRouteSegmentIds={routeInvalidSegmentIds}
+                isRouteEditing={routePhysicalEditingEnabled}
                 isPointSelectionActive={
                   activeBase ? activeBase.calibration.toolMode !== "idle" : false
                 }
@@ -6508,7 +6541,7 @@ export function DxfWorkbench() {
                 routeIntentConnections={activeRouteIntentConnections}
                 routeIntentDraft={activeRouteIntentDraftOverlay}
                 routeNetwork={activeRouteNetwork}
-                routeProposal={activeRouteProposalOverlay}
+                routeProposal={visibleRouteProposalOverlay}
                 routeProposalOutdated={isRouteProposalOutdated}
                 routeToolMode={routeToolMode}
                 savedView={activeBase?.visual.dxfView ?? null}
@@ -6586,6 +6619,7 @@ export function DxfWorkbench() {
                 hoveredEquipmentId={hoveredEquipmentId}
                 highlightedRouteSegmentIds={highlightedRouteSegmentIds}
                 invalidRouteSegmentIds={routeInvalidSegmentIds}
+                isRouteEditing={routePhysicalEditingEnabled}
                 isPointSelectionActive={
                   activeBase ? activeBase.calibration.toolMode !== "idle" : false
                 }
@@ -6594,7 +6628,7 @@ export function DxfWorkbench() {
                 routeIntentConnections={activeRouteIntentConnections}
                 routeIntentDraft={activeRouteIntentDraftOverlay}
                 routeNetwork={activeRouteNetwork}
-                routeProposal={activeRouteProposalOverlay}
+                routeProposal={visibleRouteProposalOverlay}
                 routeProposalOutdated={isRouteProposalOutdated}
                 routeToolMode={routeToolMode}
                 savedView={activeBase?.visual.pdfView ?? null}
