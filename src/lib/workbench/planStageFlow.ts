@@ -63,9 +63,7 @@ export function createPlanStageReadiness(params: {
     : sections.every((section) => section.status === "ready")
       ? "ready"
       : "pending";
-  const canContinueToEquipment =
-    plan.status === "ready" &&
-    sections.every((section) => section.status === "ready");
+  const canContinueToEquipment = plan.status === "ready";
 
   return {
     canContinueToEquipment,
@@ -227,10 +225,9 @@ function createNextAction(params: {
     return params.plan.reason;
   }
 
-  return (
-    params.sections.find((section) => section.status !== "ready")?.reason ??
-    (params.sectionsStatus === "missing" ? "Agregar Corte opcional" : "Revisar Plano")
-  );
+  return params.sectionsStatus === "missing"
+    ? "Agregar corte real opcional"
+    : "Revisar Plano";
 }
 
 function baseScaleMetersPerSourceUnit(base: PlanStageBase) {

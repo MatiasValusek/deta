@@ -39,7 +39,8 @@ export function runPlanStageFlowVerifications() {
 
     assertEqual(sectionPending.sectionsStatus, "pending");
     assertEqual(sectionPending.sections[0]?.reason, "Vincular con Planta");
-    assertEqual(sectionPending.canContinueToEquipment, false);
+    assertEqual(sectionPending.canContinueToEquipment, true);
+    assertEqual(sectionPending.nextAction, "Continuar a Artefactos");
 
     const sectionReady = createPlanStageReadiness({
       bases: [planBase(), sectionBase()],

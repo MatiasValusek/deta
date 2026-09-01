@@ -60,7 +60,6 @@ type RoutePanelProps = {
   onClearIntentConnections: () => void;
   onClearRouteSelection: () => void;
   onConnectAppliance: () => void;
-  onContinueToReview: () => void;
   onDeleteSelectedVertex: () => void;
   onDeleteIntentConnection: (connectionId: string) => void;
   onDiscardProposal: () => void;
@@ -116,7 +115,6 @@ export function RoutePanel({
   onClearIntentConnections,
   onClearRouteSelection,
   onConnectAppliance,
-  onContinueToReview,
   onDeleteSelectedVertex,
   onDeleteIntentConnection,
   onDiscardProposal,
@@ -229,7 +227,6 @@ export function RoutePanel({
           routeState={routeState}
           totalAppliances={totalAppliances}
           onAcceptProposal={onAcceptProposal}
-          onContinueToReview={onContinueToReview}
           onEditInstallation={handleEditInstallation}
           onEditProposal={handleEditProposal}
           onGenerateProposal={onGenerateProposal}
@@ -557,7 +554,6 @@ function RouteMainFlow({
   routeState,
   totalAppliances,
   onAcceptProposal,
-  onContinueToReview,
   onEditInstallation,
   onEditProposal,
   onGenerateProposal,
@@ -573,7 +569,6 @@ function RouteMainFlow({
   routeState: "setup" | "proposal" | "confirmed";
   totalAppliances: number;
   onAcceptProposal: () => void;
-  onContinueToReview: () => void;
   onEditInstallation: () => void;
   onEditProposal: () => void;
   onGenerateProposal: () => void;
@@ -584,20 +579,13 @@ function RouteMainFlow({
         <div className="font-semibold text-[#1f6f3a]">
           Recorrido confirmado
         </div>
-        <div className="mt-2 grid grid-cols-2 gap-1">
+        <div className="mt-2">
           <button
-            className="rounded border border-[var(--line)] bg-white px-2 py-1 hover:border-[var(--accent)]"
+            className="w-full rounded border border-[var(--line)] bg-white px-2 py-1 hover:border-[var(--accent)]"
             type="button"
             onClick={onEditInstallation}
           >
             Editar
-          </button>
-          <button
-            className="rounded border border-[var(--accent)] bg-[var(--accent)] px-2 py-1 font-medium text-white hover:bg-[var(--accent-strong)]"
-            type="button"
-            onClick={onContinueToReview}
-          >
-            Continuar a Revisar
           </button>
         </div>
       </section>

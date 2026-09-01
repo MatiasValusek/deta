@@ -3,29 +3,24 @@ import type { StandardTechnicalReviewViewId } from "@/lib/sections/standardTechn
 export type ReviewTechnicalViewItem = {
   id: StandardTechnicalReviewViewId;
   label: string;
-  summary: string;
 };
 
 type ReviewPanelProps = {
-  activeViewId: StandardTechnicalReviewViewId;
+  calculationBlockReason: string | null;
   connectedApplianceCount: number;
   hasValidRoute: boolean;
   routeRestrictionCount: number;
   totalApplianceCount: number;
-  views: ReviewTechnicalViewItem[];
   onContinueToCalculate: () => void;
-  onOpenView: (viewId: StandardTechnicalReviewViewId) => void;
 };
 
 export function ReviewPanel({
-  activeViewId,
+  calculationBlockReason,
   connectedApplianceCount,
   hasValidRoute,
   routeRestrictionCount,
   totalApplianceCount,
-  views,
   onContinueToCalculate,
-  onOpenView,
 }: ReviewPanelProps) {
   const generalStatus = hasValidRoute
     ? "Instalacion lista para calcular"
@@ -35,28 +30,7 @@ export function ReviewPanel({
 
   return (
     <section className="bg-white px-4 py-3 text-sm">
-      <h2 className="sr-only">Revisar</h2>
-
-      <div className="grid grid-cols-2 gap-1">
-        {views.map((view) => (
-          <button
-            className={`rounded border px-2 py-2 text-left text-xs ${
-              activeViewId === view.id
-                ? "border-[var(--accent)] bg-[#f0f7ff]"
-                : "border-[var(--line)] bg-white hover:border-[var(--accent)]"
-            }`}
-            data-review-view-id={view.id}
-            key={view.id}
-            type="button"
-            onClick={() => onOpenView(view.id)}
-          >
-            <span className="block font-semibold">{view.label}</span>
-            <span className="mt-1 block truncate text-[var(--muted)]">
-              {view.summary}
-            </span>
-          </button>
-        ))}
-      </div>
+      <h2 className="text-sm font-semibold">Validacion tecnica</h2>
 
       <section className="mt-3 rounded border border-[var(--line)] px-3 py-2 text-xs">
         <div className="font-semibold">Estado general</div>
@@ -69,6 +43,11 @@ export function ReviewPanel({
           <dt>Observaciones</dt>
           <dd className="text-right font-mono">{routeRestrictionCount}</dd>
         </dl>
+        {!hasValidRoute && calculationBlockReason ? (
+          <div className="mt-2 rounded border border-[#f1d28a] bg-[#fffaf0] px-2 py-1 text-[var(--warning)]">
+            {calculationBlockReason}
+          </div>
+        ) : null}
       </section>
 
       <button
