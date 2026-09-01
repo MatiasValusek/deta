@@ -29,6 +29,8 @@ export function ReviewPanel({
 }: ReviewPanelProps) {
   const generalStatus = hasValidRoute
     ? "Instalacion lista para calcular"
+    : routeRestrictionCount > 0
+      ? "Falta resolver observaciones tecnicas"
     : "Falta confirmar un recorrido valido";
 
   return (

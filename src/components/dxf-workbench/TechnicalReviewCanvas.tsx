@@ -480,16 +480,21 @@ function AxonometricSegmentLine({
   segment: TechnicalAxonometricSegment;
   transform: (point: Point2D) => Point2D;
 }) {
-  if (!segment.fromProjected || !segment.toProjected) {
+  const segmentPath = svgPath(
+    segment.path
+      .map((point) => point.projected)
+      .filter((point): point is Point2D => point !== null)
+      .map(transform),
+  );
+
+  if (!segmentPath) {
     return null;
   }
 
-  const from = transform(segment.fromProjected);
-  const to = transform(segment.toProjected);
-
   return (
-    <line
+    <path
       data-axonometric-segment-status={segment.status}
+      d={segmentPath}
       fill="none"
       pointerEvents="none"
       stroke={segment.status === "pending" ? "#d97706" : "#263238"}
@@ -497,10 +502,6 @@ function AxonometricSegmentLine({
       strokeLinecap="round"
       strokeLinejoin="round"
       strokeWidth="3.1"
-      x1={from.x}
-      x2={to.x}
-      y1={from.y}
-      y2={to.y}
     />
   );
 }
@@ -811,12 +812,10 @@ function axonometricSourceBounds(view: TechnicalAxonometricView) {
   const points: Point2D[] = [];
 
   for (const segment of view.segments) {
-    if (segment.fromProjected) {
-      points.push(segment.fromProjected);
-    }
-
-    if (segment.toProjected) {
-      points.push(segment.toProjected);
+    for (const point of segment.path) {
+      if (point.projected) {
+        points.push(point.projected);
+      }
     }
   }
 

@@ -11,6 +11,11 @@ import type {
   ResolvedRouteSegment,
   RouteNode,
 } from "@/lib/routing/types";
+import {
+  createTechnicalRoutePolyline,
+  type TechnicalRoutePolylineElevationStatus,
+  type TechnicalRoutePolylinePointSource,
+} from "@/lib/sections/technicalRoutePolyline";
 import type { PipeDiameterReference } from "@/lib/calculation/pipeSystem";
 import type { TechnicalCalculationResult } from "@/lib/calculation/technicalTree";
 import type { TechnicalAdoptedDiameterValidation } from "@/lib/calculation/technicalAdoptedDiameterValidation";
@@ -61,12 +66,21 @@ export type TechnicalAxonometricSegment = {
   fromProjected: TechnicalAxonometricProjectedPoint | null;
   id: string;
   labelPosition: TechnicalAxonometricProjectedPoint | null;
+  path: TechnicalAxonometricSegmentPoint[];
   pendingReasons: string[];
   physicalLengthMeters: number | null;
   status: TechnicalAxonometricStatus;
   toNodeId: string;
   toProjected: TechnicalAxonometricProjectedPoint | null;
   zDeltaMeters: number | null;
+};
+
+export type TechnicalAxonometricSegmentPoint = {
+  elevationMeters: number;
+  elevationStatus: TechnicalRoutePolylineElevationStatus;
+  planPoint: Point2D;
+  projected: TechnicalAxonometricProjectedPoint | null;
+  source: TechnicalRoutePolylinePointSource;
 };
 
 export type TechnicalAxonometricAccessory = {
@@ -110,8 +124,14 @@ type RawNode = Omit<TechnicalAxonometricNode, "projected"> & {
 
 type RawSegment = Omit<
   TechnicalAxonometricSegment,
-  "fromProjected" | "labelPosition" | "toProjected"
->;
+  "fromProjected" | "labelPosition" | "path" | "toProjected"
+> & {
+  rawPath: RawSegmentPoint[];
+};
+
+type RawSegmentPoint = Omit<TechnicalAxonometricSegmentPoint, "projected"> & {
+  rawProjected: TechnicalAxonometricProjectedPoint | null;
+};
 
 type RawAccessory = Omit<TechnicalAxonometricAccessory, "projected"> & {
   rawProjected: TechnicalAxonometricProjectedPoint | null;
@@ -195,6 +215,7 @@ export function createTechnicalAxonometricView(params: {
   const rawSegments = sortRouteSegments(params.network.segments).map(
     (segment) => {
       const resultSegment = resultSegmentById.get(segment.id) ?? null;
+      const resolvedSegment = resolvedSegmentById.get(segment.id) ?? null;
 
       return createRawSegment({
         adoptedSegment: adoptedSegmentById.get(segment.id) ?? null,
@@ -204,6 +225,8 @@ export function createTechnicalAxonometricView(params: {
           resultSegment?.fromNodeId ?? segment.fromNodeId,
         ) ?? null,
         resultSegment,
+        resolvedSegment,
+        scaleMetersPerSourceUnit: params.scaleMetersPerSourceUnit,
         segmentId: segment.id,
         toNode:
           rawNodeById.get(resultSegment?.toNodeId ?? segment.toNodeId) ?? null,
@@ -223,6 +246,9 @@ export function createTechnicalAxonometricView(params: {
     .sort((first, second) => first.id.localeCompare(second.id));
   const projection = createProjectionTransform([
     ...[...rawNodeById.values()].map((node) => node.rawProjected),
+    ...rawSegments.flatMap((segment) =>
+      segment.rawPath.map((point) => point.rawProjected),
+    ),
     ...rawAccessories.map((accessory) => accessory.rawProjected),
   ]);
   const nodes = [...rawNodeById.values()].map((node) => ({
@@ -233,18 +259,28 @@ export function createTechnicalAxonometricView(params: {
   }));
   const nodeByIdWithProjection = new Map(nodes.map((node) => [node.id, node]));
   const segments = rawSegments.map((segment) => {
+    const { rawPath, ...segmentData } = segment;
+    const path = rawPath.map(({ rawProjected, ...point }) => ({
+      ...point,
+      projected: rawProjected ? projection.project(rawProjected) : null,
+    }));
     const fromProjected =
-      nodeByIdWithProjection.get(segment.fromNodeId)?.projected ?? null;
+      path[0]?.projected ??
+      nodeByIdWithProjection.get(segment.fromNodeId)?.projected ??
+      null;
     const toProjected =
-      nodeByIdWithProjection.get(segment.toNodeId)?.projected ?? null;
+      path[path.length - 1]?.projected ??
+      nodeByIdWithProjection.get(segment.toNodeId)?.projected ??
+      null;
 
     return {
-      ...segment,
+      ...segmentData,
       fromProjected,
       labelPosition:
         fromProjected && toProjected
           ? midpointProjected(fromProjected, toProjected)
           : null,
+      path,
       toProjected,
     };
   });
@@ -319,6 +355,8 @@ function createRawSegment(params: {
   resultSegment:
     | NonNullable<TechnicalCalculationResult["segments"]>[number]
     | null;
+  resolvedSegment: ResolvedRouteSegment | null;
+  scaleMetersPerSourceUnit: number | null;
   segmentId: string;
   toNode: RawNode | null;
 }): RawSegment {
@@ -336,10 +374,32 @@ function createRawSegment(params: {
     params.toNode?.point?.zMeters !== undefined
       ? params.toNode.point.zMeters - params.fromNode.point.zMeters
       : null;
+  const polyline = params.resolvedSegment
+    ? createTechnicalRoutePolyline(params.resolvedSegment)
+    : null;
+  const rawPath =
+    polyline?.points.map((point) => {
+      const point3d = createPoint3D(
+        {
+          ...point.planPoint,
+          z: point.elevationMeters,
+        },
+        params.scaleMetersPerSourceUnit,
+      );
+
+      return {
+        elevationMeters: point.elevationMeters,
+        elevationStatus: point.elevationStatus,
+        planPoint: point.planPoint,
+        rawProjected: projectPoint3D(point3d),
+        source: point.source,
+      };
+    }) ?? [];
   const pendingReasons = [
     ...(!params.fromNode?.point || !params.toNode?.point
       ? ["Falta posicion de extremo del tramo."]
       : []),
+    ...(polyline?.pendingReason ? [polyline.pendingReason] : []),
     ...(zDeltaMeters === null
       ? ["Diferencia de altura pendiente por z faltante."]
       : []),
@@ -363,6 +423,7 @@ function createRawSegment(params: {
     pendingReasons,
     physicalLengthMeters:
       params.resultSegment?.segmentPhysicalLengthMeters ?? null,
+    rawPath,
     status: pendingReasons.length > 0 ? "pending" : "resolved",
     toNodeId,
     zDeltaMeters,

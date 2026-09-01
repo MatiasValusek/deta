@@ -100,6 +100,57 @@ export function createStandardTechnicalAxonometricView(params: {
   return createTechnicalAxonometricView(params);
 }
 
+export function countStandardTechnicalReviewGeometryPendingItems(params: {
+  axonometricView: TechnicalAxonometricView | null;
+  sectionViews: StandardTechnicalSectionView[];
+}) {
+  const pendingKeys = new Set<string>();
+
+  for (const view of params.sectionViews) {
+    for (const item of view.projection.pendingItems) {
+      const key = technicalGeometryPendingKey({
+        message: item.reason,
+        sourceId: item.sourceId ?? item.id,
+        type: item.sourceType,
+      });
+
+      if (key) {
+        pendingKeys.add(key);
+      }
+    }
+
+    for (const segment of view.projection.segments) {
+      if (!segment.pendingReason) {
+        continue;
+      }
+
+      const key = technicalGeometryPendingKey({
+        message: segment.pendingReason,
+        sourceId: segment.segmentId,
+        type: "segment",
+      });
+
+      if (key) {
+        pendingKeys.add(key);
+      }
+    }
+  }
+
+  for (const item of params.axonometricView?.pendingItems ?? []) {
+    const key = technicalGeometryPendingKey({
+      message: item.message,
+      sourceId: item.sourceId,
+      type: item.type,
+    });
+
+    if (key) {
+      pendingKeys.add(key);
+    }
+  }
+
+  return pendingKeys.size;
+}
+
 function createAutomaticSectionProjectionLink(params: {
   axis: StandardTechnicalSectionAxis;
   equipment: WorkbenchEquipment[];
@@ -214,4 +265,43 @@ function normalizedScale(value: number | null) {
 
 function distanceBetween(first: Point2D, second: Point2D) {
   return Math.hypot(second.x - first.x, second.y - first.y);
+}
+
+function technicalGeometryPendingKey(params: {
+  message: string;
+  sourceId: string;
+  type: string;
+}) {
+  const normalized = params.message
+    .toLocaleLowerCase("es-AR")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+  const bucket = technicalGeometryPendingBucket(normalized);
+
+  return bucket ? `${bucket}:${params.type}:${params.sourceId}` : null;
+}
+
+function technicalGeometryPendingBucket(message: string) {
+  if (
+    /(^|[^a-z])z([^a-z]|$)/.test(message) ||
+    message.includes("cota") ||
+    message.includes("altura")
+  ) {
+    return "z";
+  }
+
+  if (message.includes("escala")) {
+    return "scale";
+  }
+
+  if (
+    message.includes("posicion") ||
+    message.includes("geometria") ||
+    message.includes("extremo") ||
+    message.includes("correspondencia")
+  ) {
+    return "geometry";
+  }
+
+  return null;
 }

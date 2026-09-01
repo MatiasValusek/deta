@@ -12,6 +12,12 @@ export type RouteReviewState = {
   totalApplianceCount: number;
 };
 
+export type ReviewCalculationReadiness = {
+  canContinueToCalculate: boolean;
+  observationCount: number;
+  technicalGeometryPendingCount: number;
+};
+
 export function createRouteReviewState(params: {
   equipment: WorkbenchEquipment[];
   hasActiveProposal: boolean;
@@ -43,5 +49,25 @@ export function createRouteReviewState(params: {
     hasActiveProposal: params.hasActiveProposal,
     routeRestrictionCount: params.routeRestrictionCount,
     totalApplianceCount,
+  };
+}
+
+export function createReviewCalculationReadiness(params: {
+  routeReviewState: RouteReviewState;
+  technicalGeometryPendingCount: number;
+}): ReviewCalculationReadiness {
+  const technicalGeometryPendingCount = Math.max(
+    0,
+    Math.trunc(params.technicalGeometryPendingCount),
+  );
+
+  return {
+    canContinueToCalculate:
+      params.routeReviewState.canOpenReview &&
+      technicalGeometryPendingCount === 0,
+    observationCount:
+      params.routeReviewState.routeRestrictionCount +
+      technicalGeometryPendingCount,
+    technicalGeometryPendingCount,
   };
 }

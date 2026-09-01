@@ -207,6 +207,7 @@ import {
   type SectionRouteHeightTarget,
 } from "@/lib/sections/routeHeightEditing";
 import {
+  countStandardTechnicalReviewGeometryPendingItems,
   createStandardTechnicalAxonometricView,
   createStandardTechnicalSectionView,
   routeInstallationBounds,
@@ -244,7 +245,10 @@ import {
   createPlanStageReadiness,
   type PlanStageReadiness,
 } from "@/lib/workbench/planStageFlow";
-import { createRouteReviewState } from "@/lib/workbench/reviewStage";
+import {
+  createReviewCalculationReadiness,
+  createRouteReviewState,
+} from "@/lib/workbench/reviewStage";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
 import { DxfViewer } from "./DxfViewer";
 import { EquipmentPanel } from "./EquipmentPanel";
@@ -1579,6 +1583,22 @@ export function DxfWorkbench() {
       technicalPhysicalAccessoryInventory,
     ],
   );
+  const technicalReviewGeometryPendingCount = useMemo(
+    () =>
+      countStandardTechnicalReviewGeometryPendingItems({
+        axonometricView: standardTechnicalAxonometricView,
+        sectionViews: Object.values(standardTechnicalSectionViews),
+      }),
+    [standardTechnicalAxonometricView, standardTechnicalSectionViews],
+  );
+  const reviewCalculationReadiness = useMemo(
+    () =>
+      createReviewCalculationReadiness({
+        routeReviewState,
+        technicalGeometryPendingCount: technicalReviewGeometryPendingCount,
+      }),
+    [routeReviewState, technicalReviewGeometryPendingCount],
+  );
   const selectedSectionRouteHeightTarget =
     activeMainStage === "review" || activeBase?.type === "section"
       ? sectionRouteHeightEditor?.target ?? null
@@ -2066,10 +2086,14 @@ export function DxfWorkbench() {
   }
 
   function handleContinueToCalculateFromReview() {
-    if (!canOpenReviewStage) {
-      setActiveMainStage("route");
-      setActiveRightPanelSection("route");
-      setRouteError("Confirma un recorrido valido antes de calcular.");
+    if (!canOpenCalculateStage) {
+      setActiveMainStage(canOpenReviewStage ? "review" : "route");
+      setActiveRightPanelSection(canOpenReviewStage ? "review" : "route");
+      setRouteError(
+        canOpenReviewStage
+          ? "Resuelve las observaciones tecnicas antes de calcular."
+          : "Confirma un recorrido valido antes de calcular.",
+      );
       return;
     }
 
@@ -6059,8 +6083,10 @@ export function DxfWorkbench() {
   const canOpenEquipmentStage = planStageReadiness.canContinueToEquipment;
   const canOpenRouteStage =
     canOpenEquipmentStage && isEquipmentTraceReady;
-  const canOpenCalculateStage = canOpenReviewStage;
+  const canOpenCalculateStage =
+    reviewCalculationReadiness.canContinueToCalculate;
   const canOpenDeliverStage = technicalCalculationResult?.status === "valid";
+  const reviewObservationCount = reviewCalculationReadiness.observationCount;
 
   function canOpenWorkflowStage(stage: MainWorkflowStageId) {
     if (stage === "plan") {
@@ -6097,8 +6123,14 @@ export function DxfWorkbench() {
   const isReviewStage = activeWorkflowStage === "review";
   const reviewSummaryText = !planBase
     ? "Sin Planta"
-    : canOpenReviewStage
+    : canOpenCalculateStage
       ? "Listo para calcular"
+      : canOpenReviewStage
+        ? `${technicalReviewGeometryPendingCount} ${
+            technicalReviewGeometryPendingCount === 1
+              ? "observacion tecnica"
+              : "observaciones tecnicas"
+          }`
       : "Falta recorrido confirmado";
   const reviewTechnicalViewItems: ReviewTechnicalViewItem[] = useMemo(
     () => [
@@ -6321,8 +6353,8 @@ export function DxfWorkbench() {
         <ReviewPanel
           activeViewId={activeReviewViewId}
           connectedApplianceCount={routeReviewState.connectedApplianceCount}
-          hasValidRoute={canOpenReviewStage}
-          routeRestrictionCount={routeRestrictionCount}
+          hasValidRoute={canOpenCalculateStage}
+          routeRestrictionCount={reviewObservationCount}
           totalApplianceCount={routeReviewState.totalApplianceCount}
           views={reviewTechnicalViewItems}
           onContinueToCalculate={handleContinueToCalculateFromReview}

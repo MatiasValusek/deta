@@ -29,14 +29,16 @@ import {
   type SectionRegistration,
 } from "@/lib/sections/registration";
 import type { SectionRouteHeightTarget } from "./routeHeightEditing";
+import {
+  createTechnicalRoutePolyline,
+  type TechnicalRoutePolylinePoint,
+  type TechnicalRoutePolylinePointSource,
+} from "./technicalRoutePolyline";
 
 export type SectionRouteProjectionStatus = "pending" | "resolved";
 
 export type SectionRouteProjectedPointSource =
-  | "connection"
-  | "node"
-  | "vertex"
-  | "vertical";
+  TechnicalRoutePolylinePointSource;
 
 export type SectionRouteProjectedPoint = {
   elevationMeters: number;
@@ -261,39 +263,16 @@ function createProjectedSegment(params: {
   segment: ResolvedRouteSegment;
   toleranceRatio: number;
 }): SectionRouteProjectedSegment | null {
-  const fromElevation = explicitZMeters(params.segment.from);
-  const toElevation = explicitZMeters(params.segment.to);
-
-  if (fromElevation === null || toElevation === null) {
-    const pendingReason = "Falta cota Z confirmada en un extremo del tramo.";
-    params.pendingItems.push({
-      id: `section-route:segment:${params.segment.id}:z`,
-      reason: pendingReason,
-      sourceId: params.segment.id,
-      sourceType: "segment",
-    });
-
-    return {
-      adoptedDiameter: params.adoptedDiameter,
-      adoptedDiameterLabel: formatDiameterSymbol(params.adoptedDiameter),
-      fromNodeId: params.segment.fromNodeId,
-      id: `section-route:segment:${params.segment.id}`,
-      pendingReason,
-      physicalLengthMeters: params.resultPhysicalLengthMeters,
-      points: [],
-      segmentId: params.segment.id,
-      status: "pending",
-      toNodeId: params.segment.toNodeId,
-    };
-  }
-
-  const projectedPoints = createElevatedRoutePath({
-    fromElevation,
-    segment: params.segment,
-    toElevation,
-  }).map((point) =>
+  const polyline = createTechnicalRoutePolyline(params.segment);
+  const projectedPoints = polyline.points.map((point) =>
     projectPathPoint({
-      elevatedPoint: point,
+      elevatedPoint: {
+        ...point,
+        heightTarget: sectionHeightTargetForPolylinePoint(
+          point,
+          params.segment.id,
+        ),
+      },
       link: params.link,
       sectionScaleMetersPerSourceUnit: params.sectionScaleMetersPerSourceUnit,
     }),
@@ -311,15 +290,19 @@ function createProjectedSegment(params: {
     (point) => !tWithinSectionSpan(point.t, params.toleranceRatio),
   );
   const missingDiameter = !params.adoptedDiameter;
-  const pendingReason = outsideRegisteredSpan
-    ? "El tramo excede los extremos registrados del corte."
-    : missingDiameter
-      ? "Falta diametro adoptado para rotular el tramo en corte."
-      : null;
+  const pendingReason = polyline.pendingReason
+    ? polyline.pendingReason
+    : outsideRegisteredSpan
+      ? "El tramo excede los extremos registrados del corte."
+      : missingDiameter
+        ? "Falta diametro adoptado para rotular el tramo en corte."
+        : null;
 
   if (pendingReason) {
     params.pendingItems.push({
-      id: `section-route:segment:${params.segment.id}`,
+      id: `section-route:segment:${params.segment.id}${
+        polyline.pendingReason ? ":z" : ""
+      }`,
       reason: pendingReason,
       sourceId: params.segment.id,
       sourceType: "segment",
@@ -641,103 +624,9 @@ function createProjectedEquipmentNode(params: {
   };
 }
 
-function createElevatedRoutePath(params: {
-  fromElevation: number;
-  segment: ResolvedRouteSegment;
-  toElevation: number;
-}) {
-  const rawPath = [
-    params.segment.from,
-    ...(params.segment.vertices ?? []).map((point) => ({
-      ...point,
-    })),
-    params.segment.to,
-  ];
-  const hasExplicitIntermediateElevation = rawPath
-    .slice(1, -1)
-    .some(hasExplicitZ);
-  const points: Array<{
-    elevationMeters: number;
-    heightTarget: SectionRouteHeightTarget | null;
-    planPoint: Point2D;
-    source: SectionRouteProjectedPointSource;
-  }> = [
-    {
-      elevationMeters: params.fromElevation,
-      heightTarget: {
-        kind: "node",
-        nodeId: params.segment.fromNodeId,
-      },
-      planPoint: rawPath[0] as Point2D,
-      source: "node",
-    },
-  ];
-  const terminalHeightTarget: SectionRouteHeightTarget = {
-    kind: "node",
-    nodeId: params.segment.toNodeId,
-  };
-
-  if (
-    !hasExplicitIntermediateElevation &&
-    Math.abs(params.fromElevation - params.toElevation) > Number.EPSILON
-  ) {
-    points.push({
-      elevationMeters: params.toElevation,
-      heightTarget: terminalHeightTarget,
-      planPoint: rawPath[0] as Point2D,
-      source: "vertical",
-    });
-  }
-
-  let carriedElevation =
-    hasExplicitIntermediateElevation ? params.fromElevation : params.toElevation;
-
-  let previousPlanPoint = rawPath[0] as Point2D;
-
-  rawPath.slice(1, -1).forEach((planPoint, vertexIndex) => {
-    const previousElevation = carriedElevation;
-    let pointSource: SectionRouteProjectedPointSource = "vertex";
-    let heightTarget: SectionRouteHeightTarget | null =
-      hasExplicitIntermediateElevation ? null : terminalHeightTarget;
-
-    if (hasExplicitZ(planPoint)) {
-      carriedElevation = explicitZMeters(planPoint) as number;
-      pointSource =
-        samePlanPoint(previousPlanPoint, planPoint) &&
-        Math.abs(carriedElevation - previousElevation) > Number.EPSILON
-          ? "vertical"
-          : "vertex";
-      heightTarget = {
-        kind: "segment_vertex",
-        segmentId: params.segment.id,
-        vertexIndex,
-      };
-    }
-
-    points.push({
-      elevationMeters: carriedElevation,
-      heightTarget,
-      planPoint,
-      source: pointSource,
-    });
-    previousPlanPoint = planPoint;
-  });
-  points.push({
-    elevationMeters: params.toElevation,
-    heightTarget: terminalHeightTarget,
-    planPoint: rawPath[rawPath.length - 1] as Point2D,
-    source: "connection",
-  });
-
-  return dedupeProjectedPathSource(points);
-}
-
 function projectPathPoint(params: {
-  elevatedPoint: {
-    elevationMeters: number;
+  elevatedPoint: TechnicalRoutePolylinePoint & {
     heightTarget: SectionRouteHeightTarget | null;
-    planPoint: Point2D;
-    source: SectionRouteProjectedPointSource;
   };
   link: SectionRouteProjectionLink & { registration: SectionRegistration };
   sectionScaleMetersPerSourceUnit: number;
@@ -760,6 +649,29 @@ function projectPathPoint(params: {
     source: params.elevatedPoint.source,
     t: projected.t,
   };
+}
+
+function sectionHeightTargetForPolylinePoint(
+  point: TechnicalRoutePolylinePoint,
+  segmentId: string,
+): SectionRouteHeightTarget | null {
+  if (
+    point.segmentVertexIndex !== null &&
+    point.elevationStatus === "explicit"
+  ) {
+    return {
+      kind: "segment_vertex",
+      segmentId,
+      vertexIndex: point.segmentVertexIndex,
+    };
+  }
+
+  return point.targetNodeId
+    ? {
+        kind: "node",
+        nodeId: point.targetNodeId,
+      }
+    : null;
 }
 
 function validateProjectionPrerequisites(params: {
@@ -838,30 +750,6 @@ function createPendingProjection(
 
 function tWithinSectionSpan(t: number, toleranceRatio: number) {
   return t >= -toleranceRatio && t <= 1 + toleranceRatio;
-}
-
-function dedupeProjectedPathSource<T extends { elevationMeters: number; planPoint: Point2D; source: SectionRouteProjectedPointSource }>(
-  points: T[],
-) {
-  const deduped: T[] = [];
-
-  for (const point of points) {
-    const previous = deduped[deduped.length - 1];
-
-    if (
-      previous &&
-      samePlanPoint(previous.planPoint, point.planPoint) &&
-      Math.abs(previous.elevationMeters - point.elevationMeters) <=
-        Number.EPSILON &&
-      previous.source === point.source
-    ) {
-      continue;
-    }
-
-    deduped.push(point);
-  }
-
-  return deduped;
 }
 
 function dedupePendingItems(items: SectionRouteProjectionPendingItem[]) {
@@ -1039,13 +927,6 @@ function formatDiameterSymbol(diameter: PipeDiameterReference | null) {
   return diameter
     ? `Ø${diameter.externalDiameterMillimeters}`
     : "Ø pendiente";
-}
-
-function samePlanPoint(first: Point2D, second: Point2D) {
-  return (
-    Math.abs(first.x - second.x) <= Number.EPSILON &&
-    Math.abs(first.y - second.y) <= Number.EPSILON
-  );
 }
 
 function hasExplicitZ(point: Point2D) {

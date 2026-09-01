@@ -547,7 +547,17 @@ function assertMissingZIsPending(fixture: SectionRouteProjectionFixture) {
 
   assertEqual(projection.status, "pending");
   assertEqual(branch.status, "pending");
-  assertEqual(branch.points.length, 0);
+  assertEqual(
+    branch.points.map((point) => point.source).join(","),
+    "node,vertical,vertex,vertex,connection",
+  );
+  assertEqual(
+    branch.points
+      .filter((point) => point.source !== "vertical")
+      .map((point) => `${point.planPoint.x}:${point.planPoint.y}`)
+      .join("|"),
+    "2:0|2:1.4|4.2:1.4|4.6:1.4",
+  );
   assert(
     projection.pendingItems.some(
       (item) =>
@@ -555,7 +565,7 @@ function assertMissingZIsPending(fixture: SectionRouteProjectionFixture) {
         item.sourceId === "D-1" &&
         item.reason.includes("Falta cota Z"),
     ),
-    "La falta de Z debe quedar pendiente sin inferir geometria en corte.",
+    "La falta de Z debe quedar pendiente sin desconectar la geometria en corte.",
   );
 }
 
