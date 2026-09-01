@@ -43,6 +43,25 @@ type SectionHeightHandlePoint = {
   target: SectionRouteHeightTarget;
 };
 
+type CanvasBounds = {
+  maxX: number;
+  maxY: number;
+  minX: number;
+  minY: number;
+};
+
+type CanvasTransformOptions = {
+  minPadding: number;
+  paddingXRatio: number;
+  paddingYRatio: number;
+};
+
+type LabelOffset = {
+  anchor: "end" | "middle" | "start";
+  x: number;
+  y: number;
+};
+
 const CANVAS_WIDTH = 960;
 const CANVAS_HEIGHT = 560;
 const CANVAS_PADDING = 46;
@@ -729,32 +748,26 @@ function TechnicalViewWarning({ text }: { text: string }) {
 }
 
 function createSectionCanvasTransform(view: StandardTechnicalSectionView) {
-  const bounds = expandFlatBounds(sectionSourceBounds(view), {
+  return createCanvasTransform(sectionSourceBounds(view), {
     minPadding: 0.4,
     paddingXRatio: 0.05,
     paddingYRatio: 0.12,
   });
-  const scale = Math.min(
-    (CANVAS_WIDTH - CANVAS_PADDING * 2) / (bounds.maxX - bounds.minX),
-    (CANVAS_HEIGHT - CANVAS_PADDING * 2) / (bounds.maxY - bounds.minY),
-  );
-  const contentWidth = (bounds.maxX - bounds.minX) * scale;
-  const contentHeight = (bounds.maxY - bounds.minY) * scale;
-  const offsetX = (CANVAS_WIDTH - contentWidth) / 2;
-  const offsetY = (CANVAS_HEIGHT - contentHeight) / 2;
-
-  return (point: Point2D): Point2D => ({
-    x: roundCanvas(offsetX + (point.x - bounds.minX) * scale),
-    y: roundCanvas(offsetY + (point.y - bounds.minY) * scale),
-  });
 }
 
 function createAxonometricCanvasTransform(view: TechnicalAxonometricView) {
-  const bounds = expandFlatBounds(axonometricSourceBounds(view), {
+  return createCanvasTransform(axonometricSourceBounds(view), {
     minPadding: 0.3,
     paddingXRatio: 0.04,
     paddingYRatio: 0.08,
   });
+}
+
+function createCanvasTransform(
+  sourceBounds: CanvasBounds,
+  options: CanvasTransformOptions,
+) {
+  const bounds = expandFlatBounds(sourceBounds, options);
   const scale = Math.min(
     (CANVAS_WIDTH - CANVAS_PADDING * 2) / (bounds.maxX - bounds.minX),
     (CANVAS_HEIGHT - CANVAS_PADDING * 2) / (bounds.maxY - bounds.minY),
@@ -855,17 +868,8 @@ function boundsForPoints(points: Point2D[]) {
 }
 
 function expandFlatBounds(
-  bounds: {
-    maxX: number;
-    maxY: number;
-    minX: number;
-    minY: number;
-  },
-  options: {
-    minPadding: number;
-    paddingXRatio: number;
-    paddingYRatio: number;
-  },
+  bounds: CanvasBounds,
+  options: CanvasTransformOptions,
 ) {
   const width = Math.max(bounds.maxX - bounds.minX, 1);
   const height = Math.max(bounds.maxY - bounds.minY, 1);
@@ -922,7 +926,7 @@ function sectionEquipmentLabelOffset(
   index: number,
   total: number,
   isSupply: boolean,
-): { anchor: "end" | "middle" | "start"; x: number; y: number } {
+): LabelOffset {
   if (isSupply) {
     return { anchor: "middle", x: 0, y: -16 };
   }
@@ -931,7 +935,7 @@ function sectionEquipmentLabelOffset(
     return { anchor: "middle", x: 0, y: 20 };
   }
 
-  const slots: Array<{ anchor: "end" | "middle" | "start"; x: number; y: number }> = [
+  const slots: LabelOffset[] = [
     { anchor: "start", x: 12, y: 20 },
     { anchor: "end", x: -12, y: 20 },
     { anchor: "start", x: 12, y: -14 },
@@ -977,8 +981,8 @@ function axonometricNodeLabel(
 
 function axonometricNodeLabelOffset(
   index: number,
-): { anchor: "end" | "middle" | "start"; x: number; y: number } {
-  const slots: Array<{ anchor: "end" | "middle" | "start"; x: number; y: number }> = [
+): LabelOffset {
+  const slots: LabelOffset[] = [
     { anchor: "middle", x: 0, y: -17 },
     { anchor: "start", x: 18, y: 18 },
     { anchor: "end", x: -18, y: 18 },
