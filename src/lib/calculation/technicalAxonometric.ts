@@ -3,8 +3,6 @@ import type { Point2D } from "@/lib/geometry/types";
 import {
   buildEquipmentIndex,
   getRouteNeighbors,
-  resolveRouteNodePosition,
-  resolveRouteSegments,
 } from "@/lib/routing/network";
 import type {
   ManualRouteNetwork,
@@ -16,6 +14,12 @@ import {
   type TechnicalRoutePolylineElevationStatus,
   type TechnicalRoutePolylinePointSource,
 } from "@/lib/sections/technicalRoutePolyline";
+import {
+  createTechnicalRouteNodeElevationIndex,
+  resolveTechnicalRouteNodePosition,
+  resolveTechnicalRouteSegments,
+  type TechnicalRouteNodeElevation,
+} from "@/lib/sections/technicalRouteElevation";
 import type { PipeDiameterReference } from "@/lib/calculation/pipeSystem";
 import type { TechnicalCalculationResult } from "@/lib/calculation/technicalTree";
 import type { TechnicalAdoptedDiameterValidation } from "@/lib/calculation/technicalAdoptedDiameterValidation";
@@ -183,6 +187,10 @@ export function createTechnicalAxonometricView(params: {
 
   const equipmentById = buildEquipmentIndex(params.equipment);
   const nodeById = new Map(params.network.nodes.map((node) => [node.id, node]));
+  const nodeElevationById = createTechnicalRouteNodeElevationIndex({
+    equipment: params.equipment,
+    network: params.network,
+  });
   const neighbors = getRouteNeighbors(params.network);
   const resultSegmentById = new Map(
     params.result.segments.map((segment) => [segment.segmentId, segment]),
@@ -194,10 +202,11 @@ export function createTechnicalAxonometricView(params: {
     ]) ?? [],
   );
   const resolvedSegmentById = new Map(
-    resolveRouteSegments(params.network, params.equipment).map((segment) => [
-      segment.id,
-      segment,
-    ]),
+    resolveTechnicalRouteSegments({
+      equipment: params.equipment,
+      network: params.network,
+      nodeElevationById,
+    }).map((segment) => [segment.id, segment]),
   );
   const rawNodeById = new Map(
     sortNodes(params.network.nodes).map((node) => {
@@ -205,6 +214,7 @@ export function createTechnicalAxonometricView(params: {
         equipmentById,
         neighbors,
         node,
+        nodeElevationById,
         nodeLabels: params.result?.nodeLabels ?? {},
         scaleMetersPerSourceUnit: params.scaleMetersPerSourceUnit,
       });
@@ -238,6 +248,7 @@ export function createTechnicalAxonometricView(params: {
       createRawAccessory({
         equipmentById,
         item,
+        nodeElevationById,
         nodeById,
         resolvedSegmentById,
         scaleMetersPerSourceUnit: params.scaleMetersPerSourceUnit,
@@ -318,18 +329,27 @@ function createRawNode(params: {
   equipmentById: Map<string, WorkbenchEquipment>;
   neighbors: Map<string, Set<string>>;
   node: RouteNode;
+  nodeElevationById: Map<string, TechnicalRouteNodeElevation>;
   nodeLabels: Record<string, string>;
   scaleMetersPerSourceUnit: number | null;
 }): RawNode {
-  const point = resolveRouteNodePosition(params.node, params.equipmentById);
+  const point = resolveTechnicalRouteNodePosition({
+    equipmentById: params.equipmentById,
+    node: params.node,
+    nodeElevationById: params.nodeElevationById,
+  });
   const degree = params.neighbors.get(params.node.id)?.size ?? 0;
   const point3d = point
     ? createPoint3D(point, params.scaleMetersPerSourceUnit)
     : null;
+  const elevation = params.nodeElevationById.get(params.node.id) ?? null;
   const pendingReasons = [
     ...(!point ? ["Falta posicion del nodo."] : []),
     ...(point && point3d?.zMeters === null
-      ? ["Altura z pendiente en el nodo."]
+      ? [
+          elevation?.reason ??
+            `Altura z pendiente en el nodo ${params.node.id}.`,
+        ]
       : []),
   ];
 
@@ -433,6 +453,7 @@ function createRawSegment(params: {
 function createRawAccessory(params: {
   equipmentById: Map<string, WorkbenchEquipment>;
   item: TechnicalPhysicalAccessory;
+  nodeElevationById: Map<string, TechnicalRouteNodeElevation>;
   nodeById: Map<string, RouteNode>;
   resolvedSegmentById: Map<string, ResolvedRouteSegment>;
   scaleMetersPerSourceUnit: number | null;
@@ -440,6 +461,7 @@ function createRawAccessory(params: {
   const nodePoint = params.item.nodeId
     ? resolveNodePosition(
         params.item.nodeId,
+        params.nodeElevationById,
         params.nodeById,
         params.equipmentById,
       )
@@ -520,9 +542,27 @@ function terminalRouteAccessoryPlanPoint(params: {
   const point =
     terminalKind === "terminal"
       ? segment.path[segment.path.length - 1]
-      : segment.path[Math.max(0, segment.path.length - 2)];
+      : terminalValvePlanPoint(segment);
 
   return point ? { ...point } : null;
+}
+
+function terminalValvePlanPoint(segment: ResolvedRouteSegment): Point2D | null {
+  const terminalPoint = segment.path[segment.path.length - 1];
+
+  if (!terminalPoint) {
+    return null;
+  }
+
+  for (let index = segment.path.length - 2; index >= 0; index -= 1) {
+    const point = segment.path[index];
+
+    if (point && !samePlanPoint(point, terminalPoint)) {
+      return point;
+    }
+  }
+
+  return segment.path[Math.max(0, segment.path.length - 2)] ?? null;
 }
 
 function terminalRouteAccessoryKind(
@@ -727,12 +767,19 @@ function nodeLabel(
 
 function resolveNodePosition(
   nodeId: string,
+  nodeElevationById: Map<string, TechnicalRouteNodeElevation>,
   nodeById: Map<string, RouteNode>,
   equipmentById: Map<string, WorkbenchEquipment>,
 ) {
   const node = nodeById.get(nodeId);
 
-  return node ? resolveRouteNodePosition(node, equipmentById) : null;
+  return node
+    ? resolveTechnicalRouteNodePosition({
+        equipmentById,
+        node,
+        nodeElevationById,
+      })
+    : null;
 }
 
 function physicalAccessoryDiameterLabel(item: TechnicalPhysicalAccessory) {
@@ -756,6 +803,13 @@ function formatDiameterSymbol(diameter: PipeDiameterReference | null) {
 
 function pointHasExplicitZ(point: Point2D) {
   return typeof point.z === "number" && Number.isFinite(point.z);
+}
+
+function samePlanPoint(first: Point2D, second: Point2D) {
+  return (
+    Math.abs(first.x - second.x) <= Number.EPSILON &&
+    Math.abs(first.y - second.y) <= Number.EPSILON
+  );
 }
 
 function sortNodes(nodes: RouteNode[]) {

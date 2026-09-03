@@ -48,8 +48,11 @@ export function createTechnicalRoutePolyline(
   const hasExplicitIntermediateElevation = rawPath
     .slice(1, -1)
     .some((point) => explicitZMeters(point.point) !== null);
-  const hasPendingElevation =
-    explicitZMeters(first.point) === null || explicitZMeters(last.point) === null;
+  const missingEndpointNodeIds = [
+    explicitZMeters(first.point) === null ? segment.fromNodeId : null,
+    explicitZMeters(last.point) === null ? segment.toNodeId : null,
+  ].filter((nodeId): nodeId is string => nodeId !== null);
+  const hasPendingElevation = missingEndpointNodeIds.length > 0;
   const points: TechnicalRoutePolylinePoint[] = [
     {
       elevationMeters: fromElevation,
@@ -133,10 +136,25 @@ export function createTechnicalRoutePolyline(
   return {
     hasPendingElevation,
     pendingReason: hasPendingElevation
-      ? "Falta cota Z confirmada en un extremo del tramo."
+      ? formatMissingEndpointElevationReason(segment, missingEndpointNodeIds)
       : null,
     points: dedupeTechnicalRoutePolylinePoints(points),
   };
+}
+
+function formatMissingEndpointElevationReason(
+  segment: ResolvedRouteSegment,
+  nodeIds: string[],
+) {
+  if (nodeIds.length > 1) {
+    return `Falta cota Z en los extremos ${nodeIds.join(
+      " y ",
+    )} del tramo ${segment.id}.`;
+  }
+
+  const nodeId = nodeIds[0] ?? "sin identificar";
+
+  return `Falta cota Z en el extremo ${nodeId} del tramo ${segment.id}.`;
 }
 
 function createRawSegmentPath(segment: ResolvedRouteSegment) {

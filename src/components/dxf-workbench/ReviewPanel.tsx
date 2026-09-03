@@ -6,20 +6,29 @@ export type ReviewTechnicalViewItem = {
 };
 
 type ReviewPanelProps = {
+  calculationObservation: {
+    actionLabel: string;
+    message: string;
+    sourceLabel: string;
+    viewLabel: string;
+  } | null;
   calculationBlockReason: string | null;
   connectedApplianceCount: number;
   hasValidRoute: boolean;
   routeRestrictionCount: number;
   totalApplianceCount: number;
+  onOpenCalculationObservation: () => void;
   onContinueToCalculate: () => void;
 };
 
 export function ReviewPanel({
+  calculationObservation,
   calculationBlockReason,
   connectedApplianceCount,
   hasValidRoute,
   routeRestrictionCount,
   totalApplianceCount,
+  onOpenCalculationObservation,
   onContinueToCalculate,
 }: ReviewPanelProps) {
   const generalStatus = hasValidRoute
@@ -46,6 +55,22 @@ export function ReviewPanel({
         {!hasValidRoute && calculationBlockReason ? (
           <div className="mt-2 rounded border border-[#f1d28a] bg-[#fffaf0] px-2 py-1 text-[var(--warning)]">
             {calculationBlockReason}
+          </div>
+        ) : null}
+        {!hasValidRoute && calculationObservation ? (
+          <div className="mt-2 rounded border border-[#f1d28a] bg-[#fffaf0] px-2 py-2 text-[var(--warning)]">
+            <div className="font-semibold">
+              {calculationObservation.sourceLabel} -{" "}
+              {calculationObservation.viewLabel}
+            </div>
+            <p className="mt-1">{calculationObservation.message}</p>
+            <button
+              className="mt-2 rounded border border-[#d97706] bg-white px-2 py-1 font-medium hover:bg-[#fffbeb]"
+              type="button"
+              onClick={onOpenCalculationObservation}
+            >
+              {calculationObservation.actionLabel}
+            </button>
           </div>
         ) : null}
       </section>

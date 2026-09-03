@@ -11,11 +11,11 @@ import type {
 } from "@/lib/calculation/technicalPhysicalAccessories";
 import type { TechnicalCalculationResult } from "@/lib/calculation/technicalTree";
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
+import { withPointZ } from "@/lib/geometry/height";
 import type { Point2D } from "@/lib/geometry/types";
 import {
   buildEquipmentIndex,
   resolveRouteNodePosition,
-  resolveRouteSegments,
 } from "@/lib/routing/network";
 import type {
   ManualRouteNetwork,
@@ -34,6 +34,11 @@ import {
   type TechnicalRoutePolylinePoint,
   type TechnicalRoutePolylinePointSource,
 } from "./technicalRoutePolyline";
+import {
+  createTechnicalRouteNodeElevationIndex,
+  resolveTechnicalRouteSegments,
+  type TechnicalRouteNodeElevation,
+} from "./technicalRouteElevation";
 
 export type SectionRouteProjectionStatus = "pending" | "resolved";
 
@@ -145,7 +150,15 @@ export function createSectionRouteProjection(params: {
   const resultSegmentById = new Map(
     (params.result?.segments ?? []).map((segment) => [segment.segmentId, segment]),
   );
-  const resolvedSegments = resolveRouteSegments(params.network, params.equipment);
+  const routeNodeElevations = createTechnicalRouteNodeElevationIndex({
+    equipment: params.equipment,
+    network: params.network,
+  });
+  const resolvedSegments = resolveTechnicalRouteSegments({
+    equipment: params.equipment,
+    network: params.network,
+    nodeElevationById: routeNodeElevations,
+  });
   const resolvedSegmentById = new Map(
     resolvedSegments.map((segment) => [segment.id, segment]),
   );
@@ -220,6 +233,7 @@ export function createSectionRouteProjection(params: {
     link,
     network: params.network,
     pendingItems,
+    routeNodeElevations,
     sectionScaleMetersPerSourceUnit,
     toleranceRatio,
   });
@@ -506,6 +520,7 @@ function createProjectedEquipment(params: {
   link: SectionRouteProjectionLink & { registration: SectionRegistration };
   network: ManualRouteNetwork;
   pendingItems: SectionRouteProjectionPendingItem[];
+  routeNodeElevations: Map<string, TechnicalRouteNodeElevation>;
   sectionScaleMetersPerSourceUnit: number;
   toleranceRatio: number;
 }) {
@@ -518,6 +533,7 @@ function createProjectedEquipment(params: {
         link: params.link,
         node,
         pendingItems: params.pendingItems,
+        routeNodeElevations: params.routeNodeElevations,
         sectionScaleMetersPerSourceUnit:
           params.sectionScaleMetersPerSourceUnit,
         toleranceRatio: params.toleranceRatio,
@@ -534,6 +550,7 @@ function createProjectedEquipmentNode(params: {
   link: SectionRouteProjectionLink & { registration: SectionRegistration };
   node: RouteNode;
   pendingItems: SectionRouteProjectionPendingItem[];
+  routeNodeElevations: Map<string, TechnicalRouteNodeElevation>;
   sectionScaleMetersPerSourceUnit: number;
   toleranceRatio: number;
 }): SectionRouteProjectedEquipment | null {
@@ -548,22 +565,26 @@ function createProjectedEquipmentNode(params: {
     return null;
   }
 
-  const zMeters = explicitZMeters(planPoint);
+  const elevation = params.routeNodeElevations.get(params.node.id) ?? null;
+  const zMeters = explicitZMeters(planPoint) ?? elevation?.zMeters ?? null;
 
   if (zMeters === null) {
     params.pendingItems.push({
       id: `section-route:equipment:${params.node.id}:z`,
-      reason: "Falta cota Z confirmada del equipo conectado.",
+      reason:
+        elevation?.reason ??
+        `Falta cota Z confirmada del equipo conectado en ${params.node.id}.`,
       sourceId: params.node.id,
       sourceType: "equipment",
     });
     return null;
   }
 
+  const projectedPlanPoint = withPointZ(planPoint, zMeters);
   const projected = projectPlanPointToSection({
     elevationMeters: zMeters,
     planEnd: params.link.planEnd,
-    planPoint,
+    planPoint: projectedPlanPoint,
     planStart: params.link.planStart,
     registration: params.link.registration,
     sectionScaleMetersPerSourceUnit: params.sectionScaleMetersPerSourceUnit,
@@ -573,42 +594,34 @@ function createProjectedEquipmentNode(params: {
     return null;
   }
 
-  const bodyPlanPoint = equipment.bodyPoint ?? planPoint;
-  const bodyZ = explicitZMeters(bodyPlanPoint);
+  const bodyPlanPoint = equipment.bodyPoint ?? projectedPlanPoint;
+  const bodyZ = explicitZMeters(bodyPlanPoint) ?? zMeters;
+  const projectedBodyPlanPoint = withPointZ(bodyPlanPoint, bodyZ);
   let bodySectionPoint: Point2D | null = null;
 
-  if (bodyZ === null) {
+  const projectedBody = projectPlanPointToSection({
+    elevationMeters: bodyZ,
+    planEnd: params.link.planEnd,
+    planPoint: projectedBodyPlanPoint,
+    planStart: params.link.planStart,
+    registration: params.link.registration,
+    sectionScaleMetersPerSourceUnit: params.sectionScaleMetersPerSourceUnit,
+  });
+
+  if (tWithinSectionSpan(projectedBody.t, params.toleranceRatio)) {
+    bodySectionPoint = projectedBody.sectionPoint;
+  } else {
     params.pendingItems.push({
-      id: `section-route:equipment:${params.node.id}:body-z`,
-      reason: "Falta cota Z confirmada del simbolo del equipo.",
+      id: `section-route:equipment:${params.node.id}:body-span`,
+      reason: "El simbolo del equipo queda fuera de los extremos registrados del corte.",
       sourceId: params.node.id,
       sourceType: "equipment",
     });
-  } else {
-    const projectedBody = projectPlanPointToSection({
-      elevationMeters: bodyZ,
-      planEnd: params.link.planEnd,
-      planPoint: bodyPlanPoint,
-      planStart: params.link.planStart,
-      registration: params.link.registration,
-      sectionScaleMetersPerSourceUnit: params.sectionScaleMetersPerSourceUnit,
-    });
-
-    if (tWithinSectionSpan(projectedBody.t, params.toleranceRatio)) {
-      bodySectionPoint = projectedBody.sectionPoint;
-    } else {
-      params.pendingItems.push({
-        id: `section-route:equipment:${params.node.id}:body-span`,
-        reason: "El simbolo del equipo queda fuera de los extremos registrados del corte.",
-        sourceId: params.node.id,
-        sourceType: "equipment",
-      });
-    }
   }
 
   return {
     anchorStatus: equipment.wallAnchor?.status ?? null,
-    bodyPlanPoint,
+    bodyPlanPoint: projectedBodyPlanPoint,
     bodySectionPoint,
     equipmentId: equipment.id,
     heightTarget: {
@@ -617,7 +630,7 @@ function createProjectedEquipmentNode(params: {
     },
     label: equipment.name,
     nodeId: params.node.id,
-    planPoint,
+    planPoint: projectedPlanPoint,
     role: equipment.role,
     sectionPoint: projected.sectionPoint,
     zMeters,
@@ -792,7 +805,7 @@ function terminalRouteAccessoryPlanPoint(params: {
   const point =
     terminalKind === "terminal"
       ? segment.path[segment.path.length - 1]
-      : segment.path[Math.max(0, segment.path.length - 2)];
+      : terminalValvePlanPoint(segment);
 
   return point ? { ...point } : null;
 }
@@ -808,9 +821,27 @@ function terminalRouteSegmentAccessoryPlanPoint(params: {
   const point =
     params.accessoryKind === "terminal"
       ? params.segment.path[params.segment.path.length - 1]
-      : params.segment.path[Math.max(0, params.segment.path.length - 2)];
+      : terminalValvePlanPoint(params.segment);
 
   return point ? { ...point } : null;
+}
+
+function terminalValvePlanPoint(segment: ResolvedRouteSegment): Point2D | null {
+  const terminalPoint = segment.path[segment.path.length - 1];
+
+  if (!terminalPoint) {
+    return null;
+  }
+
+  for (let index = segment.path.length - 2; index >= 0; index -= 1) {
+    const point = segment.path[index];
+
+    if (point && !samePlanPoint(point, terminalPoint)) {
+      return point;
+    }
+  }
+
+  return segment.path[Math.max(0, segment.path.length - 2)] ?? null;
 }
 
 function terminalRouteAccessoryKind(
@@ -939,4 +970,11 @@ function explicitZMeters(point: Point2D) {
 
 function distanceBetween(first: Point2D, second: Point2D) {
   return Math.hypot(first.x - second.x, first.y - second.y);
+}
+
+function samePlanPoint(first: Point2D, second: Point2D) {
+  return (
+    Math.abs(first.x - second.x) <= Number.EPSILON &&
+    Math.abs(first.y - second.y) <= Number.EPSILON
+  );
 }

@@ -12,10 +12,19 @@ import type {
 import { applyConfirmedEquipmentTerminalConnection } from "@/lib/routing/terminalConnection";
 import type { ManualRouteNetwork } from "@/lib/routing/types";
 import {
+  countStandardTechnicalReviewGeometryPendingItems,
+  createStandardTechnicalAxonometricView,
+  createStandardTechnicalSectionView,
+} from "@/lib/sections/standardTechnicalViews";
+import {
   createSectionRouteProjection,
   type SectionRouteProjection,
   type SectionRouteProjectionLink,
 } from "@/lib/sections/routeProjection";
+import {
+  createReviewCalculationReadiness,
+  createRouteReviewState,
+} from "@/lib/workbench/reviewStage";
 import type { ClassificationIndex } from "@/lib/semantic/types";
 import {
   confirmEquipmentTerminalConfig,
@@ -109,6 +118,8 @@ export function runPhysicalPresetPlacementVerifications() {
 
         assertPhysicalPlacement(preset, placed.appliance);
         assertTerminalConnection(preset, placed);
+        assertCalibratedSectionProjection(preset, placed);
+        assertPresetReadyForCalculation(placed);
       }
     },
   );
@@ -233,6 +244,7 @@ function placedPresetEquipment(preset: PresetCase) {
   });
 
   return {
+    adoptedDiameterValidation,
     appliance,
     equipment,
     inventory,
@@ -399,8 +411,10 @@ function assertPresetSectionProjection(
   preset: PresetCase,
   projection: SectionRouteProjection,
 ) {
-  const expectedY =
+  const expectedTopY =
     200 + preset.expectedHeightMeters / SECTION_SCALE_METERS_PER_SOURCE_UNIT;
+  const expectedEndY =
+    200 + preset.expectedEndHeightMeters / SECTION_SCALE_METERS_PER_SOURCE_UNIT;
   const branch =
     projection.segments.find(
       (segment) => segment.segmentId === `D-${preset.id}-N`,
@@ -414,37 +428,101 @@ function assertPresetSectionProjection(
     projection.accessories.find((item) => item.kind === "rh_elbow") ?? null;
 
   assertEqual(projection.status, "resolved");
+  assertEqual(projection.pendingItems.length, 0);
   assert(branch, "Falta rama terminal proyectada en corte.");
-  assertEqual(
-    branch.points.map((point) => point.source).join(","),
-    "node,vertical,connection",
+  assertEqual(branch.status, "resolved");
+  assertEqual(branch.pendingReason, null);
+  assert(
+    branch.points.some(
+      (point) =>
+        point.source === "vertical" &&
+        close(point.elevationMeters, preset.expectedHeightMeters) &&
+        close(point.sectionPoint.y, expectedTopY),
+    ),
+    "La rama terminal debe proyectar la subida al preset fisico.",
   );
-  assertClose(branch.points[1]?.elevationMeters, preset.expectedHeightMeters);
-  assertClose(branch.points[1]?.sectionPoint.y, expectedY);
-  assertClose(branch.points[2]?.elevationMeters, preset.expectedHeightMeters);
-  assertClose(branch.points[2]?.sectionPoint.y, expectedY);
+  assertClose(branch.points.at(-1)?.elevationMeters, preset.expectedEndHeightMeters);
+  assertClose(branch.points.at(-1)?.sectionPoint.y, expectedEndY);
   assert(appliance, "Falta artefacto proyectado en corte.");
   assertEqual(appliance.anchorStatus, "anchored");
-  assertClose(appliance.zMeters, preset.expectedHeightMeters);
+  assertClose(appliance.zMeters, preset.expectedEndHeightMeters);
   assertPoint(appliance.planPoint, {
     x: preset.x,
     y: 0,
-    z: preset.expectedHeightMeters,
+    z: preset.expectedEndHeightMeters,
   });
   assertPoint(appliance.bodyPlanPoint, {
     x: preset.x,
     y: 0,
-    z: preset.expectedHeightMeters,
+    z: preset.expectedEndHeightMeters,
   });
   assertPoint(appliance.sectionPoint, {
     x: 100 + (preset.x / 6) * 60,
-    y: expectedY,
+    y: expectedEndY,
   });
   assert(valve, "Falta llave proyectada en corte.");
   assert(terminal, "Falta terminal/RH proyectado en corte.");
-  assertClose(valve.sectionPoint?.y, expectedY);
-  assertClose(terminal.sectionPoint?.y, expectedY);
+  assertEqual(valve.status, "resolved");
+  assertEqual(terminal.status, "resolved");
+  assertClose(valve.sectionPoint?.y, expectedTopY);
+  assertClose(terminal.sectionPoint?.y, expectedEndY);
   assertEqual(projection.accessories.length, 2);
+}
+
+function assertPresetReadyForCalculation(
+  fixture: ReturnType<typeof placedPresetEquipment>,
+) {
+  const result = fixture.result;
+  const sectionAA = createStandardTechnicalSectionView({
+    adoptedDiameterValidation: fixture.adoptedDiameterValidation,
+    axis: "x",
+    equipment: fixture.equipment,
+    id: "section-aa",
+    inventory: fixture.inventory,
+    network: fixture.network,
+    result,
+    scaleMetersPerSourceUnit: SCALE_METERS_PER_SOURCE_UNIT,
+    title: "Corte A-A",
+  });
+  const sectionBB = createStandardTechnicalSectionView({
+    adoptedDiameterValidation: fixture.adoptedDiameterValidation,
+    axis: "y",
+    equipment: fixture.equipment,
+    id: "section-bb",
+    inventory: fixture.inventory,
+    network: fixture.network,
+    result,
+    scaleMetersPerSourceUnit: SCALE_METERS_PER_SOURCE_UNIT,
+    title: "Corte B-B",
+  });
+  const axonometricView = createStandardTechnicalAxonometricView({
+    adoptedDiameterValidation: fixture.adoptedDiameterValidation,
+    equipment: fixture.equipment,
+    inventory: fixture.inventory,
+    network: fixture.network,
+    result,
+    scaleMetersPerSourceUnit: SCALE_METERS_PER_SOURCE_UNIT,
+  });
+  const pendingCount = countStandardTechnicalReviewGeometryPendingItems({
+    axonometricView,
+    sectionViews: [sectionAA, sectionBB],
+  });
+  const routeReviewState = createRouteReviewState({
+    equipment: fixture.equipment,
+    hasActiveProposal: false,
+    hasRouteCycle: false,
+    network: fixture.network,
+    routeRestrictionCount: 0,
+  });
+  const readiness = createReviewCalculationReadiness({
+    routeReviewState,
+    technicalGeometryPendingCount: pendingCount,
+  });
+
+  assertEqual(pendingCount, 0);
+  assertEqual(routeReviewState.canOpenReview, true);
+  assertEqual(readiness.canContinueToCalculate, true);
+  assertEqual(readiness.observationCount, 0);
 }
 
 function assertMissingScaleBlocksSectionProjection(
@@ -614,6 +692,14 @@ function assertClose(actual: number | null | undefined, expected: number) {
       actual !== undefined &&
       Math.abs(actual - expected) <= EPSILON,
     `Expected ${expected}, got ${String(actual)}.`,
+  );
+}
+
+function close(actual: number | null | undefined, expected: number) {
+  return (
+    actual !== null &&
+    actual !== undefined &&
+    Math.abs(actual - expected) <= EPSILON
   );
 }
 

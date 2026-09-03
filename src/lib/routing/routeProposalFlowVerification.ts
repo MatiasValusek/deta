@@ -1,4 +1,9 @@
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
+import { SIGAS_PIPE_SYSTEM } from "@/lib/calculation/pipeSystems/sigas";
+import { createTechnicalAdoptedDiameterValidation } from "@/lib/calculation/technicalAdoptedDiameterValidation";
+import { createTechnicalEquivalentAccessoryVerification } from "@/lib/calculation/technicalEquivalentAccessoryVerification";
+import { createTechnicalPhysicalAccessoryInventory } from "@/lib/calculation/technicalPhysicalAccessories";
+import { calculateTechnicalTree } from "@/lib/calculation/technicalTree";
 import type { Point2D } from "@/lib/geometry/types";
 import { generateAutomaticRouteProposal } from "@/lib/routing/autoProposal";
 import {
@@ -19,7 +24,15 @@ import {
 } from "@/lib/routing/network";
 import { applyConfirmedEquipmentTerminalConnection } from "@/lib/routing/terminalConnection";
 import type { ManualRouteNetwork } from "@/lib/routing/types";
-import { createRouteReviewState } from "@/lib/workbench/reviewStage";
+import {
+  createReviewCalculationReadiness,
+  createRouteReviewState,
+} from "@/lib/workbench/reviewStage";
+import {
+  countStandardTechnicalReviewGeometryPendingItems,
+  createStandardTechnicalAxonometricView,
+  createStandardTechnicalSectionView,
+} from "@/lib/sections/standardTechnicalViews";
 
 export type RouteProposalFlowVerificationResult = {
   name: string;
@@ -112,6 +125,10 @@ export function runRouteProposalFlowVerifications() {
       assertEqual(reviewState.connectedApplianceCount, 4);
       assertEqual(reviewState.totalApplianceCount, 4);
       assertProposalTargetsTerminalStarts(fixture);
+      assertPhysicalTerminalProposalCanContinueToCalculate(
+        fixture,
+        reviewState,
+      );
     },
   );
 
@@ -388,6 +405,76 @@ function assertProposalTargetsTerminalStarts(
       false,
     );
   }
+}
+
+function assertPhysicalTerminalProposalCanContinueToCalculate(
+  fixture: RouteProposalFlowFixture,
+  routeReviewState: ReturnType<typeof createRouteReviewState>,
+) {
+  const result = calculateTechnicalTree({
+    equipment: fixture.equipment,
+    minSegmentLengthSource: EPSILON,
+    network: fixture.acceptedNetwork,
+    pipeSystem: SIGAS_PIPE_SYSTEM,
+    scaleMetersPerSourceUnit: SCALE_METERS_PER_SOURCE_UNIT,
+  });
+
+  assertEqual(result.status, "valid");
+
+  const inventory = createTechnicalPhysicalAccessoryInventory({ result });
+  const equivalentVerificationBySegmentId =
+    createTechnicalEquivalentAccessoryVerification({
+      inventory,
+      pipeSystem: SIGAS_PIPE_SYSTEM,
+      result,
+    });
+  const adoptedDiameterValidation = createTechnicalAdoptedDiameterValidation({
+    equivalentVerificationBySegmentId,
+    pipeSystem: SIGAS_PIPE_SYSTEM,
+    result,
+  });
+  const sectionAA = createStandardTechnicalSectionView({
+    adoptedDiameterValidation,
+    axis: "x",
+    equipment: fixture.equipment,
+    id: "section-aa",
+    inventory,
+    network: fixture.acceptedNetwork,
+    result,
+    scaleMetersPerSourceUnit: SCALE_METERS_PER_SOURCE_UNIT,
+    title: "Corte A-A",
+  });
+  const sectionBB = createStandardTechnicalSectionView({
+    adoptedDiameterValidation,
+    axis: "y",
+    equipment: fixture.equipment,
+    id: "section-bb",
+    inventory,
+    network: fixture.acceptedNetwork,
+    result,
+    scaleMetersPerSourceUnit: SCALE_METERS_PER_SOURCE_UNIT,
+    title: "Corte B-B",
+  });
+  const axonometricView = createStandardTechnicalAxonometricView({
+    adoptedDiameterValidation,
+    equipment: fixture.equipment,
+    inventory,
+    network: fixture.acceptedNetwork,
+    result,
+    scaleMetersPerSourceUnit: SCALE_METERS_PER_SOURCE_UNIT,
+  });
+  const pendingCount = countStandardTechnicalReviewGeometryPendingItems({
+    axonometricView,
+    sectionViews: [sectionAA, sectionBB],
+  });
+  const readiness = createReviewCalculationReadiness({
+    routeReviewState,
+    technicalGeometryPendingCount: pendingCount,
+  });
+
+  assertEqual(pendingCount, 0);
+  assertEqual(readiness.canContinueToCalculate, true);
+  assertEqual(readiness.observationCount, 0);
 }
 
 function equipmentIndex(equipment: WorkbenchEquipment[]) {

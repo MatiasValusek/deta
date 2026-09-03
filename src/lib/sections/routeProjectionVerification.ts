@@ -61,7 +61,8 @@ export function runSectionRouteProjectionVerifications() {
       assertProjectedTerminalEquipment(first);
       assertMissingRegistrationIsPending(first);
       assertMissingScaleIsPending(first);
-      assertMissingZIsPending(first);
+      assertRouteNodeZIsInferredFromConfirmedGeometry(first);
+      assertMissingApplianceZIsPending(first);
     },
   );
 
@@ -514,7 +515,9 @@ function assertMissingScaleIsPending(fixture: SectionRouteProjectionFixture) {
   assertEqual(projection.segments.length, 0);
 }
 
-function assertMissingZIsPending(fixture: SectionRouteProjectionFixture) {
+function assertRouteNodeZIsInferredFromConfirmedGeometry(
+  fixture: SectionRouteProjectionFixture,
+) {
   const network: ManualRouteNetwork = {
     ...fixture.network,
     nodes: fixture.network.nodes.map((node) =>
@@ -545,8 +548,10 @@ function assertMissingZIsPending(fixture: SectionRouteProjectionFixture) {
   });
   const branch = projectedSegment(projection, "D-1");
 
-  assertEqual(projection.status, "pending");
-  assertEqual(branch.status, "pending");
+  assertEqual(projection.status, "resolved");
+  assertEqual(projection.pendingItems.length, 0);
+  assertEqual(branch.status, "resolved");
+  assertEqual(branch.pendingReason, null);
   assertEqual(
     branch.points.map((point) => point.source).join(","),
     "node,vertical,vertex,vertex,connection",
@@ -558,14 +563,50 @@ function assertMissingZIsPending(fixture: SectionRouteProjectionFixture) {
       .join("|"),
     "2:0|2:1.4|4.2:1.4|4.6:1.4",
   );
+  assertClose(branch.points[0]?.elevationMeters, 0);
+}
+
+function assertMissingApplianceZIsPending(
+  fixture: SectionRouteProjectionFixture,
+) {
+  const equipment = fixture.equipment.map((item) =>
+    item.id === "appliance-terminal"
+      ? {
+          ...item,
+          connectionPoint: { x: item.connectionPoint.x, y: item.connectionPoint.y },
+        }
+      : item,
+  );
+  const result = calculateTechnicalTree({
+    equipment,
+    minSegmentLengthSource: EPSILON,
+    network: fixture.network,
+    pipeSystem: SIGAS_PIPE_SYSTEM,
+    scaleMetersPerSourceUnit: PLAN_SCALE_METERS_PER_SOURCE_UNIT,
+  });
+  const projection = createSectionRouteProjection({
+    adoptedDiameterValidation: fixture.adoptedDiameterValidation,
+    equipment,
+    inventory: fixture.inventory,
+    link: fixture.link,
+    network: fixture.network,
+    result,
+    sectionScaleMetersPerSourceUnit: SECTION_SCALE_METERS_PER_SOURCE_UNIT,
+    toleranceSource: EPSILON,
+  });
+  const branch = projectedSegment(projection, "D-1");
+
+  assertEqual(projection.status, "pending");
+  assertEqual(branch.status, "pending");
   assert(
     projection.pendingItems.some(
       (item) =>
         item.sourceType === "segment" &&
         item.sourceId === "D-1" &&
-        item.reason.includes("Falta cota Z"),
+        item.reason.includes("extremo 1") &&
+        item.reason.includes("tramo D-1"),
     ),
-    "La falta de Z debe quedar pendiente sin desconectar la geometria en corte.",
+    "La falta real de Z debe nombrar el extremo y el tramo afectados.",
   );
 }
 

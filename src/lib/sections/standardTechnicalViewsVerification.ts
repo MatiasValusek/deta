@@ -20,6 +20,7 @@ import type {
 } from "@/lib/routing/types";
 import { applySectionRouteHeightEdit } from "./routeHeightEditing";
 import {
+  collectStandardTechnicalReviewGeometryPendingItems,
   countStandardTechnicalReviewGeometryPendingItems,
   createStandardTechnicalAxonometricView,
   createStandardTechnicalSectionView,
@@ -57,7 +58,8 @@ export function runStandardTechnicalViewsVerifications() {
       assertRootSegmentIsNotChord(fixture, views);
       assertReadyForCalculation(fixture, views);
       assertXyAndZEditsReachEveryReviewView(fixture);
-      assertMissingZBlocksCalculationButKeepsGeometryVisible(fixture);
+      assertRouteNodeZIsInferredFromConfirmedGeometry(fixture);
+      assertMissingApplianceZBlocksCalculationButKeepsGeometryVisible(fixture);
     },
   );
 
@@ -312,10 +314,10 @@ function assertXyAndZEditsReachEveryReviewView(fixture: SimpleReviewFixture) {
   assertPoint(axonometricSegment(editedViews.axonometric, "M-J").path.at(-1)?.planPoint, expectedJ);
 }
 
-function assertMissingZBlocksCalculationButKeepsGeometryVisible(
+function assertRouteNodeZIsInferredFromConfirmedGeometry(
   fixture: SimpleReviewFixture,
 ) {
-  const pendingFixture = {
+  const inferredFixture = {
     equipment: fixture.equipment,
     network: {
       ...fixture.network,
@@ -329,7 +331,60 @@ function assertMissingZBlocksCalculationButKeepsGeometryVisible(
       ),
     },
   };
+  const inferredViews = createViews(inferredFixture);
+  const pendingCount = countStandardTechnicalReviewGeometryPendingItems({
+    axonometricView: inferredViews.axonometric,
+    sectionViews: [inferredViews.sectionAA, inferredViews.sectionBB],
+  });
+  const routeReviewState = createRouteReviewState({
+    equipment: inferredFixture.equipment,
+    hasActiveProposal: false,
+    hasRouteCycle: false,
+    network: inferredFixture.network,
+    routeRestrictionCount: 0,
+  });
+  const readiness = createReviewCalculationReadiness({
+    routeReviewState,
+    technicalGeometryPendingCount: pendingCount,
+  });
+
+  assertEqual(pendingCount, 0);
+  assertEqual(routeReviewState.canOpenReview, true);
+  assertEqual(readiness.canContinueToCalculate, true);
+  assertEqual(readiness.observationCount, 0);
+  assertPoint(
+    sectionSegment(inferredViews.sectionAA, "M-J").points.at(-1)?.planPoint,
+    { x: 2, y: 0, z: 0 },
+  );
+  assertPoint(
+    sectionSegment(inferredViews.sectionBB, "M-J").points.at(-1)?.planPoint,
+    { x: 2, y: 0, z: 0 },
+  );
+  assertPoint(
+    axonometricSegment(inferredViews.axonometric, "M-J").path.at(-1)?.planPoint,
+    { x: 2, y: 0, z: 0 },
+  );
+}
+
+function assertMissingApplianceZBlocksCalculationButKeepsGeometryVisible(
+  fixture: SimpleReviewFixture,
+) {
+  const pendingFixture = {
+    equipment: fixture.equipment.map((item) =>
+      item.id === "stove"
+        ? {
+            ...item,
+            connectionPoint: { x: item.connectionPoint.x, y: item.connectionPoint.y },
+          }
+        : item,
+    ),
+    network: fixture.network,
+  };
   const pendingViews = createViews(pendingFixture);
+  const pendingItems = collectStandardTechnicalReviewGeometryPendingItems({
+    axonometricView: pendingViews.axonometric,
+    sectionViews: [pendingViews.sectionAA, pendingViews.sectionBB],
+  });
   const pendingCount = countStandardTechnicalReviewGeometryPendingItems({
     axonometricView: pendingViews.axonometric,
     sectionViews: [pendingViews.sectionAA, pendingViews.sectionBB],
@@ -347,20 +402,32 @@ function assertMissingZBlocksCalculationButKeepsGeometryVisible(
   });
 
   assert(pendingCount > 0, "La Z pendiente debe crear observacion.");
+  assert(
+    pendingItems.some(
+      (item) =>
+        item.sourceLabel.includes("J-A1") ||
+        item.message.includes("tramo J-A1"),
+    ),
+    "La observacion debe mostrar tramo/punto afectado.",
+  );
+  assert(
+    pendingItems.some((item) => item.actionLabel.includes(item.viewLabel)),
+    "La observacion debe tener accion directa a la vista tecnica.",
+  );
   assertEqual(routeReviewState.canOpenReview, true);
   assertEqual(readiness.canContinueToCalculate, false);
   assert(readiness.observationCount > 0, "La observacion debe mostrarse en Revisar.");
   assertPoint(
-    sectionSegment(pendingViews.sectionAA, "M-J").points.at(-1)?.planPoint,
-    { x: 2, y: 0 },
+    sectionSegment(pendingViews.sectionAA, "J-A1").points.at(-1)?.planPoint,
+    { x: 5, y: 2 },
   );
   assertPoint(
-    sectionSegment(pendingViews.sectionBB, "M-J").points.at(-1)?.planPoint,
-    { x: 2, y: 0 },
+    sectionSegment(pendingViews.sectionBB, "J-A1").points.at(-1)?.planPoint,
+    { x: 5, y: 2 },
   );
   assertPoint(
-    axonometricSegment(pendingViews.axonometric, "M-J").path.at(-1)?.planPoint,
-    { x: 2, y: 0 },
+    axonometricSegment(pendingViews.axonometric, "J-A1").path.at(-1)?.planPoint,
+    { x: 5, y: 2 },
   );
 }
 

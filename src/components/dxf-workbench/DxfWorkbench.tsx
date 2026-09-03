@@ -207,7 +207,7 @@ import {
   type SectionRouteHeightTarget,
 } from "@/lib/sections/routeHeightEditing";
 import {
-  countStandardTechnicalReviewGeometryPendingItems,
+  collectStandardTechnicalReviewGeometryPendingItems,
   createStandardTechnicalAxonometricView,
   createStandardTechnicalSectionView,
   routeInstallationBounds,
@@ -1577,14 +1577,18 @@ export function DxfWorkbench() {
       technicalPhysicalAccessoryInventory,
     ],
   );
-  const technicalReviewGeometryPendingCount = useMemo(
+  const technicalReviewGeometryPendingItems = useMemo(
     () =>
-      countStandardTechnicalReviewGeometryPendingItems({
+      collectStandardTechnicalReviewGeometryPendingItems({
         axonometricView: standardTechnicalAxonometricView,
         sectionViews: Object.values(standardTechnicalSectionViews),
       }),
     [standardTechnicalAxonometricView, standardTechnicalSectionViews],
   );
+  const technicalReviewGeometryPendingCount =
+    technicalReviewGeometryPendingItems.length;
+  const primaryTechnicalReviewPendingItem =
+    technicalReviewGeometryPendingItems[0] ?? null;
   const reviewCalculationReadiness = useMemo(
     () =>
       createReviewCalculationReadiness({
@@ -2074,6 +2078,14 @@ export function DxfWorkbench() {
             showRoute: true,
           },
     );
+  }
+
+  function handleOpenPrimaryTechnicalReviewPendingItem() {
+    if (!primaryTechnicalReviewPendingItem) {
+      return;
+    }
+
+    handleReviewViewOpen(primaryTechnicalReviewPendingItem.viewId);
   }
 
   function handleContinueToCalculateFromRoute() {
@@ -6315,11 +6327,15 @@ export function DxfWorkbench() {
           />
           {canReviewConfirmedRoute ? (
             <ReviewPanel
+              calculationObservation={primaryTechnicalReviewPendingItem}
               calculationBlockReason={routeCalculationBlockReason}
               connectedApplianceCount={routeReviewState.connectedApplianceCount}
               hasValidRoute={canOpenCalculateStage}
               routeRestrictionCount={reviewObservationCount}
               totalApplianceCount={routeReviewState.totalApplianceCount}
+              onOpenCalculationObservation={
+                handleOpenPrimaryTechnicalReviewPendingItem
+              }
               onContinueToCalculate={handleContinueToCalculateFromRoute}
             />
           ) : null}

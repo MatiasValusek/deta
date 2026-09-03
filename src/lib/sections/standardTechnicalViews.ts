@@ -32,6 +32,17 @@ export type StandardTechnicalSectionViewId =
 
 export type StandardTechnicalSectionAxis = "x" | "y";
 
+export type StandardTechnicalReviewGeometryPendingItem = {
+  actionLabel: string;
+  id: string;
+  message: string;
+  sourceId: string;
+  sourceLabel: string;
+  sourceType: string;
+  viewId: Exclude<StandardTechnicalReviewViewId, "plan">;
+  viewLabel: string;
+};
+
 export type StandardTechnicalSectionView = {
   axis: StandardTechnicalSectionAxis;
   baseline: {
@@ -104,7 +115,17 @@ export function countStandardTechnicalReviewGeometryPendingItems(params: {
   axonometricView: TechnicalAxonometricView | null;
   sectionViews: StandardTechnicalSectionView[];
 }) {
-  const pendingKeys = new Set<string>();
+  return collectStandardTechnicalReviewGeometryPendingItems(params).length;
+}
+
+export function collectStandardTechnicalReviewGeometryPendingItems(params: {
+  axonometricView: TechnicalAxonometricView | null;
+  sectionViews: StandardTechnicalSectionView[];
+}) {
+  const pendingByKey = new Map<
+    string,
+    StandardTechnicalReviewGeometryPendingItem
+  >();
 
   for (const view of params.sectionViews) {
     for (const item of view.projection.pendingItems) {
@@ -115,7 +136,14 @@ export function countStandardTechnicalReviewGeometryPendingItems(params: {
       });
 
       if (key) {
-        pendingKeys.add(key);
+        addPendingItem(pendingByKey, key, {
+          id: item.id,
+          message: item.reason,
+          sourceId: item.sourceId ?? item.id,
+          sourceType: item.sourceType,
+          viewId: view.id,
+          viewLabel: view.title,
+        });
       }
     }
 
@@ -131,7 +159,14 @@ export function countStandardTechnicalReviewGeometryPendingItems(params: {
       });
 
       if (key) {
-        pendingKeys.add(key);
+        addPendingItem(pendingByKey, key, {
+          id: `${view.id}:segment:${segment.segmentId}`,
+          message: segment.pendingReason,
+          sourceId: segment.segmentId,
+          sourceType: "segment",
+          viewId: view.id,
+          viewLabel: view.title,
+        });
       }
     }
   }
@@ -144,11 +179,69 @@ export function countStandardTechnicalReviewGeometryPendingItems(params: {
     });
 
     if (key) {
-      pendingKeys.add(key);
+      addPendingItem(pendingByKey, key, {
+        id: item.id,
+        message: item.message,
+        sourceId: item.sourceId,
+        sourceType: item.type,
+        viewId: "axo",
+        viewLabel: "Axo",
+      });
     }
   }
 
-  return pendingKeys.size;
+  return [...pendingByKey.values()];
+}
+
+function addPendingItem(
+  pendingByKey: Map<string, StandardTechnicalReviewGeometryPendingItem>,
+  key: string,
+  item: {
+    id: string;
+    message: string;
+    sourceId: string;
+    sourceType: string;
+    viewId: Exclude<StandardTechnicalReviewViewId, "plan">;
+    viewLabel: string;
+  },
+) {
+  const current = pendingByKey.get(key);
+
+  if (current && item.sourceType !== "segment") {
+    return;
+  }
+
+  if (current?.sourceType === "segment") {
+    return;
+  }
+
+  pendingByKey.set(key, {
+    ...item,
+    actionLabel: `Corregir en ${item.viewLabel}`,
+    sourceLabel: `${technicalPendingSourceTypeLabel(item.sourceType)} ${
+      item.sourceId
+    }`,
+  });
+}
+
+function technicalPendingSourceTypeLabel(sourceType: string) {
+  if (sourceType === "segment") {
+    return "Tramo";
+  }
+
+  if (sourceType === "node" || sourceType === "equipment") {
+    return "Punto";
+  }
+
+  if (sourceType === "accessory") {
+    return "Accesorio";
+  }
+
+  if (sourceType === "scale") {
+    return "Escala";
+  }
+
+  return "Fuente";
 }
 
 function createAutomaticSectionProjectionLink(params: {
@@ -278,7 +371,27 @@ function technicalGeometryPendingKey(params: {
     .replace(/[\u0300-\u036f]/g, "");
   const bucket = technicalGeometryPendingBucket(normalized);
 
-  return bucket ? `${bucket}:${params.type}:${params.sourceId}` : null;
+  if (!bucket) {
+    return null;
+  }
+
+  if (bucket === "z") {
+    const endpointNodeId = zEndpointNodeId(normalized);
+
+    if (endpointNodeId) {
+      return `z:point:${endpointNodeId}`;
+    }
+
+    if (params.type === "equipment" || params.type === "node") {
+      return `z:point:${params.sourceId}`;
+    }
+  }
+
+  return `${bucket}:${params.type}:${params.sourceId}`;
+}
+
+function zEndpointNodeId(message: string) {
+  return message.match(/extremo\s+(.+?)\s+del tramo/)?.[1] ?? null;
 }
 
 function technicalGeometryPendingBucket(message: string) {
