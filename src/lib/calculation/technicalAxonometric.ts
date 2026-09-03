@@ -102,6 +102,9 @@ export type TechnicalAxonometricPendingItem = {
   id: string;
   message: string;
   sourceId: string;
+  sourceLabel?: string;
+  sourceNodeId?: string | null;
+  sourceSegmentIds?: string[];
   type: "accessory" | "node" | "scale" | "segment";
 };
 
@@ -175,6 +178,7 @@ export function createTechnicalAxonometricView(params: {
                 id: "axonometric:calculation",
                 message: "Calculo tecnico pendiente para axonometrica.",
                 sourceId: "calculation",
+                sourceLabel: "Calculo tecnico",
                 type: "segment",
               },
             ],
@@ -458,6 +462,9 @@ function createRawAccessory(params: {
   resolvedSegmentById: Map<string, ResolvedRouteSegment>;
   scaleMetersPerSourceUnit: number | null;
 }): RawAccessory {
+  const label = `${technicalPhysicalAccessoryKindLabel(
+    params.item.kind,
+  )} ${physicalAccessoryDiameterLabel(params.item)}`.trim();
   const nodePoint = params.item.nodeId
     ? resolveNodePosition(
         params.item.nodeId,
@@ -478,16 +485,20 @@ function createRawAccessory(params: {
     ? createPoint3D(anchorPoint, params.scaleMetersPerSourceUnit)
     : null;
   const pendingReasons = [
-    ...(!point ? ["Falta posicion de la pieza fisica."] : []),
-    ...(point?.zMeters === null ? ["Altura z pendiente en la pieza."] : []),
+    ...(!point
+      ? [
+          `${label}: falta posicion confirmada en ${physicalAccessoryLocationLabel(
+            params.item.segmentIds,
+          )}.`,
+        ]
+      : []),
+    ...(point?.zMeters === null ? [`${label}: altura z pendiente.`] : []),
   ];
 
   return {
     id: params.item.id,
     kind: params.item.kind,
-    label: `${technicalPhysicalAccessoryKindLabel(
-      params.item.kind,
-    )} ${physicalAccessoryDiameterLabel(params.item)}`.trim(),
+    label,
     nodeId: params.item.nodeId,
     pendingReasons,
     rawProjected: point ? projectPoint3D(point) : null,
@@ -606,6 +617,7 @@ function createPendingItems(params: {
       id: "axonometric:scale",
       message: "Escala de planta pendiente; la vista usa coordenadas fuente.",
       sourceId: "scale",
+      sourceLabel: "Escala de planta",
       type: "scale",
     });
   }
@@ -614,8 +626,12 @@ function createPendingItems(params: {
     for (const reason of node.pendingReasons) {
       pending.push({
         id: `axonometric:node:${node.id}:${reason}`,
-        message: reason,
+        message: readableAxonometricPendingMessage(reason),
         sourceId: node.id,
+        sourceLabel: node.label
+          ? `Punto ${node.label}`
+          : "Punto del recorrido",
+        sourceNodeId: node.id,
         type: "node",
       });
     }
@@ -625,8 +641,10 @@ function createPendingItems(params: {
     for (const reason of segment.pendingReasons) {
       pending.push({
         id: `axonometric:segment:${segment.id}:${reason}`,
-        message: reason,
+        message: readableAxonometricPendingMessage(reason),
         sourceId: segment.id,
+        sourceLabel: `Tramo ${readableSegmentLocation(segment.id)}`,
+        sourceSegmentIds: [segment.id],
         type: "segment",
       });
     }
@@ -636,8 +654,13 @@ function createPendingItems(params: {
     for (const reason of accessory.pendingReasons) {
       pending.push({
         id: `axonometric:accessory:${accessory.id}:${reason}`,
-        message: reason,
+        message: readableAxonometricPendingMessage(reason),
         sourceId: accessory.id,
+        sourceLabel: `${accessory.label} en ${physicalAccessoryLocationLabel(
+          accessory.segmentIds,
+        )}`,
+        sourceNodeId: accessory.nodeId,
+        sourceSegmentIds: accessory.segmentIds,
         type: "accessory",
       });
     }
@@ -646,8 +669,13 @@ function createPendingItems(params: {
   for (const item of params.inventory.pendingItems) {
     pending.push({
       id: `axonometric:physical-pending:${item.id}`,
-      message: item.reason,
+      message: readableAxonometricPendingMessage(item.reason),
       sourceId: item.id,
+      sourceLabel: `${technicalPhysicalAccessoryKindLabel(
+        item.kind,
+      )} en ${physicalAccessoryLocationLabel(item.segmentIds)}`,
+      sourceNodeId: item.nodeId,
+      sourceSegmentIds: item.segmentIds,
       type: "accessory",
     });
   }
@@ -789,6 +817,31 @@ function physicalAccessoryDiameterLabel(item: TechnicalPhysicalAccessory) {
     .map(formatDiameterSymbol);
 
   return [...new Set(labels)].sort().join("/");
+}
+
+function physicalAccessoryLocationLabel(segmentIds: string[]) {
+  if (segmentIds.length === 0) {
+    return "ubicacion pendiente";
+  }
+
+  const labels = [...new Set(segmentIds.map(readableSegmentLocation))].sort();
+
+  return labels.slice(0, 2).join(" / ") +
+    (labels.length > 2 ? ` +${labels.length - 2}` : "");
+}
+
+function readableSegmentLocation(segmentId: string) {
+  return segmentId.startsWith("route-segment:")
+    ? "tramo del recorrido"
+    : `tramo ${segmentId}`;
+}
+
+function readableAxonometricPendingMessage(message: string) {
+  return message
+    .replace(/\bphysical-accessory:[^\s,.;)]+/g, "accesorio fisico")
+    .replace(/\broute-accessory:[^\s,.;)]+/g, "accesorio fisico")
+    .replace(/\broute-segment:[^\s,.;)]+/g, "tramo del recorrido")
+    .replace(/\broute-node:[^\s,.;)]+/g, "punto del recorrido");
 }
 
 function formatDiameterSymbol(diameter: PipeDiameterReference | null) {

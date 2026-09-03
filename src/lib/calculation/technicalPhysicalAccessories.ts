@@ -18,12 +18,28 @@ import type {
 import type {
   TechnicalCalculationResult,
 } from "@/lib/calculation/technicalTree";
+import type { WorkbenchEquipment } from "@/lib/equipment/types";
+import { withPointZ } from "@/lib/geometry/height";
 import type { Point2D } from "@/lib/geometry/types";
+import {
+  buildEquipmentIndex,
+  getRouteNeighbors,
+} from "@/lib/routing/network";
 import {
   automaticAccessoryId,
   type AccessoryProposal,
 } from "@/lib/routing/routeAccessoryProposals";
-import type { RouteAccessoryType } from "@/lib/routing/types";
+import {
+  createTechnicalRouteNodeElevationIndex,
+  resolveTechnicalRouteNodePosition,
+} from "@/lib/sections/technicalRouteElevation";
+import type {
+  ManualRouteNetwork,
+  RouteAccessoryType,
+  RouteNode,
+  RouteSegment,
+  RouteSegmentAccessory,
+} from "@/lib/routing/types";
 
 export type TechnicalPhysicalAccessoryKind =
   | "elbow_90"
@@ -112,9 +128,19 @@ type AccessoryDraft = Omit<
   sourceId: string;
 };
 
+type RouteAccessoryGeometry = {
+  nodeId: string | null;
+  position: Point2D | null;
+};
+
+const ROUTE_ACCESSORY_PROPOSAL_ID_PREFIX =
+  "route-accessory:accessory-proposal:";
+
 export function createTechnicalPhysicalAccessoryInventory(params: {
   accessoryProposals?: AccessoryProposal[];
   diameterTransitionProposals?: DiameterTransitionProposal[];
+  equipment?: WorkbenchEquipment[];
+  network?: ManualRouteNetwork;
   result: TechnicalCalculationResult | null;
   routeTransitionResolutions?: Record<string, TechnicalRouteTransitionResolution>;
 }): TechnicalPhysicalAccessoryInventory {
@@ -132,16 +158,26 @@ export function createTechnicalPhysicalAccessoryInventory(params: {
       proposal,
     ]),
   );
+  const routeNodeGeometryById = createRouteNodeGeometryIndex({
+    equipment: params.equipment ?? [],
+    network: params.network,
+  });
+  const routeAccessoryGeometryByKey = createRouteAccessoryGeometryIndex({
+    network: params.network,
+    routeNodeGeometryById,
+  });
 
   addRouteAccessoryPieces({
     accessoryProposalByAccessoryId,
     itemsById,
     pendingItems,
+    routeAccessoryGeometryByKey,
     resolutions: selectRouteAccessoryResolutions(params.result),
   });
   addTransitionPieces({
     itemsById,
     pendingItems,
+    routeNodeGeometryById,
     resolutions:
       params.routeTransitionResolutions ??
       selectRouteTransitionResolutions(params.result),
@@ -169,6 +205,7 @@ function addRouteAccessoryPieces(params: {
   accessoryProposalByAccessoryId: Map<string, AccessoryProposal>;
   itemsById: Map<string, TechnicalPhysicalAccessory>;
   pendingItems: TechnicalPhysicalAccessoryPendingItem[];
+  routeAccessoryGeometryByKey: Map<string, RouteAccessoryGeometry>;
   resolutions: Record<string, TechnicalRouteAccessoryResolution>;
 }) {
   for (const resolution of sortRouteAccessoryResolutions(params.resolutions)) {
@@ -181,12 +218,17 @@ function addRouteAccessoryPieces(params: {
       const pieceId = routeAccessoryPieceId(contribution);
       const kind = routeAccessoryKind(contribution);
       const segmentIds = [contribution.ownerSegmentId];
+      const geometry = routeAccessoryPieceGeometry({
+        contribution,
+        proposal,
+        routeAccessoryGeometryByKey: params.routeAccessoryGeometryByKey,
+      });
 
       if (contribution.status !== "resolved") {
         params.pendingItems.push({
           id: pieceId,
           kind,
-          nodeId: proposal?.nodeId ?? null,
+          nodeId: geometry.nodeId,
           reason:
             contribution.reason ??
             "Accesorio confirmado pendiente de resolucion tecnica.",
@@ -212,8 +254,8 @@ function addRouteAccessoryPieces(params: {
         id: pieceId,
         kind,
         label: routeAccessoryLabel(contribution, kind),
-        nodeId: proposal?.nodeId ?? null,
-        position: proposal?.position ?? null,
+        nodeId: geometry.nodeId,
+        position: geometry.position,
         routeUse: {
           equivalentLengthMeters: contribution.equivalentLengthMetersPerUnit,
           routeId: contribution.routeId,
@@ -233,6 +275,7 @@ function addRouteAccessoryPieces(params: {
 function addTransitionPieces(params: {
   itemsById: Map<string, TechnicalPhysicalAccessory>;
   pendingItems: TechnicalPhysicalAccessoryPendingItem[];
+  routeNodeGeometryById: Map<string, RouteAccessoryGeometry>;
   resolutions: Record<string, TechnicalRouteTransitionResolution>;
   transitionProposalById: Map<string, DiameterTransitionProposal>;
 }) {
@@ -253,6 +296,8 @@ function addTransitionPieces(params: {
       );
       const segmentIds = transitionSegmentIds(contribution, proposal);
       const kind = transitionAccessoryKind(contribution);
+      const nodeGeometry =
+        params.routeNodeGeometryById.get(contribution.nodeId) ?? null;
 
       if (
         contribution.status !== "resolved" ||
@@ -282,7 +327,10 @@ function addTransitionPieces(params: {
         kind,
         label: transitionAccessoryLabel(contribution, kind),
         nodeId: contribution.nodeId,
-        position: proposal?.position ?? null,
+        position: mergeKnownPosition(
+          proposal?.position ?? null,
+          nodeGeometry?.position ?? null,
+        ),
         routeUse: {
           downstreamSegmentId: contribution.downstreamSegmentId,
           equivalentLengthMeters: contribution.equivalentLengthMeters,
@@ -382,6 +430,25 @@ function selectRouteTransitionResolutions(result: TechnicalCalculationResult) {
   return result.transitionAwareNetworkSizing?.routeTransitionResolutions ?? {};
 }
 
+function routeAccessoryPieceGeometry(params: {
+  contribution: TechnicalRouteAccessoryContribution;
+  proposal: AccessoryProposal | undefined;
+  routeAccessoryGeometryByKey: Map<string, RouteAccessoryGeometry>;
+}): RouteAccessoryGeometry {
+  const inferred =
+    params.routeAccessoryGeometryByKey.get(
+      routeAccessoryPhysicalKey(params.contribution),
+    ) ?? null;
+
+  return {
+    nodeId: params.proposal?.nodeId ?? inferred?.nodeId ?? null,
+    position: mergeKnownPosition(
+      params.proposal?.position ?? null,
+      inferred?.position ?? null,
+    ),
+  };
+}
+
 function routeAccessoryPieceId(
   contribution: TechnicalRouteAccessoryContribution,
 ) {
@@ -392,6 +459,13 @@ function routeAccessoryPhysicalKey(
   contribution: TechnicalRouteAccessoryContribution,
 ) {
   return `${contribution.ownerSegmentId}:${contribution.accessoryId}`;
+}
+
+function routeSegmentAccessoryPhysicalKey(
+  segmentId: string,
+  accessoryId: string,
+) {
+  return `${segmentId}:${accessoryId}`;
 }
 
 function transitionPieceId(
@@ -562,6 +636,174 @@ function accessoryKindLabel(kind: TechnicalPhysicalAccessoryKind) {
     default:
       return "Accesorio";
   }
+}
+
+function createRouteNodeGeometryIndex(params: {
+  equipment: WorkbenchEquipment[];
+  network: ManualRouteNetwork | undefined;
+}) {
+  const byId = new Map<string, RouteAccessoryGeometry>();
+
+  if (!params.network) {
+    return byId;
+  }
+
+  const equipmentById = buildEquipmentIndex(params.equipment);
+  const nodeElevationById = createTechnicalRouteNodeElevationIndex({
+    equipment: params.equipment,
+    network: params.network,
+  });
+
+  for (const node of params.network.nodes) {
+    byId.set(node.id, {
+      nodeId: node.id,
+      position: resolveTechnicalRouteNodePosition({
+        equipmentById,
+        node,
+        nodeElevationById,
+      }),
+    });
+  }
+
+  return byId;
+}
+
+function createRouteAccessoryGeometryIndex(params: {
+  network: ManualRouteNetwork | undefined;
+  routeNodeGeometryById: Map<string, RouteAccessoryGeometry>;
+}) {
+  const byKey = new Map<string, RouteAccessoryGeometry>();
+
+  if (!params.network) {
+    return byKey;
+  }
+
+  const nodeById = new Map(params.network.nodes.map((node) => [node.id, node]));
+  const neighbors = getRouteNeighbors(params.network);
+
+  for (const segment of params.network.segments) {
+    for (const accessory of segment.accessories ?? []) {
+      const geometry = inferRouteSegmentAccessoryGeometry({
+        accessory,
+        neighbors,
+        nodeById,
+        routeNodeGeometryById: params.routeNodeGeometryById,
+        segment,
+      });
+
+      if (geometry) {
+        byKey.set(
+          routeSegmentAccessoryPhysicalKey(segment.id, accessory.id),
+          geometry,
+        );
+      }
+    }
+  }
+
+  return byKey;
+}
+
+function inferRouteSegmentAccessoryGeometry(params: {
+  accessory: RouteSegmentAccessory;
+  neighbors: Map<string, Set<string>>;
+  nodeById: Map<string, RouteNode>;
+  routeNodeGeometryById: Map<string, RouteAccessoryGeometry>;
+  segment: RouteSegment;
+}): RouteAccessoryGeometry | null {
+  const parsedNodeId = parseAutomaticRouteAccessoryNodeId(params.accessory.id);
+  const parsedNode =
+    parsedNodeId &&
+    (params.segment.fromNodeId === parsedNodeId ||
+      params.segment.toNodeId === parsedNodeId)
+      ? params.routeNodeGeometryById.get(parsedNodeId) ?? null
+      : null;
+
+  if (parsedNode) {
+    return parsedNode;
+  }
+
+  const endpointCandidates = [params.segment.fromNodeId, params.segment.toNodeId]
+    .map((nodeId) => params.nodeById.get(nodeId) ?? null)
+    .filter((node): node is RouteNode => node !== null)
+    .filter((node) =>
+      routeNodeMatchesAccessoryType(
+        node,
+        params.neighbors.get(node.id)?.size ?? 0,
+        params.accessory.type,
+      ),
+    )
+    .map((node) => params.routeNodeGeometryById.get(node.id) ?? null)
+    .filter((item): item is RouteAccessoryGeometry => item !== null);
+
+  if (endpointCandidates.length === 1) {
+    return endpointCandidates[0] as RouteAccessoryGeometry;
+  }
+
+  const [singleVertex] = params.segment.vertices ?? [];
+
+  if (
+    params.accessory.type === "elbow" &&
+    params.segment.vertices?.length === 1 &&
+    singleVertex
+  ) {
+    return {
+      nodeId: null,
+      position: { ...singleVertex },
+    };
+  }
+
+  return null;
+}
+
+function routeNodeMatchesAccessoryType(
+  node: RouteNode,
+  degree: number,
+  type: RouteAccessoryType,
+) {
+  if (node.kind !== "route") {
+    return false;
+  }
+
+  if (type === "elbow") {
+    return degree === 2;
+  }
+
+  if (type === "tee") {
+    return degree >= 3;
+  }
+
+  return false;
+}
+
+function parseAutomaticRouteAccessoryNodeId(accessoryId: string) {
+  if (!accessoryId.startsWith(ROUTE_ACCESSORY_PROPOSAL_ID_PREFIX)) {
+    return null;
+  }
+
+  const parts = accessoryId
+    .slice(ROUTE_ACCESSORY_PROPOSAL_ID_PREFIX.length)
+    .split(":");
+
+  if (parts.length < 3) {
+    return null;
+  }
+
+  return parts.slice(0, -2).join(":") || null;
+}
+
+function mergeKnownPosition(
+  preferred: Point2D | null,
+  fallback: Point2D | null,
+): Point2D | null {
+  if (!preferred) {
+    return fallback ? { ...fallback } : null;
+  }
+
+  if (pointHasExplicitZ(preferred) || !fallback || !pointHasExplicitZ(fallback)) {
+    return { ...preferred };
+  }
+
+  return withPointZ(preferred, fallback.z);
 }
 
 function isRhElbowLabel(label: string) {
@@ -737,6 +979,12 @@ function comparePhysicalAccessories(
     first.kind.localeCompare(second.kind) ||
     first.id.localeCompare(second.id)
   );
+}
+
+function pointHasExplicitZ(
+  point: Point2D | null | undefined,
+): point is Point2D & { z: number } {
+  return typeof point?.z === "number" && Number.isFinite(point.z);
 }
 
 function recordStringValue(

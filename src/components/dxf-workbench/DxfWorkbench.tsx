@@ -211,8 +211,13 @@ import {
   createStandardTechnicalAxonometricView,
   createStandardTechnicalSectionView,
   routeInstallationBounds,
+  type StandardTechnicalReviewGeometryPendingItem,
   type StandardTechnicalReviewViewId,
 } from "@/lib/sections/standardTechnicalViews";
+import {
+  createTechnicalRouteNodeElevationIndex,
+  resolveTechnicalRouteNodePosition,
+} from "@/lib/sections/technicalRouteElevation";
 import {
   buildClassificationIndex,
   createClassificationFromProposal,
@@ -449,6 +454,8 @@ export function DxfWorkbench() {
     useState(DEFAULT_ROUTE_PROPOSAL_MARGIN_INPUT);
   const [selectedRouteEdit, setSelectedRouteEdit] =
     useState<PhysicalRouteEditSelection | null>(null);
+  const [focusedTechnicalReviewItem, setFocusedTechnicalReviewItem] =
+    useState<StandardTechnicalReviewGeometryPendingItem | null>(null);
   const [routeSnapOptions, setRouteSnapOptions] =
     useState<PhysicalRouteSnapOptions>(DEFAULT_PHYSICAL_ROUTE_SNAP_OPTIONS);
   const [activeRightPanelSection, setActiveRightPanelSection] =
@@ -1312,12 +1319,16 @@ export function DxfWorkbench() {
       createTechnicalPhysicalAccessoryInventory({
         accessoryProposals: routeAccessoryProposals,
         diameterTransitionProposals,
+        equipment: planEquipment,
+        network: routeNetwork,
         result: technicalCalculationResult,
         routeTransitionResolutions,
       }),
     [
       diameterTransitionProposals,
+      planEquipment,
       routeAccessoryProposals,
+      routeNetwork,
       routeTransitionResolutions,
       technicalCalculationResult,
     ],
@@ -1347,8 +1358,8 @@ export function DxfWorkbench() {
     ],
   );
   const highlightedRouteSegmentIds = useMemo(
-    () =>
-      planBase
+    () => {
+      const ids = planBase
         ? relatedRouteSegmentIds({
             equipment: planEquipment,
             network: routeNetwork,
@@ -1356,8 +1367,19 @@ export function DxfWorkbench() {
             selectedEquipmentId: planBase.selectedEquipmentId,
             selection: selectedRouteEdit,
           })
-        : new Set<string>(),
+        : new Set<string>();
+
+      if (!focusedTechnicalReviewItem) {
+        return ids;
+      }
+
+      return new Set([
+        ...ids,
+        ...focusedTechnicalReviewItem.routeSegmentIds,
+      ]);
+    },
     [
+      focusedTechnicalReviewItem,
       planBase?.id,
       planBase?.selectedEquipmentId,
       planEquipment,
@@ -1747,6 +1769,12 @@ export function DxfWorkbench() {
   }, [activeReviewViewId, isRouteTechnicalReviewActive]);
 
   useEffect(() => {
+    if (!isRouteTechnicalReviewActive && focusedTechnicalReviewItem) {
+      setFocusedTechnicalReviewItem(null);
+    }
+  }, [focusedTechnicalReviewItem, isRouteTechnicalReviewActive]);
+
+  useEffect(() => {
     if (
       isRouteTechnicalReviewActive &&
       planBase &&
@@ -2068,6 +2096,7 @@ export function DxfWorkbench() {
     setActiveRightPanelSection("route");
     setActiveReviewViewId(viewId);
     setSectionRouteHeightEditor(null);
+    setFocusedTechnicalReviewItem(null);
     handleActivateBase(planBase.id);
     updateBase(planBase.id, (base) =>
       base.showEquipment && base.showRoute
@@ -2085,7 +2114,46 @@ export function DxfWorkbench() {
       return;
     }
 
-    handleReviewViewOpen(primaryTechnicalReviewPendingItem.viewId);
+    handleOpenTechnicalReviewPendingItem(primaryTechnicalReviewPendingItem);
+  }
+
+  function handleOpenTechnicalReviewPendingItem(
+    item: StandardTechnicalReviewGeometryPendingItem,
+  ) {
+    if (!planBase) {
+      return;
+    }
+
+    const routeSelection = technicalReviewPendingRouteSelection({
+      item,
+      network: routeNetwork,
+    });
+    const heightEditor = technicalReviewPendingHeightEditor({
+      equipment: planEquipment,
+      item,
+      network: routeNetwork,
+    });
+    const selectedEquipmentId =
+      routeSelection?.kind === "terminal" ? routeSelection.equipmentId : null;
+
+    handleReviewViewOpen(item.viewId);
+    setFocusedTechnicalReviewItem(item);
+    setSelectedRouteEdit(routeSelection);
+    setSectionRouteHeightEditor(heightEditor);
+    setRouteDraft(null);
+    setRouteIntentDraft(null);
+    setEquipmentDraft(null);
+    setRouteProposal(null);
+    setRouteProposalMode(null);
+    setRouteError(null);
+    setEquipmentError(null);
+    setSessionError(null);
+    updateBase(planBase.id, (base) => ({
+      ...base,
+      selectedEquipmentId,
+      showEquipment: true,
+      showRoute: true,
+    }));
   }
 
   function handleContinueToCalculateFromRoute() {
@@ -6790,6 +6858,7 @@ export function DxfWorkbench() {
               <TechnicalReviewCanvas
                 axonometricView={standardTechnicalAxonometricView}
                 equipment={planEquipment}
+                focusedItem={focusedTechnicalReviewItem}
                 sectionView={activeStandardTechnicalSectionView}
                 selectedHeightTarget={selectedSectionRouteHeightTarget}
                 viewId={activeReviewViewId}
@@ -10995,6 +11064,134 @@ function formatElevationInputForEdit(value: number) {
     maximumFractionDigits: 2,
     minimumFractionDigits: 2,
   });
+}
+
+function technicalReviewPendingRouteSelection(params: {
+  item: StandardTechnicalReviewGeometryPendingItem;
+  network: ManualRouteNetwork;
+}): PhysicalRouteEditSelection | null {
+  if (params.item.routeNodeId) {
+    const node =
+      params.network.nodes.find(
+        (candidate) => candidate.id === params.item.routeNodeId,
+      ) ?? null;
+
+    if (node) {
+      return routeNodeEditSelection(node);
+    }
+  }
+
+  const segmentId =
+    params.item.routeSegmentIds.find((candidate) =>
+      params.network.segments.some((segment) => segment.id === candidate),
+    ) ?? null;
+
+  return segmentId ? { kind: "segment", segmentId } : null;
+}
+
+function routeNodeEditSelection(node: RouteNode): PhysicalRouteEditSelection {
+  return node.kind === "appliance" && node.equipmentId
+    ? {
+        equipmentId: node.equipmentId,
+        kind: "terminal",
+        nodeId: node.id,
+      }
+    : {
+        kind: "node",
+        nodeId: node.id,
+      };
+}
+
+function technicalReviewPendingHeightEditor(params: {
+  equipment: WorkbenchEquipment[];
+  item: StandardTechnicalReviewGeometryPendingItem;
+  network: ManualRouteNetwork;
+}): SectionRouteHeightEditorState | null {
+  if (!technicalReviewPendingNeedsHeightEdit(params.item)) {
+    return null;
+  }
+
+  const target = technicalReviewPendingHeightTarget(
+    params.item,
+    params.network,
+  );
+
+  if (!target) {
+    return null;
+  }
+
+  const heightMeters = technicalReviewPendingCurrentHeightMeters({
+    equipment: params.equipment,
+    network: params.network,
+    target,
+  });
+
+  if (heightMeters === null) {
+    return null;
+  }
+
+  return {
+    error: null,
+    heightInput: formatElevationInputForEdit(heightMeters),
+    heightMeters,
+    target,
+  };
+}
+
+function technicalReviewPendingNeedsHeightEdit(
+  item: StandardTechnicalReviewGeometryPendingItem,
+) {
+  const message = item.message.toLocaleLowerCase("es-AR");
+
+  return (
+    message.includes("cota") ||
+    message.includes("altura") ||
+    /\bz\b/.test(message)
+  );
+}
+
+function technicalReviewPendingHeightTarget(
+  item: StandardTechnicalReviewGeometryPendingItem,
+  network: ManualRouteNetwork,
+): SectionRouteHeightTarget | null {
+  return item.routeNodeId &&
+    network.nodes.some((node) => node.id === item.routeNodeId)
+    ? { kind: "node", nodeId: item.routeNodeId }
+    : null;
+}
+
+function technicalReviewPendingCurrentHeightMeters(params: {
+  equipment: WorkbenchEquipment[];
+  network: ManualRouteNetwork;
+  target: SectionRouteHeightTarget;
+}) {
+  const target = params.target;
+
+  if (target.kind !== "node") {
+    return null;
+  }
+
+  const node =
+    params.network.nodes.find(
+      (candidate) => candidate.id === target.nodeId,
+    ) ?? null;
+
+  if (!node) {
+    return null;
+  }
+
+  const equipmentById = buildEquipmentIndex(params.equipment);
+  const nodeElevationById = createTechnicalRouteNodeElevationIndex({
+    equipment: params.equipment,
+    network: params.network,
+  });
+  const point = resolveTechnicalRouteNodePosition({
+    equipmentById,
+    node,
+    nodeElevationById,
+  });
+
+  return point ? pointZMeters(point) : null;
 }
 
 function formatMeters(value: number) {

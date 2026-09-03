@@ -36,6 +36,7 @@ import {
 } from "./technicalRoutePolyline";
 import {
   createTechnicalRouteNodeElevationIndex,
+  resolveTechnicalRouteNodePosition,
   resolveTechnicalRouteSegments,
   type TechnicalRouteNodeElevation,
 } from "./technicalRouteElevation";
@@ -99,6 +100,9 @@ export type SectionRouteProjectionPendingItem = {
   id: string;
   reason: string;
   sourceId?: string;
+  sourceLabel?: string;
+  sourceNodeId?: string | null;
+  sourceSegmentIds?: string[];
   sourceType: "accessory" | "equipment" | "link" | "segment";
 };
 
@@ -150,6 +154,8 @@ export function createSectionRouteProjection(params: {
   const resultSegmentById = new Map(
     (params.result?.segments ?? []).map((segment) => [segment.segmentId, segment]),
   );
+  const equipmentById = buildEquipmentIndex(params.equipment);
+  const nodeById = new Map(params.network.nodes.map((node) => [node.id, node]));
   const routeNodeElevations = createTechnicalRouteNodeElevationIndex({
     equipment: params.equipment,
     network: params.network,
@@ -189,10 +195,13 @@ export function createSectionRouteProjection(params: {
     .map((item) =>
       createProjectedAccessory({
         item,
+        equipmentById,
         link,
+        nodeById,
         pendingItems,
         relevantSegmentIds,
         resolvedSegmentById,
+        routeNodeElevations,
         sectionScaleMetersPerSourceUnit,
         toleranceRatio,
       }),
@@ -304,13 +313,16 @@ function createProjectedSegment(params: {
     (point) => !tWithinSectionSpan(point.t, params.toleranceRatio),
   );
   const missingDiameter = !params.adoptedDiameter;
-  const pendingReason = polyline.pendingReason
+  const rawPendingReason = polyline.pendingReason
     ? polyline.pendingReason
     : outsideRegisteredSpan
       ? "El tramo excede los extremos registrados del corte."
       : missingDiameter
         ? "Falta diametro adoptado para rotular el tramo en corte."
         : null;
+  const pendingReason = rawPendingReason
+    ? readableProjectionPendingReason(rawPendingReason)
+    : null;
 
   if (pendingReason) {
     params.pendingItems.push({
@@ -338,11 +350,14 @@ function createProjectedSegment(params: {
 }
 
 function createProjectedAccessory(params: {
+  equipmentById: Map<string, WorkbenchEquipment>;
   item: TechnicalPhysicalAccessory;
   link: SectionRouteProjectionLink & { registration: SectionRegistration };
+  nodeById: Map<string, RouteNode>;
   pendingItems: SectionRouteProjectionPendingItem[];
   relevantSegmentIds: Set<string>;
   resolvedSegmentById: Map<string, ResolvedRouteSegment>;
+  routeNodeElevations: Map<string, TechnicalRouteNodeElevation>;
   sectionScaleMetersPerSourceUnit: number;
   toleranceRatio: number;
 }): SectionRouteProjectedAccessory | null {
@@ -354,20 +369,26 @@ function createProjectedAccessory(params: {
     return null;
   }
 
-  const accessoryPlanPoint =
-    params.item.position && hasExplicitZ(params.item.position)
-      ? params.item.position
-      : terminalRouteAccessoryPlanPoint({
-          item: params.item,
-          resolvedSegmentById: params.resolvedSegmentById,
-        });
+  const accessoryPlanPoint = projectedAccessoryPlanPoint({
+    equipmentById: params.equipmentById,
+    item: params.item,
+    nodeById: params.nodeById,
+    resolvedSegmentById: params.resolvedSegmentById,
+    routeNodeElevations: params.routeNodeElevations,
+  });
+  const sourceLabel = projectedAccessorySourceLabel(params.item);
 
   if (!accessoryPlanPoint || !hasExplicitZ(accessoryPlanPoint)) {
-    const reason = "Falta posicion confirmada del accesorio fisico.";
+    const reason = `${accessoryLabel(params.item)}: falta posicion confirmada en ${projectedAccessoryLocationLabel(
+      params.item,
+    )}.`;
     params.pendingItems.push({
       id: `section-route:accessory:${params.item.id}`,
       reason,
       sourceId: params.item.id,
+      sourceLabel,
+      sourceNodeId: params.item.nodeId,
+      sourceSegmentIds: params.item.segmentIds,
       sourceType: "accessory",
     });
 
@@ -398,7 +419,9 @@ function createProjectedAccessory(params: {
     params.toleranceRatio,
   );
   const pendingReason = outsideRegisteredSpan
-    ? "El accesorio queda fuera de los extremos registrados del corte."
+    ? `${accessoryLabel(params.item)} queda fuera de los extremos registrados del corte en ${projectedAccessoryLocationLabel(
+        params.item,
+      )}.`
     : null;
 
   if (pendingReason) {
@@ -406,6 +429,9 @@ function createProjectedAccessory(params: {
       id: `section-route:accessory:${params.item.id}`,
       reason: pendingReason,
       sourceId: params.item.id,
+      sourceLabel,
+      sourceNodeId: params.item.nodeId,
+      sourceSegmentIds: params.item.segmentIds,
       sourceType: "accessory",
     });
   }
@@ -452,13 +478,22 @@ function createProjectedRouteAccessory(params: {
     accessoryKind: terminalKind,
     segment: params.segment,
   });
+  const sourceLabel = `${routeSegmentAccessoryLabel(
+    params.accessory,
+  )} en ${readableSegmentLocation(params.segment.id)}`;
 
   if (!planPoint || !hasExplicitZ(planPoint)) {
-    const reason = "Falta posicion confirmada del accesorio fisico.";
+    const reason = `${routeSegmentAccessoryLabel(
+      params.accessory,
+    )}: falta posicion confirmada en ${readableSegmentLocation(
+      params.segment.id,
+    )}.`;
     params.pendingItems.push({
       id: `section-route:accessory:${id}`,
       reason,
       sourceId: id,
+      sourceLabel,
+      sourceSegmentIds: [params.segment.id],
       sourceType: "accessory",
     });
 
@@ -489,7 +524,11 @@ function createProjectedRouteAccessory(params: {
     params.toleranceRatio,
   );
   const pendingReason = outsideRegisteredSpan
-    ? "El accesorio queda fuera de los extremos registrados del corte."
+    ? `${routeSegmentAccessoryLabel(
+        params.accessory,
+      )} queda fuera de los extremos registrados del corte en ${readableSegmentLocation(
+        params.segment.id,
+      )}.`
     : null;
 
   if (pendingReason) {
@@ -497,6 +536,8 @@ function createProjectedRouteAccessory(params: {
       id: `section-route:accessory:${id}`,
       reason: pendingReason,
       sourceId: id,
+      sourceLabel,
+      sourceSegmentIds: [params.segment.id],
       sourceType: "accessory",
     });
   }
@@ -783,6 +824,90 @@ function dedupePendingItems(items: SectionRouteProjectionPendingItem[]) {
   );
 }
 
+function projectedAccessoryPlanPoint(params: {
+  equipmentById: Map<string, WorkbenchEquipment>;
+  item: TechnicalPhysicalAccessory;
+  nodeById: Map<string, RouteNode>;
+  resolvedSegmentById: Map<string, ResolvedRouteSegment>;
+  routeNodeElevations: Map<string, TechnicalRouteNodeElevation>;
+}): Point2D | null {
+  const position = accessoryPositionWithTechnicalZ({
+    equipmentById: params.equipmentById,
+    item: params.item,
+    nodeById: params.nodeById,
+    position: params.item.position,
+    routeNodeElevations: params.routeNodeElevations,
+  });
+
+  if (position) {
+    return position;
+  }
+
+  const nodePosition = params.item.nodeId
+    ? technicalNodePosition({
+        equipmentById: params.equipmentById,
+        nodeById: params.nodeById,
+        nodeId: params.item.nodeId,
+        routeNodeElevations: params.routeNodeElevations,
+      })
+    : null;
+
+  if (nodePosition) {
+    return nodePosition;
+  }
+
+  return terminalRouteAccessoryPlanPoint({
+    item: params.item,
+    resolvedSegmentById: params.resolvedSegmentById,
+  });
+}
+
+function accessoryPositionWithTechnicalZ(params: {
+  equipmentById: Map<string, WorkbenchEquipment>;
+  item: TechnicalPhysicalAccessory;
+  nodeById: Map<string, RouteNode>;
+  position: Point2D | null;
+  routeNodeElevations: Map<string, TechnicalRouteNodeElevation>;
+}): Point2D | null {
+  if (!params.position) {
+    return null;
+  }
+
+  if (hasExplicitZ(params.position)) {
+    return params.position;
+  }
+
+  const nodePosition = params.item.nodeId
+    ? technicalNodePosition({
+        equipmentById: params.equipmentById,
+        nodeById: params.nodeById,
+        nodeId: params.item.nodeId,
+        routeNodeElevations: params.routeNodeElevations,
+      })
+    : null;
+
+  return nodePosition && hasExplicitZ(nodePosition)
+    ? withPointZ(params.position, nodePosition.z as number)
+    : params.position;
+}
+
+function technicalNodePosition(params: {
+  equipmentById: Map<string, WorkbenchEquipment>;
+  nodeById: Map<string, RouteNode>;
+  nodeId: string;
+  routeNodeElevations: Map<string, TechnicalRouteNodeElevation>;
+}) {
+  const node = params.nodeById.get(params.nodeId);
+
+  return node
+    ? resolveTechnicalRouteNodePosition({
+        equipmentById: params.equipmentById,
+        node,
+        nodeElevationById: params.routeNodeElevations,
+      })
+    : null;
+}
+
 function terminalRouteAccessoryPlanPoint(params: {
   item: TechnicalPhysicalAccessory;
   resolvedSegmentById: Map<string, ResolvedRouteSegment>;
@@ -930,6 +1055,54 @@ function routeSegmentAccessoryLabel(accessory: RouteSegmentAccessory) {
   }
 
   return accessory.catalogCode ?? accessory.catalogFamilyId ?? "Accesorio";
+}
+
+function projectedAccessorySourceLabel(item: TechnicalPhysicalAccessory) {
+  return `${accessoryLabel(item)} en ${projectedAccessoryLocationLabel(item)}`;
+}
+
+function projectedAccessoryLocationLabel(item: TechnicalPhysicalAccessory) {
+  if (item.segmentIds.length > 0) {
+    return formatSegmentLocation(item.segmentIds);
+  }
+
+  if (item.nodeId) {
+    return readableNodeLocation(item.nodeId);
+  }
+
+  return "ubicacion pendiente";
+}
+
+function formatSegmentLocation(segmentIds: string[]) {
+  const readable = segmentIds.map(readableSegmentLocation);
+  const unique = [...new Set(readable)].sort();
+
+  if (unique.length === 1) {
+    return unique[0] as string;
+  }
+
+  return unique.slice(0, 2).join(" / ") +
+    (unique.length > 2 ? ` +${unique.length - 2}` : "");
+}
+
+function readableSegmentLocation(segmentId: string) {
+  return segmentId.startsWith("route-segment:")
+    ? "tramo del recorrido"
+    : `tramo ${segmentId}`;
+}
+
+function readableNodeLocation(nodeId: string) {
+  return nodeId.startsWith("route-node:")
+    ? "punto del recorrido"
+    : `punto ${nodeId}`;
+}
+
+function readableProjectionPendingReason(reason: string) {
+  return reason
+    .replace(/\bphysical-accessory:[^\s,.;)]+/g, "accesorio fisico")
+    .replace(/\broute-accessory:[^\s,.;)]+/g, "accesorio fisico")
+    .replace(/\broute-segment:[^\s,.;)]+/g, "tramo del recorrido")
+    .replace(/\broute-node:[^\s,.;)]+/g, "punto del recorrido");
 }
 
 function accessoryLabel(item: TechnicalPhysicalAccessory) {

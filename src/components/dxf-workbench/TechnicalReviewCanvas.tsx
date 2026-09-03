@@ -20,6 +20,7 @@ import type {
   SectionRouteProjectedSegment,
 } from "@/lib/sections/routeProjection";
 import type {
+  StandardTechnicalReviewGeometryPendingItem,
   StandardTechnicalReviewViewId,
   StandardTechnicalSectionView,
 } from "@/lib/sections/standardTechnicalViews";
@@ -27,6 +28,7 @@ import type {
 type TechnicalReviewCanvasProps = {
   axonometricView: TechnicalAxonometricView | null;
   equipment: WorkbenchEquipment[];
+  focusedItem: StandardTechnicalReviewGeometryPendingItem | null;
   sectionView: StandardTechnicalSectionView | null;
   selectedHeightTarget: SectionRouteHeightTarget | null;
   viewId: Exclude<StandardTechnicalReviewViewId, "plan">;
@@ -75,6 +77,7 @@ const DEFAULT_SECTION_BOUNDS = {
 export function TechnicalReviewCanvas({
   axonometricView,
   equipment,
+  focusedItem,
   sectionView,
   selectedHeightTarget,
   viewId,
@@ -93,6 +96,7 @@ export function TechnicalReviewCanvas({
         {viewId === "axo" ? (
           axonometricView ? (
             <AxonometricCanvas
+              focusedItem={focusedItem}
               selectedHeightTarget={selectedHeightTarget}
               view={axonometricView}
               onHeightTargetSelect={onHeightTargetSelect}
@@ -103,6 +107,7 @@ export function TechnicalReviewCanvas({
         ) : sectionView ? (
           <SectionCanvas
             equipment={equipment}
+            focusedItem={focusedItem}
             selectedHeightTarget={selectedHeightTarget}
             view={sectionView}
             onHeightTargetSelect={onHeightTargetSelect}
@@ -117,11 +122,13 @@ export function TechnicalReviewCanvas({
 
 function SectionCanvas({
   equipment,
+  focusedItem,
   selectedHeightTarget,
   view,
   onHeightTargetSelect,
 }: {
   equipment: WorkbenchEquipment[];
+  focusedItem: StandardTechnicalReviewGeometryPendingItem | null;
   selectedHeightTarget: SectionRouteHeightTarget | null;
   view: StandardTechnicalSectionView;
   onHeightTargetSelect: (
@@ -173,6 +180,10 @@ function SectionCanvas({
         <g>
           {view.projection.segments.map((segment) => (
             <SectionSegmentPath
+              focused={focusedItemMatchesSegment(
+                focusedItem,
+                segment.segmentId,
+              )}
               key={segment.id}
               segment={segment}
               transform={transform}
@@ -181,6 +192,10 @@ function SectionCanvas({
           {view.projection.accessories.map((accessory) => (
             <SectionAccessoryMarker
               accessory={accessory}
+              focused={focusedItemMatchesSectionAccessory(
+                focusedItem,
+                accessory,
+              )}
               key={accessory.id}
               transform={transform}
             />
@@ -201,6 +216,7 @@ function SectionCanvas({
           {view.projection.equipment.map((item, index) => (
             <SectionEquipmentMarker
               equipment={item}
+              focused={focusedItemMatchesNode(focusedItem, item.nodeId)}
               index={index}
               key={item.nodeId}
               selectedHeightTarget={selectedHeightTarget}
@@ -220,9 +236,11 @@ function SectionCanvas({
 }
 
 function SectionSegmentPath({
+  focused,
   segment,
   transform,
 }: {
+  focused: boolean;
   segment: SectionRouteProjectedSegment;
   transform: (point: Point2D) => Point2D;
 }) {
@@ -241,20 +259,28 @@ function SectionSegmentPath({
       data-section-route-segment-status={segment.status}
       fill="none"
       pointerEvents="none"
-      stroke={segment.status === "pending" ? "#d97706" : "#0f766e"}
+      stroke={
+        focused
+          ? "#be123c"
+          : segment.status === "pending"
+            ? "#d97706"
+            : "#0f766e"
+      }
       strokeDasharray={segment.status === "pending" ? "7 5" : undefined}
       strokeLinecap="round"
       strokeLinejoin="round"
-      strokeWidth="3.2"
+      strokeWidth={focused ? "4.4" : "3.2"}
     />
   );
 }
 
 function SectionAccessoryMarker({
   accessory,
+  focused,
   transform,
 }: {
   accessory: SectionRouteProjectedAccessory;
+  focused: boolean;
   transform: (point: Point2D) => Point2D;
 }) {
   if (!accessory.sectionPoint) {
@@ -262,10 +288,22 @@ function SectionAccessoryMarker({
   }
 
   const point = transform(accessory.sectionPoint);
-  const stroke = accessory.status === "pending" ? "#d97706" : "#6d28d9";
+  const stroke = focused
+    ? "#be123c"
+    : accessory.status === "pending"
+      ? "#d97706"
+      : "#6d28d9";
 
   return (
     <g pointerEvents="none" transform={`translate(${point.x} ${point.y})`}>
+      {focused ? (
+        <circle
+          fill="none"
+          r="9"
+          stroke="#be123c"
+          strokeWidth="2"
+        />
+      ) : null}
       {accessory.kind === "valve" ? (
         <path
           d="M -8 0 L -2 -5 L 2 5 L 8 0"
@@ -289,6 +327,7 @@ function SectionAccessoryMarker({
 
 function SectionEquipmentMarker({
   equipment,
+  focused,
   index,
   selectedHeightTarget,
   sourceEquipment,
@@ -297,6 +336,7 @@ function SectionEquipmentMarker({
   onHeightTargetSelect,
 }: {
   equipment: SectionRouteProjectedEquipment;
+  focused: boolean;
   index: number;
   selectedHeightTarget: SectionRouteHeightTarget | null;
   sourceEquipment: WorkbenchEquipment | null;
@@ -324,6 +364,7 @@ function SectionEquipmentMarker({
     selectedHeightTarget,
     equipment.heightTarget,
   );
+  const isFocused = focused || selected;
   const offset = sectionEquipmentLabelOffset(index, totalEquipment, isSupply);
   const labelPoint = offsetPoint(bodyPoint, offset.x, offset.y);
   const label = `${equipmentShortCode(equipment, sourceEquipment)} ${formatSignedMeters(
@@ -370,11 +411,11 @@ function SectionEquipmentMarker({
       <circle
         cx={connectionPoint.x}
         cy={connectionPoint.y}
-        fill={selected ? "#fff1f2" : "#ffffff"}
+        fill={isFocused ? "#fff1f2" : "#ffffff"}
         pointerEvents="none"
         r="3.4"
-        stroke={selected ? "#be123c" : stroke}
-        strokeWidth={selected ? 2.3 : 1.8}
+        stroke={isFocused ? "#be123c" : stroke}
+        strokeWidth={isFocused ? 2.3 : 1.8}
       />
       <HeightHandle
         currentHeightMeters={equipment.zMeters}
@@ -402,10 +443,12 @@ function SectionEquipmentMarker({
 }
 
 function AxonometricCanvas({
+  focusedItem,
   selectedHeightTarget,
   view,
   onHeightTargetSelect,
 }: {
+  focusedItem: StandardTechnicalReviewGeometryPendingItem | null;
   selectedHeightTarget: SectionRouteHeightTarget | null;
   view: TechnicalAxonometricView;
   onHeightTargetSelect: (
@@ -438,6 +481,7 @@ function AxonometricCanvas({
         <g>
           {view.segments.map((segment) => (
             <AxonometricSegmentLine
+              focused={focusedItemMatchesSegment(focusedItem, segment.id)}
               key={segment.id}
               segment={segment}
               transform={transform}
@@ -446,6 +490,10 @@ function AxonometricCanvas({
           {view.accessories.map((accessory) => (
             <AxonometricAccessoryMarker
               accessory={accessory}
+              focused={focusedItemMatchesAxonometricAccessory(
+                focusedItem,
+                accessory,
+              )}
               key={accessory.id}
               transform={transform}
             />
@@ -454,6 +502,7 @@ function AxonometricCanvas({
             <AxonometricNodeMarker
               key={node.id}
               labelIndex={labeledNodeIds.indexOf(node.id)}
+              focused={focusedItemMatchesNode(focusedItem, node.id)}
               node={node}
               selectedHeightTarget={selectedHeightTarget}
               transform={transform}
@@ -474,9 +523,11 @@ function AxonometricCanvas({
 }
 
 function AxonometricSegmentLine({
+  focused,
   segment,
   transform,
 }: {
+  focused: boolean;
   segment: TechnicalAxonometricSegment;
   transform: (point: Point2D) => Point2D;
 }) {
@@ -497,20 +548,28 @@ function AxonometricSegmentLine({
       d={segmentPath}
       fill="none"
       pointerEvents="none"
-      stroke={segment.status === "pending" ? "#d97706" : "#263238"}
+      stroke={
+        focused
+          ? "#be123c"
+          : segment.status === "pending"
+            ? "#d97706"
+            : "#263238"
+      }
       strokeDasharray={segment.status === "pending" ? "7 5" : undefined}
       strokeLinecap="round"
       strokeLinejoin="round"
-      strokeWidth="3.1"
+      strokeWidth={focused ? "4.4" : "3.1"}
     />
   );
 }
 
 function AxonometricAccessoryMarker({
   accessory,
+  focused,
   transform,
 }: {
   accessory: TechnicalAxonometricAccessory;
+  focused: boolean;
   transform: (point: Point2D) => Point2D;
 }) {
   if (!accessory.projected) {
@@ -518,10 +577,22 @@ function AxonometricAccessoryMarker({
   }
 
   const point = transform(accessory.projected);
-  const stroke = accessory.status === "resolved" ? "#6d28d9" : "#d97706";
+  const stroke = focused
+    ? "#be123c"
+    : accessory.status === "resolved"
+      ? "#6d28d9"
+      : "#d97706";
 
   return (
     <g pointerEvents="none" transform={`translate(${point.x} ${point.y})`}>
+      {focused ? (
+        <circle
+          fill="none"
+          r="9"
+          stroke="#be123c"
+          strokeWidth="2"
+        />
+      ) : null}
       <path
         d="M -5 0 L 0 -5 L 5 0 L 0 5 Z"
         fill="#ffffff"
@@ -533,12 +604,14 @@ function AxonometricAccessoryMarker({
 }
 
 function AxonometricNodeMarker({
+  focused,
   labelIndex,
   node,
   selectedHeightTarget,
   transform,
   onHeightTargetSelect,
 }: {
+  focused: boolean;
   labelIndex: number;
   node: TechnicalAxonometricNode;
   selectedHeightTarget: SectionRouteHeightTarget | null;
@@ -562,6 +635,7 @@ function AxonometricNodeMarker({
     selectedHeightTarget,
     heightTarget,
   );
+  const isFocused = focused || isSelected;
   const label = axonometricNodeLabel(node, zMeters);
   const labelOffset = axonometricNodeLabelOffset(labelIndex);
   const labelPoint = offsetPoint(point, labelOffset.x, labelOffset.y);
@@ -585,10 +659,10 @@ function AxonometricNodeMarker({
     >
       {node.kind === "derivation" ? (
         <rect
-          fill={isSelected ? "#fff1f2" : marker.fill}
+          fill={isFocused ? "#fff1f2" : marker.fill}
           height="11"
-          stroke={isSelected ? "#be123c" : marker.stroke}
-          strokeWidth={isSelected ? 2.3 : 1.7}
+          stroke={isFocused ? "#be123c" : marker.stroke}
+          strokeWidth={isFocused ? 2.3 : 1.7}
           width="11"
           x={point.x - 5.5}
           y={point.y - 5.5}
@@ -597,10 +671,10 @@ function AxonometricNodeMarker({
         <circle
           cx={point.x}
           cy={point.y}
-          fill={isSelected ? "#fff1f2" : marker.fill}
+          fill={isFocused ? "#fff1f2" : marker.fill}
           r={marker.radius}
-          stroke={isSelected ? "#be123c" : marker.stroke}
-          strokeWidth={isSelected ? 2.3 : 1.7}
+          stroke={isFocused ? "#be123c" : marker.stroke}
+          strokeWidth={isFocused ? 2.3 : 1.7}
         />
       )}
       {label ? (
@@ -649,6 +723,61 @@ function AxonometricNodeMarker({
         <title>{`Editar cota ${formatSignedMeters(zMeters)}`}</title>
       ) : null}
     </g>
+  );
+}
+
+function focusedItemMatchesSegment(
+  item: StandardTechnicalReviewGeometryPendingItem | null,
+  segmentId: string,
+) {
+  return Boolean(
+    item &&
+      (item.routeSegmentIds.includes(segmentId) ||
+        item.focusSourceId === segmentId ||
+        item.sourceId === segmentId),
+  );
+}
+
+function focusedItemMatchesSectionAccessory(
+  item: StandardTechnicalReviewGeometryPendingItem | null,
+  accessory: SectionRouteProjectedAccessory,
+) {
+  if (!item || item.sourceType !== "accessory") {
+    return false;
+  }
+
+  return (
+    item.focusSourceId === accessory.id ||
+    item.sourceId === accessory.id ||
+    accessory.sourceIds.includes(item.focusSourceId) ||
+    accessory.sourceIds.includes(item.sourceId)
+  );
+}
+
+function focusedItemMatchesAxonometricAccessory(
+  item: StandardTechnicalReviewGeometryPendingItem | null,
+  accessory: TechnicalAxonometricAccessory,
+) {
+  if (!item || item.sourceType !== "accessory") {
+    return false;
+  }
+
+  return (
+    item.focusSourceId === accessory.id ||
+    item.sourceId === accessory.id ||
+    (item.routeNodeId !== null && item.routeNodeId === accessory.nodeId)
+  );
+}
+
+function focusedItemMatchesNode(
+  item: StandardTechnicalReviewGeometryPendingItem | null,
+  nodeId: string,
+) {
+  return Boolean(
+    item &&
+      (item.routeNodeId === nodeId ||
+        item.focusSourceId === nodeId ||
+        item.sourceId === nodeId),
   );
 }
 

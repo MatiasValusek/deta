@@ -1,8 +1,16 @@
 import { SIGAS_PIPE_SYSTEM } from "@/lib/calculation/pipeSystems/sigas";
 import { SIGAS_DIAMETERS } from "@/lib/calculation/pipeSystems/sigas/sigasData";
+import {
+  getSigasAccessoryCatalogCandidates,
+  matchSigasAccessoryProposal,
+} from "@/lib/calculation/pipeSystems/sigas/sigasAccessoryProposal";
 import type { PipeDiameterReference } from "@/lib/calculation/pipeSystem";
 import type { TechnicalAdoptedDiameterValidation } from "@/lib/calculation/technicalAdoptedDiameterValidation";
-import type { TechnicalPhysicalAccessoryInventory } from "@/lib/calculation/technicalPhysicalAccessories";
+import {
+  createTechnicalPhysicalAccessoryInventory,
+  type TechnicalPhysicalAccessoryInventory,
+} from "@/lib/calculation/technicalPhysicalAccessories";
+import { accessoryCatalogSelectionFromCandidate } from "@/lib/calculation/accessoryCatalogCandidates";
 import {
   calculateTechnicalTree,
   type TechnicalCalculationResult,
@@ -14,6 +22,12 @@ import {
   getConnectedApplianceEquipmentIds,
   resolveRouteSegments,
 } from "@/lib/routing/network";
+import {
+  confirmRouteAccessoryProposal,
+  detectRouteAccessoryProposals,
+  resolveAccessoryProposalTechnicalOwner,
+  withAccessoryProposalSystemMatch,
+} from "@/lib/routing/routeAccessoryProposals";
 import type {
   ManualRouteNetwork,
   ResolvedRouteSegment,
@@ -60,6 +74,7 @@ export function runStandardTechnicalViewsVerifications() {
       assertXyAndZEditsReachEveryReviewView(fixture);
       assertRouteNodeZIsInferredFromConfirmedGeometry(fixture);
       assertMissingApplianceZBlocksCalculationButKeepsGeometryVisible(fixture);
+      assertConfirmedRouteAccessoryKeepsCalculationContinuationEnabled(fixture);
     },
   );
 
@@ -128,10 +143,16 @@ function simpleReviewFixture(): SimpleReviewFixture {
   };
 }
 
-function createViews(fixture: SimpleReviewFixture) {
-  const result = calculateResult(fixture);
+function createViews(
+  fixture: SimpleReviewFixture,
+  options: {
+    inventory?: TechnicalPhysicalAccessoryInventory;
+    result?: TechnicalCalculationResult;
+  } = {},
+) {
+  const result = options.result ?? calculateResult(fixture);
   const adoptedDiameterValidation = adoptedValidation(result);
-  const inventory = emptyInventory();
+  const inventory = options.inventory ?? emptyInventory();
   const sectionAA = createStandardTechnicalSectionView({
     adoptedDiameterValidation,
     axis: "x",
@@ -414,6 +435,13 @@ function assertMissingApplianceZBlocksCalculationButKeepsGeometryVisible(
     pendingItems.some((item) => item.actionLabel.includes(item.viewLabel)),
     "La observacion debe tener accion directa a la vista tecnica.",
   );
+  assert(
+    pendingItems.some(
+      (item) =>
+        item.routeNodeId === "A1" || item.routeSegmentIds.includes("J-A1"),
+    ),
+    "La observacion debe incluir foco accionable de nodo o tramo.",
+  );
   assertEqual(routeReviewState.canOpenReview, true);
   assertEqual(readiness.canContinueToCalculate, false);
   assert(readiness.observationCount > 0, "La observacion debe mostrarse en Revisar.");
@@ -428,6 +456,105 @@ function assertMissingApplianceZBlocksCalculationButKeepsGeometryVisible(
   assertPoint(
     axonometricSegment(pendingViews.axonometric, "J-A1").path.at(-1)?.planPoint,
     { x: 5, y: 2 },
+  );
+}
+
+function assertConfirmedRouteAccessoryKeepsCalculationContinuationEnabled(
+  fixture: SimpleReviewFixture,
+) {
+  const resultBeforeCorrection = calculateResult(fixture);
+  const diameterBySegmentId = diameterBySegmentIdFromResult(
+    resultBeforeCorrection,
+  );
+  const proposedAccessory =
+    detectRouteAccessoryProposals({
+      diameterBySegmentId,
+      equipment: fixture.equipment,
+      network: fixture.network,
+    }).find((proposal) => proposal.kind === "tee" && proposal.nodeId === "J") ??
+    null;
+
+  assert(
+    proposedAccessory,
+    "Calcular debe detectar una propuesta pendiente de accesorio en J.",
+  );
+
+  const ownerResolution = resolveAccessoryProposalTechnicalOwner({
+    diameterBySegmentId,
+    network: fixture.network,
+    proposal: proposedAccessory,
+  });
+  const reviewedProposal = withAccessoryProposalSystemMatch(
+    proposedAccessory,
+    matchSigasAccessoryProposal(proposedAccessory),
+  );
+  const candidate =
+    getSigasAccessoryCatalogCandidates({
+      diameterBySegmentId,
+      ownerResolution,
+      proposal: reviewedProposal,
+    }).find((item) => item.status === "compatible") ?? null;
+
+  assert(candidate, "La propuesta debe tener un candidato SIGAS confirmable.");
+
+  const confirmation = confirmRouteAccessoryProposal({
+    decidedAt: 1,
+    network: fixture.network,
+    origin: "user_confirmed",
+    ownerResolution,
+    proposal: reviewedProposal,
+    selection: accessoryCatalogSelectionFromCandidate(candidate),
+  });
+
+  assert(confirmation.ok, confirmation.ok ? "" : confirmation.message);
+
+  const confirmedAccessoryFixture: SimpleReviewFixture = {
+    equipment: fixture.equipment,
+    network: confirmation.network,
+  };
+  const result = calculateResult(confirmedAccessoryFixture);
+  const inventory = createTechnicalPhysicalAccessoryInventory({
+    equipment: confirmedAccessoryFixture.equipment,
+    network: confirmedAccessoryFixture.network,
+    result,
+  });
+  const views = createViews(confirmedAccessoryFixture, {
+    inventory,
+    result,
+  });
+  const accessory = inventory.items.find(
+    (item) => item.source === "route_accessory",
+  );
+  const pendingCount = countStandardTechnicalReviewGeometryPendingItems({
+    axonometricView: views.axonometric,
+    sectionViews: [views.sectionAA, views.sectionBB],
+  });
+  const routeReviewState = createRouteReviewState({
+    equipment: confirmedAccessoryFixture.equipment,
+    hasActiveProposal: false,
+    hasRouteCycle: false,
+    network: confirmedAccessoryFixture.network,
+    routeRestrictionCount: 0,
+  });
+  const readiness = createReviewCalculationReadiness({
+    routeReviewState,
+    technicalGeometryPendingCount: pendingCount,
+  });
+
+  assert(accessory, "El accesorio confirmado debe entrar al inventario fisico.");
+  assertEqual(accessory.nodeId, "J");
+  assertPoint(accessory.position, { x: 2, y: 0, z: 0 });
+  assertEqual(inventory.pendingItems.length, 0);
+  assertEqual(pendingCount, 0);
+  assertEqual(readiness.canContinueToCalculate, true);
+}
+
+function diameterBySegmentIdFromResult(result: TechnicalCalculationResult) {
+  return Object.fromEntries(
+    result.segments.map((segment) => [
+      segment.segmentId,
+      segment.calculatedDiameter ?? segment.provisionalDiameter ?? D20,
+    ]),
   );
 }
 

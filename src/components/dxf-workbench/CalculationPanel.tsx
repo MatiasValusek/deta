@@ -223,13 +223,17 @@ export function CalculationPanel({
       createTechnicalPhysicalAccessoryInventory({
         accessoryProposals,
         diameterTransitionProposals,
+        equipment,
+        network: routeNetwork,
         result,
         routeTransitionResolutions,
       }),
     [
       accessoryProposals,
       diameterTransitionProposals,
+      equipment,
       result,
+      routeNetwork,
       routeTransitionResolutions,
     ],
   );
@@ -1986,7 +1990,7 @@ function TechnicalAxonometricSection({
         <ul className="mt-2 space-y-1 text-[10px] text-[var(--muted)]">
           {view.pendingItems.slice(0, 5).map((item) => (
             <li key={item.id}>
-              {item.sourceId}: {item.message}
+              {item.sourceLabel ?? "Observacion"}: {item.message}
             </li>
           ))}
           {view.pendingItems.length > 5 ? (

@@ -945,22 +945,36 @@ function routeEditSelectionLabel(
   }
 
   if (selection.kind === "segment") {
-    return `Tramo ${selection.segmentId}`;
+    return `Tramo ${readableRouteSegmentId(selection.segmentId)}`;
   }
 
   if (selection.kind === "vertex") {
-    return `Vertice ${selection.vertexIndex + 1} de ${selection.segmentId}`;
+    return `Vertice ${selection.vertexIndex + 1} de ${readableRouteSegmentId(
+      selection.segmentId,
+    )}`;
   }
 
   if (selection.kind === "terminal") {
     return `Terminal ${equipmentName(selection.equipmentId, equipment)}`;
   }
 
-  return `Nodo ${selection.nodeId}`;
+  return `Nodo ${readableRouteNodeId(selection.nodeId)}`;
 }
 
 function equipmentName(equipmentId: string, equipment: WorkbenchEquipment[]) {
   return equipment.find((item) => item.id === equipmentId)?.name ?? equipmentId;
+}
+
+function readableRouteSegmentId(segmentId: string) {
+  return segmentId.startsWith("route-segment:")
+    ? "del recorrido"
+    : segmentId;
+}
+
+function readableRouteNodeId(nodeId: string) {
+  return nodeId.startsWith("route-node:")
+    ? "del recorrido"
+    : nodeId;
 }
 
 function RouteIntentDraftControls({

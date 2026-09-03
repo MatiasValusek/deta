@@ -34,8 +34,11 @@ export type StandardTechnicalSectionAxis = "x" | "y";
 
 export type StandardTechnicalReviewGeometryPendingItem = {
   actionLabel: string;
+  focusSourceId: string;
   id: string;
   message: string;
+  routeNodeId: string | null;
+  routeSegmentIds: string[];
   sourceId: string;
   sourceLabel: string;
   sourceType: string;
@@ -140,6 +143,9 @@ export function collectStandardTechnicalReviewGeometryPendingItems(params: {
           id: item.id,
           message: item.reason,
           sourceId: item.sourceId ?? item.id,
+          sourceLabel: item.sourceLabel,
+          sourceNodeId: item.sourceNodeId,
+          sourceSegmentIds: item.sourceSegmentIds,
           sourceType: item.sourceType,
           viewId: view.id,
           viewLabel: view.title,
@@ -163,6 +169,9 @@ export function collectStandardTechnicalReviewGeometryPendingItems(params: {
           id: `${view.id}:segment:${segment.segmentId}`,
           message: segment.pendingReason,
           sourceId: segment.segmentId,
+          sourceLabel: `Tramo ${readableTechnicalSourceId(segment.segmentId)}`,
+          sourceNodeId: null,
+          sourceSegmentIds: [segment.segmentId],
           sourceType: "segment",
           viewId: view.id,
           viewLabel: view.title,
@@ -183,6 +192,9 @@ export function collectStandardTechnicalReviewGeometryPendingItems(params: {
         id: item.id,
         message: item.message,
         sourceId: item.sourceId,
+        sourceLabel: item.sourceLabel,
+        sourceNodeId: item.sourceNodeId,
+        sourceSegmentIds: item.sourceSegmentIds,
         sourceType: item.type,
         viewId: "axo",
         viewLabel: "Axo",
@@ -200,6 +212,9 @@ function addPendingItem(
     id: string;
     message: string;
     sourceId: string;
+    sourceLabel?: string;
+    sourceNodeId?: string | null;
+    sourceSegmentIds?: string[];
     sourceType: string;
     viewId: Exclude<StandardTechnicalReviewViewId, "plan">;
     viewLabel: string;
@@ -217,11 +232,23 @@ function addPendingItem(
 
   pendingByKey.set(key, {
     ...item,
-    actionLabel: `Corregir en ${item.viewLabel}`,
-    sourceLabel: `${technicalPendingSourceTypeLabel(item.sourceType)} ${
-      item.sourceId
-    }`,
+    actionLabel: technicalPendingActionLabel(item.sourceType, item.viewLabel),
+    focusSourceId: item.sourceId,
+    message: readableTechnicalPendingMessage(item.message),
+    routeNodeId: item.sourceNodeId ?? routeNodeIdFromSource(item),
+    routeSegmentIds: item.sourceSegmentIds ?? routeSegmentIdsFromSource(item),
+    sourceLabel:
+      item.sourceLabel ??
+      `${technicalPendingSourceTypeLabel(
+        item.sourceType,
+      )} ${readableTechnicalSourceId(item.sourceId)}`,
   });
+}
+
+function technicalPendingActionLabel(sourceType: string, viewLabel: string) {
+  return sourceType === "accessory"
+    ? `Corregir accesorio en ${viewLabel}`
+    : `Corregir en ${viewLabel}`;
 }
 
 function technicalPendingSourceTypeLabel(sourceType: string) {
@@ -242,6 +269,46 @@ function technicalPendingSourceTypeLabel(sourceType: string) {
   }
 
   return "Fuente";
+}
+
+function routeNodeIdFromSource(item: { sourceId: string; sourceType: string }) {
+  return item.sourceType === "node" || item.sourceType === "equipment"
+    ? item.sourceId
+    : null;
+}
+
+function routeSegmentIdsFromSource(item: {
+  sourceId: string;
+  sourceType: string;
+}) {
+  return item.sourceType === "segment" ? [item.sourceId] : [];
+}
+
+function readableTechnicalSourceId(sourceId: string) {
+  if (
+    sourceId.startsWith("physical-accessory:") ||
+    sourceId.startsWith("route-accessory:")
+  ) {
+    return "fisico";
+  }
+
+  if (sourceId.startsWith("route-node:")) {
+    return "del recorrido";
+  }
+
+  if (sourceId.startsWith("route-segment:")) {
+    return "del recorrido";
+  }
+
+  return sourceId;
+}
+
+function readableTechnicalPendingMessage(message: string) {
+  return message
+    .replace(/\bphysical-accessory:[^\s,.;)]+/g, "accesorio fisico")
+    .replace(/\broute-accessory:[^\s,.;)]+/g, "accesorio fisico")
+    .replace(/\broute-segment:[^\s,.;)]+/g, "tramo del recorrido")
+    .replace(/\broute-node:[^\s,.;)]+/g, "punto del recorrido");
 }
 
 function createAutomaticSectionProjectionLink(params: {
