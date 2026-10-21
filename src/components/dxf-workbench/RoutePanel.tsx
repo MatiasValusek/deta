@@ -780,6 +780,16 @@ function ProposalSummary({
         </div>
       ) : null}
 
+      {(proposal.architecturalWarnings ?? []).map((warning) => (
+        <div
+          className="mt-2 rounded border border-[#f1d28a] bg-[#fffaf0] px-2 py-1 text-[var(--warning)]"
+          key={warning.id}
+        >
+          {warning.message} Debe revisarse antes de considerar verificada la
+          propuesta.
+        </div>
+      ))}
+
       {isOutdated ? (
         <div className="mt-2 rounded border border-[#f1d28a] bg-[#fffaf0] px-2 py-1 text-[var(--warning)]">
           Cambiaron equipos, escala o restricciones. Regenera antes de aceptar.

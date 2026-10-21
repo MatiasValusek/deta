@@ -1,4 +1,9 @@
 import { pointInPolygon, polygonBounds } from "@/lib/constraints/geometry";
+import {
+  createArchitecturalRouteWarnings,
+  type ArchitecturalRouteContext,
+  type ArchitecturalRouteGuide,
+} from "@/lib/architecture/routeContext";
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
 import type { Bounds, Point2D } from "@/lib/geometry/types";
 import {
@@ -41,6 +46,7 @@ import type {
 } from "@/lib/routing/types";
 
 export type GenerateAutomaticRouteProposalInput = {
+  architecture?: ArchitecturalRouteContext;
   baseNetwork?: ManualRouteNetwork;
   bounds: Bounds | null;
   equipment: WorkbenchEquipment[];
@@ -63,6 +69,7 @@ type IdContext = {
 
 type TreePathCandidate = {
   equipment: WorkbenchEquipment;
+  guidedLengthSource: number;
   path: Point2D[];
   routeLengthSource: number;
   turnCount: number;
@@ -79,6 +86,7 @@ type SearchState = {
 };
 
 type StateRecord = SearchState & {
+  guidedLength: number;
   length: number;
   previous: StateRecord | null;
   turns: number;
@@ -90,6 +98,7 @@ const COORDINATE_EPSILON = 0.000001;
 const MAX_COORDINATE_COUNT = 72;
 const MAX_GRID_NODE_COUNT = 5200;
 const MAX_SEARCH_VISITS = 16000;
+const MAX_GUIDE_COORDINATE_SEGMENTS = 48;
 const ROUTE_HASH_PREFIX = "route-proposal";
 
 function cloneRouteNetwork(network: ManualRouteNetwork | undefined): ManualRouteNetwork {
@@ -139,6 +148,7 @@ export function generateAutomaticRouteProposal(
     });
 
     return {
+      architecturalWarnings: [],
       baseId: input.planBaseId,
       derivationCount: 0,
       diagnostics: appliances.map((equipment) => ({
@@ -182,6 +192,7 @@ export function generateAutomaticRouteProposal(
     network,
     input.equipment,
   );
+  const guideIndex = createGuideIndex(input.architecture?.guides ?? []);
 
   let remaining = appliances.filter((equipment) => {
     if (!equipmentBelongsToProposalPage(equipment, supply, input.pdfPageNumber)) {
@@ -214,11 +225,13 @@ export function generateAutomaticRouteProposal(
           input,
           network,
           equipment,
+          guideIndex,
           input.preferredBranchEquipmentIdsByApplianceId?.[equipment.id] ?? [],
         );
         return candidate
           ? {
               equipment,
+              guidedLengthSource: candidate.guidedLengthSource,
               path: candidate.path,
               routeLengthSource: candidate.routeLengthSource,
               turnCount: candidate.turnCount,
@@ -288,6 +301,11 @@ export function generateAutomaticRouteProposal(
         : "invalid";
 
   return {
+    architecturalWarnings: createArchitecturalRouteWarnings({
+      equipment: input.equipment,
+      network,
+      pendingStructures: input.architecture?.pendingStructures ?? [],
+    }),
     baseId: input.planBaseId,
     derivationCount: getDerivationNodeIds(network).length,
     diagnostics,
@@ -315,8 +333,14 @@ function findPathFromTreeToEquipment(
   input: GenerateAutomaticRouteProposalInput,
   network: ManualRouteNetwork,
   equipment: WorkbenchEquipment,
+  guideIndex: GuideIndex,
   preferredBranchEquipmentIds: string[] = [],
-): { path: Point2D[]; routeLengthSource: number; turnCount: number } | null {
+): {
+  guidedLengthSource: number;
+  path: Point2D[];
+  routeLengthSource: number;
+  turnCount: number;
+} | null {
   const target = routeTargetPointForEquipment(network, input.equipment, equipment);
 
   if (pointViolatesRestrictions(target, input.restrictions, 0)) {
@@ -378,6 +402,7 @@ function findPathFromTreeToEquipment(
     preferredSeedRecords.length > 0
       ? runOrthogonalSearch({
           currentNetwork: network,
+          guideIndex,
           input,
           targetKey,
           validPoints,
@@ -390,6 +415,7 @@ function findPathFromTreeToEquipment(
     preferredResult ??
     runOrthogonalSearch({
       currentNetwork: network,
+      guideIndex,
       input,
       targetKey,
       validPoints,
@@ -413,6 +439,7 @@ function findPathFromTreeToEquipment(
   }
 
   return {
+    guidedLengthSource: result.guidedLength,
     path,
     routeLengthSource: pathLength(path),
     turnCount: countTurns(path),
@@ -421,6 +448,7 @@ function findPathFromTreeToEquipment(
 
 function runOrthogonalSearch(params: {
   currentNetwork: ManualRouteNetwork;
+  guideIndex: GuideIndex;
   input: GenerateAutomaticRouteProposalInput;
   seedRecords: StateRecord[];
   targetKey: string;
@@ -446,7 +474,8 @@ function runOrthogonalSearch(params: {
     if (
       !currentBest ||
       currentBest.length !== current.length ||
-      currentBest.turns !== current.turns
+      currentBest.turns !== current.turns ||
+      currentBest.guidedLength !== current.guidedLength
     ) {
       continue;
     }
@@ -494,6 +523,8 @@ function runOrthogonalSearch(params: {
         (current.direction !== "start" && current.direction !== direction ? 1 : 0);
       const next: StateRecord = {
         direction,
+        guidedLength:
+          current.guidedLength + guidedLengthBetween(from, to, params.guideIndex),
         key: neighbor.key,
         length: nextLength,
         previous: current,
@@ -806,6 +837,17 @@ function collectOrthogonalCoordinates(
     }
   }
 
+  for (const guide of selectCoordinateGuides(
+    input.architecture?.guides ?? [],
+    target,
+  )) {
+    if (sameCoordinate(guide.from.y, guide.to.y)) {
+      addCoordinate(guide.from.y, yValues);
+    } else if (sameCoordinate(guide.from.x, guide.to.x)) {
+      addCoordinate(guide.from.x, xValues);
+    }
+  }
+
   return {
     xValues: [...xValues].sort((a, b) => a - b),
     yValues: [...yValues].sort((a, b) => a - b),
@@ -987,6 +1029,7 @@ function createSearchSeedRecords(
     .filter((key) => validPoints.has(key))
     .map((key) => ({
       direction: "start" as const,
+      guidedLength: 0,
       key,
       length: 0,
       previous: null,
@@ -1445,6 +1488,7 @@ function comparePathCandidates(first: TreePathCandidate, second: TreePathCandida
   return (
     compareNumbers(first.routeLengthSource, second.routeLengthSource) ||
     compareNumbers(first.turnCount, second.turnCount) ||
+    compareNumbers(second.guidedLengthSource, first.guidedLengthSource) ||
     first.equipment.id.localeCompare(second.equipment.id)
   );
 }
@@ -1481,9 +1525,142 @@ function compareStateRecords(first: StateRecord, second: StateRecord) {
   return (
     compareNumbers(first.length, second.length) ||
     compareNumbers(first.turns, second.turns) ||
+    compareNumbers(second.guidedLength, first.guidedLength) ||
     first.key.localeCompare(second.key) ||
     first.direction.localeCompare(second.direction)
   );
+}
+
+type GuideInterval = {
+  max: number;
+  min: number;
+};
+
+type GuideIndex = {
+  horizontalByY: Map<string, GuideInterval[]>;
+  verticalByX: Map<string, GuideInterval[]>;
+};
+
+function createGuideIndex(guides: ArchitecturalRouteGuide[]): GuideIndex {
+  const horizontalByY = new Map<string, GuideInterval[]>();
+  const verticalByX = new Map<string, GuideInterval[]>();
+
+  for (const guide of guides) {
+    if (sameCoordinate(guide.from.y, guide.to.y)) {
+      addGuideInterval(
+        horizontalByY,
+        formatCoordinate(guide.from.y),
+        guide.from.x,
+        guide.to.x,
+      );
+    } else if (sameCoordinate(guide.from.x, guide.to.x)) {
+      addGuideInterval(
+        verticalByX,
+        formatCoordinate(guide.from.x),
+        guide.from.y,
+        guide.to.y,
+      );
+    }
+  }
+
+  return {
+    horizontalByY: mergeGuideIntervalIndex(horizontalByY),
+    verticalByX: mergeGuideIntervalIndex(verticalByX),
+  };
+}
+
+function guidedLengthBetween(from: Point2D, to: Point2D, index: GuideIndex) {
+  if (sameCoordinate(from.y, to.y)) {
+    return intervalOverlapLength(
+      Math.min(from.x, to.x),
+      Math.max(from.x, to.x),
+      index.horizontalByY.get(formatCoordinate(from.y)) ?? [],
+    );
+  }
+
+  if (sameCoordinate(from.x, to.x)) {
+    return intervalOverlapLength(
+      Math.min(from.y, to.y),
+      Math.max(from.y, to.y),
+      index.verticalByX.get(formatCoordinate(from.x)) ?? [],
+    );
+  }
+
+  return 0;
+}
+
+function addGuideInterval(
+  index: Map<string, GuideInterval[]>,
+  key: string,
+  first: number,
+  second: number,
+) {
+  index.set(key, [
+    ...(index.get(key) ?? []),
+    { min: Math.min(first, second), max: Math.max(first, second) },
+  ]);
+}
+
+function mergeGuideIntervalIndex(index: Map<string, GuideInterval[]>) {
+  return new Map(
+    [...index.entries()].map(([key, intervals]) => [
+      key,
+      mergeGuideIntervals(intervals),
+    ]),
+  );
+}
+
+function mergeGuideIntervals(intervals: GuideInterval[]) {
+  const sorted = [...intervals].sort(
+    (first, second) => first.min - second.min || first.max - second.max,
+  );
+  const merged: GuideInterval[] = [];
+
+  for (const interval of sorted) {
+    const previous = merged[merged.length - 1];
+
+    if (!previous || interval.min > previous.max + COORDINATE_EPSILON) {
+      merged.push({ ...interval });
+    } else {
+      previous.max = Math.max(previous.max, interval.max);
+    }
+  }
+
+  return merged;
+}
+
+function intervalOverlapLength(
+  min: number,
+  max: number,
+  intervals: GuideInterval[],
+) {
+  return intervals.reduce(
+    (total, interval) =>
+      total + Math.max(0, Math.min(max, interval.max) - Math.max(min, interval.min)),
+    0,
+  );
+}
+
+function selectCoordinateGuides(
+  guides: ArchitecturalRouteGuide[],
+  target: Point2D,
+) {
+  if (guides.length <= MAX_GUIDE_COORDINATE_SEGMENTS) {
+    return guides;
+  }
+
+  return [...guides]
+    .map((guide) => ({
+      distance: projectPointToSegment(target, guide.from, guide.to).distance,
+      guide,
+    }))
+    .sort(
+      (first, second) =>
+        compareNumbers(first.distance, second.distance) ||
+        first.guide.id.localeCompare(second.guide.id),
+    )
+    .slice(0, MAX_GUIDE_COORDINATE_SEGMENTS)
+    .map((item) => item.guide);
 }
 
 function compareNumbers(first: number, second: number) {

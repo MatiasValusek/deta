@@ -119,6 +119,13 @@ export type RouteProposalDiagnostic = {
   turnCount?: number;
 };
 
+export type RouteProposalArchitecturalWarning = {
+  featureIds: string[];
+  id: string;
+  kind: "pending_structure_crossing";
+  message: string;
+};
+
 export type RouteProposalParams = {
   fingerprint: string;
   marginMeters: number;
@@ -138,6 +145,7 @@ export type RouteProposalValidation = {
 };
 
 export type AutomaticRouteProposal = {
+  architecturalWarnings: RouteProposalArchitecturalWarning[];
   baseId: string;
   derivationCount: number;
   diagnostics: RouteProposalDiagnostic[];

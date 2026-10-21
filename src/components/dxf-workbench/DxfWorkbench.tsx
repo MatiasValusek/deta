@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { buildArchitecturalRouteContext } from "@/lib/architecture/routeContext";
 import { createConfirmedCalibration, createPointPair } from "@/lib/calibration/calibration";
 import type { CalibrationUnit } from "@/lib/calibration/types";
 import {
@@ -181,7 +182,6 @@ import {
 } from "@/lib/routing/routeAccessoryProposals";
 import type {
   AutomaticRouteProposal,
-  AutomaticRouteRestriction,
   ManualRouteNetwork,
   ResolvedRouteSegment,
   RouteDraft,
@@ -4876,7 +4876,12 @@ export function DxfWorkbench() {
       }
 
       const proposalPageNumber = routeProposalPdfPageNumber(plan);
+      const architecture = architecturalRouteContextForPlan(
+        plan,
+        proposalPageNumber,
+      );
       const proposal = buildProposalFromIntent({
+        architecture,
         baseNetwork: terminalRoutes.network,
         bounds: routeSourceBounds(plan),
         equipment: plan.equipment,
@@ -4890,11 +4895,7 @@ export function DxfWorkbench() {
         minSegmentLengthSource: MIN_SECTION_LINK_LENGTH,
         pdfPageNumber: proposalPageNumber,
         planBaseId: plan.id,
-        restrictions: createAutomaticRouteRestrictions(
-          plan,
-          planClassificationIndex,
-          proposalPageNumber,
-        ),
+        restrictions: architecture.restrictions,
         scaleMetersPerSourceUnit: calibrationScaleMetersPerSourceUnit(plan) ?? 0,
       });
 
@@ -4984,7 +4985,12 @@ export function DxfWorkbench() {
       }
 
       const proposalPageNumber = routeProposalPdfPageNumber(plan);
+      const architecture = architecturalRouteContextForPlan(
+        plan,
+        proposalPageNumber,
+      );
       const proposal = generateAutomaticRouteProposal({
+        architecture,
         baseNetwork: terminalRoutes.network,
         bounds: routeSourceBounds(plan),
         equipment: plan.equipment,
@@ -4997,11 +5003,7 @@ export function DxfWorkbench() {
         minSegmentLengthSource: MIN_SECTION_LINK_LENGTH,
         pdfPageNumber: proposalPageNumber,
         planBaseId: plan.id,
-        restrictions: createAutomaticRouteRestrictions(
-          plan,
-          planClassificationIndex,
-          proposalPageNumber,
-        ),
+        restrictions: architecture.restrictions,
         scaleMetersPerSourceUnit: calibrationScaleMetersPerSourceUnit(plan) ?? 0,
       });
 
@@ -9386,143 +9388,29 @@ function segmentViolatesRouteRestrictions(
 
 function createAutomaticRouteRestrictions(
   plan: WorkbenchBase,
-  classificationIndex: ClassificationIndex,
+  _classificationIndex: ClassificationIndex,
   pdfPageNumber: number | null | undefined,
-): AutomaticRouteRestriction[] {
-  const pageNumber =
-    plan.sourceType === "pdf"
-      ? pdfPageNumber ?? plan.visual.activePdfPageNumber
-      : null;
-  const manualRestrictions: AutomaticRouteRestriction[] = plan.constraints
-    .filter(
-      (constraint) =>
-        constraint.active &&
-        constraintBelongsToSource(constraint, plan.sourceType, pageNumber),
-    )
-    .map((constraint) => ({
-      id: constraint.id,
-      kind: "polygon" as const,
-      polygon: constraint.polygon,
-    }));
-
-  if (!plan.drawing) {
-    return manualRestrictions;
-  }
-
-  const hardStructureRestrictions = plan.drawing.entities.flatMap((entity) =>
-    classificationIndex[entity.id]?.category === "hard_structure"
-      ? routeRestrictionsForPrimitive(entity)
-      : [],
-  );
-
-  return [...manualRestrictions, ...hardStructureRestrictions];
+) {
+  return architecturalRouteContextForPlan(plan, pdfPageNumber).restrictions;
 }
 
-function routeRestrictionsForPrimitive(
-  entity: DrawingPrimitive,
-): AutomaticRouteRestriction[] {
-  if (entity.kind === "line") {
-    return routeDistanceBetween(entity.start, entity.end) <= MIN_SECTION_LINK_LENGTH
-      ? []
-      : [
-          {
-            from: entity.start,
-            id: `hard-structure:${entity.id}:line`,
-            kind: "segment",
-            to: entity.end,
-          },
-        ];
-  }
-
-  if (entity.kind === "polyline") {
-    const restrictions: AutomaticRouteRestriction[] = [];
-
-    if (entity.closed && isValidPolygon(entity.points)) {
-      restrictions.push({
-        id: `hard-structure:${entity.id}:polygon`,
-        kind: "polygon",
-        polygon: entity.points,
-      });
-    }
-
-    for (const [index, segment] of primitivePolylineSegments(entity.points, entity.closed).entries()) {
-      restrictions.push({
-        from: segment.from,
-        id: `hard-structure:${entity.id}:segment:${index}`,
-        kind: "segment",
-        to: segment.to,
-      });
-    }
-
-    return restrictions;
-  }
-
-  if (entity.kind === "hatch") {
-    return isValidPolygon(entity.outerRing)
-      ? [
-          {
-            id: `hard-structure:${entity.id}:hatch`,
-            kind: "polygon",
-            polygon: entity.outerRing,
-          },
-        ]
-      : [];
-  }
-
-  if (entity.kind === "arc") {
-    return primitivePolylineSegments(sampleArc(entity), false).map(
-      (segment, index) => ({
-        from: segment.from,
-        id: `hard-structure:${entity.id}:arc:${index}`,
-        kind: "segment" as const,
-        to: segment.to,
-      }),
-    );
-  }
-
-  return [];
-}
-
-function primitivePolylineSegments(points: Point2D[], closed: boolean) {
-  const segments: Array<{ from: Point2D; to: Point2D }> = [];
-  const count = closed ? points.length : points.length - 1;
-
-  for (let index = 0; index < count; index += 1) {
-    const from = points[index];
-    const to = points[(index + 1) % points.length];
-
-    if (from && to && routeDistanceBetween(from, to) > MIN_SECTION_LINK_LENGTH) {
-      segments.push({ from, to });
-    }
-  }
-
-  return segments;
-}
-
-function sampleArc(entity: Extract<DrawingPrimitive, { kind: "arc" }>) {
-  const sweep = normalizeArcSweep(entity.startAngle, entity.endAngle);
-  const segmentCount = Math.max(8, Math.ceil(Math.abs(sweep) / (Math.PI / 12)));
-  const points: Point2D[] = [];
-
-  for (let index = 0; index <= segmentCount; index += 1) {
-    const angle = entity.startAngle + (sweep * index) / segmentCount;
-    points.push({
-      x: entity.center.x + Math.cos(angle) * entity.radius,
-      y: entity.center.y + Math.sin(angle) * entity.radius,
-    });
-  }
-
-  return points;
-}
-
-function normalizeArcSweep(startAngle: number, endAngle: number) {
-  let sweep = endAngle - startAngle;
-
-  while (sweep <= 0) {
-    sweep += Math.PI * 2;
-  }
-
-  return sweep;
+function architecturalRouteContextForPlan(
+  plan: WorkbenchBase,
+  pdfPageNumber: number | null | undefined,
+) {
+  return buildArchitecturalRouteContext({
+    assignments: plan.semanticAssignments,
+    constraints: plan.constraints,
+    drawing: plan.drawing,
+    minSegmentLengthSource: MIN_SECTION_LINK_LENGTH,
+    pageNumber:
+      plan.sourceType === "pdf"
+        ? pdfPageNumber ?? plan.visual.activePdfPageNumber
+        : null,
+    proposals: plan.proposals,
+    source: plan.sourceType,
+    viewType: "plan",
+  });
 }
 
 function distanceFromSegmentToPolygon(
@@ -10144,6 +10032,38 @@ function createRouteProposalFingerprint(
     .map(([entityId]) => entityId)
     .sort()
     .join("|");
+  const architectureSignature = [
+    ...plan.semanticAssignments.map((assignment) =>
+      [
+        "assignment",
+        assignment.id,
+        assignment.category,
+        assignment.status,
+        assignment.origin,
+        ...[...assignment.entityIds].sort(),
+      ].join(":"),
+    ),
+    ...plan.proposals
+      .filter(
+        (proposal) =>
+          proposal.status === "pending" || proposal.status === "modified",
+      )
+      .map((proposal) =>
+        [
+          "proposal",
+          proposal.id,
+          proposal.category,
+          proposal.status,
+          formatFingerprintNumber(proposal.confidence),
+          ...proposal.signals
+            .map((signal) => `${signal.source}:${signal.value}`)
+            .sort(),
+          ...[...proposal.entityIds].sort(),
+        ].join(":"),
+      ),
+  ]
+    .sort()
+    .join("|");
 
   return [
     plan.id,
@@ -10154,6 +10074,7 @@ function createRouteProposalFingerprint(
     equipmentSignature,
     constraintSignature,
     structureSignature,
+    architectureSignature,
   ].join("||");
 }
 

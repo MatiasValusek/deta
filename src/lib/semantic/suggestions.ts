@@ -1,36 +1,10 @@
 import type { DrawingPrimitive, NormalizedDrawing } from "@/lib/geometry/types";
+import { classifyArchitecturalName } from "@/lib/architecture/semantics";
 import type {
   ClassificationProposal,
   SemanticCategory,
   SemanticSignal,
 } from "./types";
-
-const OPENING_TERMS = [
-  "window",
-  "ventana",
-  "door",
-  "puerta",
-  "opening",
-  "abertura",
-  "glass",
-  "vidrio",
-];
-
-const WALL_TERMS = ["wall", "muro", "pared", "cerramiento"];
-
-const STRUCTURE_TERMS = [
-  "structure",
-  "estructura",
-  "structural",
-  "column",
-  "columna",
-  "beam",
-  "viga",
-  "slab",
-  "losa",
-  "foundation",
-  "fundacion",
-];
 
 export function generateClassificationProposals(
   drawing: NormalizedDrawing,
@@ -53,7 +27,7 @@ export function generateClassificationProposals(
   return Array.from(byLayer.entries())
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([layer, entityIds]) => {
-      const match = matchName(layer);
+      const match = classifyArchitecturalName(layer);
       const blockMatch = findBlockMatch(blockNamesByLayer.get(layer));
 
       if (match) {
@@ -203,7 +177,6 @@ function findColorMatch(
 
   return null;
 }
-
 function isDominantOrDefaultColor(
   color: string,
   stats: ColorStatsRecord,
@@ -300,35 +273,6 @@ export function nextSemanticCategory(
   return "hard_structure";
 }
 
-function matchName(
-  name: string,
-): { category: SemanticCategory; reason: string } | null {
-  const normalized = normalizeSearchText(name);
-
-  if (containsAny(normalized, OPENING_TERMS)) {
-    return {
-      category: "opening",
-      reason: "terminos asociados a aberturas",
-    };
-  }
-
-  if (containsAny(normalized, WALL_TERMS)) {
-    return {
-      category: "reference_wall",
-      reason: "terminos asociados a muros o arquitectura",
-    };
-  }
-
-  if (containsAny(normalized, STRUCTURE_TERMS)) {
-    return {
-      category: "hard_structure",
-      reason: "terminos inequivocos de estructura",
-    };
-  }
-
-  return null;
-}
-
 function findBlockMatch(blockNames: Set<string> | undefined) {
   if (!blockNames) {
     return null;
@@ -339,7 +283,7 @@ function findBlockMatch(blockNames: Set<string> | undefined) {
       continue;
     }
 
-    const match = matchName(blockName);
+    const match = classifyArchitecturalName(blockName);
 
     if (match) {
       return {
@@ -350,15 +294,4 @@ function findBlockMatch(blockNames: Set<string> | undefined) {
   }
 
   return null;
-}
-
-function normalizeSearchText(value: string) {
-  return value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-}
-
-function containsAny(value: string, terms: string[]) {
-  return terms.some((term) => value.includes(term));
 }

@@ -1,4 +1,6 @@
 import type { ManualConstraint } from "@/lib/constraints/types";
+import { drawingPrimitiveSegments } from "@/lib/architecture/geometry";
+import { classifyArchitecturalNames } from "@/lib/architecture/semantics";
 import type {
   DrawingPrimitive,
   NormalizedDrawing,
@@ -42,35 +44,6 @@ export const DEFAULT_WALL_SNAP_TOLERANCE_SOURCE = 0.35;
 const DEFAULT_WALL_SNAP_RADIUS_METERS = 0.5;
 const DIRECT_WALL_CLICK_RADIUS_METERS = 0.08;
 const MIN_WALL_SEGMENT_LENGTH_METERS = 0.3;
-const WALL_NAME_TERMS = [
-  "wall",
-  "muro",
-  "muros",
-  "pared",
-  "paredes",
-  "cerramiento",
-  "tabique",
-  "arquitectura",
-  "architecture",
-];
-const STRUCTURE_NAME_TERMS = [
-  "hard",
-  "estructura",
-  "structure",
-  "structural",
-  "columna",
-  "column",
-  "viga",
-  "beam",
-];
-const OPENING_NAME_TERMS = [
-  "abertura",
-  "door",
-  "opening",
-  "puerta",
-  "ventana",
-  "window",
-];
 
 export function resolveEquipmentPhysicalPlacement(params: {
   classificationIndex?: ClassificationIndex;
@@ -311,7 +284,7 @@ function drawingWallSegments(
       return [];
     }
 
-    return primitiveSegments(entity).flatMap((segment, index) => {
+    return drawingPrimitiveSegments(entity).flatMap((segment, index) => {
       const lengthSource = distanceBetween(segment.from, segment.to);
 
       if (lengthSource <= Number.EPSILON) {
@@ -374,22 +347,6 @@ function constraintWallSegments(
     );
 }
 
-function primitiveSegments(entity: DrawingPrimitive) {
-  if (entity.kind === "line") {
-    return [{ from: entity.start, to: entity.end }];
-  }
-
-  if (entity.kind === "polyline") {
-    return polygonalSegments(entity.points, entity.closed);
-  }
-
-  if (entity.kind === "hatch") {
-    return entity.rings.flatMap((ring) => polygonalSegments(ring, true));
-  }
-
-  return polygonalSegments(sampleArc(entity), false);
-}
-
 function polygonSegments(points: Point2D[]) {
   return polygonalSegments(points, true);
 }
@@ -408,32 +365,6 @@ function polygonalSegments(points: Point2D[], closed: boolean) {
   }
 
   return segments;
-}
-
-function sampleArc(entity: Extract<DrawingPrimitive, { kind: "arc" }>) {
-  const sweep = normalizeArcSweep(entity.startAngle, entity.endAngle);
-  const segmentCount = Math.max(8, Math.ceil(Math.abs(sweep) / (Math.PI / 12)));
-  const points: Point2D[] = [];
-
-  for (let index = 0; index <= segmentCount; index += 1) {
-    const angle = entity.startAngle + (sweep * index) / segmentCount;
-    points.push({
-      x: entity.center.x + Math.cos(angle) * entity.radius,
-      y: entity.center.y + Math.sin(angle) * entity.radius,
-    });
-  }
-
-  return points;
-}
-
-function normalizeArcSweep(startAngle: number, endAngle: number) {
-  let sweep = endAngle - startAngle;
-
-  while (sweep <= 0) {
-    sweep += Math.PI * 2;
-  }
-
-  return sweep;
 }
 
 function wallSnapToleranceSource(params: {
@@ -551,13 +482,17 @@ function detectWallEntity(
     };
   }
 
-  const names = normalizedEntitySearchNames(entity);
+  const semanticMatch = classifyArchitecturalNames(entitySearchNames(entity));
 
-  if (category === "opening" || namesContainAny(names, OPENING_NAME_TERMS)) {
+  if (category === "opening" || semanticMatch?.category === "opening") {
     return null;
   }
 
-  const inferredKind = inferWallKind(names);
+  const inferredKind =
+    semanticMatch?.category === "hard_structure" ||
+    semanticMatch?.category === "reference_wall"
+      ? semanticMatch.category
+      : null;
 
   if (inferredKind) {
     return {
@@ -605,22 +540,6 @@ function wallKindFromClassification(
     : null;
 }
 
-function inferWallKind(names: string[]): EquipmentWallReferenceKind | null {
-  if (namesContainAny(names, STRUCTURE_NAME_TERMS)) {
-    return "hard_structure";
-  }
-
-  if (namesContainAny(names, WALL_NAME_TERMS)) {
-    return "reference_wall";
-  }
-
-  return null;
-}
-
-function normalizedEntitySearchNames(entity: DrawingPrimitive) {
-  return entitySearchNames(entity).map(normalizeSearchText);
-}
-
 function entitySearchNames(entity: DrawingPrimitive) {
   return [
     entity.layer,
@@ -630,21 +549,6 @@ function entitySearchNames(entity: DrawingPrimitive) {
     entity.visual.sourceEntityType,
     entity.sourceType,
   ].filter((value): value is string => Boolean(value));
-}
-
-function normalizeSearchText(value: string) {
-  return value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-}
-
-function containsAny(value: string, terms: string[]) {
-  return terms.some((term) => value.includes(term));
-}
-
-function namesContainAny(names: string[], terms: string[]) {
-  return names.some((name) => containsAny(name, terms));
 }
 
 function wallNormal(from: Point2D, to: Point2D, point: Point2D): Point2D {
