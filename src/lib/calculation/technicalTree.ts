@@ -398,6 +398,7 @@ export function calculateTechnicalTree(params: {
     pipeSystem,
     routeSegments: params.network.segments,
     routes: technicalRoutes,
+    scaleMetersPerSourceUnit: params.scaleMetersPerSourceUnit,
     segments: technicalSegments,
   });
   const professionalDiameterAdoption = validateProfessionalDiameterAdoption({

@@ -348,6 +348,81 @@ export function runDiameterTransitionProposalVerifications() {
     assertEqual(JSON.stringify(decisions), JSON.stringify([rejected]));
   });
 
+  verify(results, "Caso P - cambio de diametro en giro vertical", () => {
+    const proposal = onlyTransition(
+      detectDiameterTransitionProposals({
+        diameterBySegmentId: diameterMap({
+          s1: diameter(32),
+          s2: diameter(25),
+        }),
+        equipment: [],
+        network: verticalTurnNetwork(),
+        scaleMetersPerSourceUnit: 1,
+      }),
+    );
+
+    assertEqual(proposal.kind, "compound_turn_transition");
+    assertEqual(proposal.state, "needs_review");
+    assertEqual(proposal.incidentSegments.length, 2);
+    assertEqual(proposal.evidence.angleDegrees, 90);
+  });
+
+  verify(results, "Caso Q - vertice adyacente define el giro", () => {
+    const proposal = onlyTransition(
+      detectDiameterTransitionProposals({
+        diameterBySegmentId: diameterMap({
+          s1: diameter(32),
+          s2: diameter(25),
+        }),
+        equipment: [],
+        network: vertexTurnNetwork(),
+        scaleMetersPerSourceUnit: 1,
+      }),
+    );
+
+    assertEqual(proposal.kind, "compound_turn_transition");
+    assertEqual(proposal.evidence.angleDegrees, 90);
+  });
+
+  verify(results, "Caso R - geometria realmente nula sigue bloqueada", () => {
+    const proposal = onlyTransition(
+      detectDiameterTransitionProposals({
+        diameterBySegmentId: diameterMap({
+          s1: diameter(32),
+          s2: diameter(25),
+        }),
+        equipment: [],
+        network: invalidIncidentNetwork(),
+        scaleMetersPerSourceUnit: 1,
+      }),
+    );
+
+    assertEqual(proposal.kind, "unresolved");
+    assertEqual(proposal.state, "unresolved");
+    assertEqual(
+      proposal.reason,
+      "No se pudo resolver la geometria de todos los tramos incidentes.",
+    );
+  });
+
+  verify(results, "Caso S - vertical con igual diametro no crea transicion", () => {
+    const proposal = onlyTransition(
+      detectDiameterTransitionProposals({
+        diameterBySegmentId: diameterMap({
+          s1: diameter(25),
+          s2: diameter(25),
+        }),
+        equipment: [],
+        network: verticalTurnNetwork(),
+        scaleMetersPerSourceUnit: 1,
+      }),
+    );
+
+    assertEqual(proposal.kind, "not_required");
+    assertEqual(proposal.state, "not_required");
+    assertEqual(proposal.incidentSegments.length, 2);
+  });
+
   return results;
 }
 
@@ -429,6 +504,53 @@ function straightNetwork(): ManualRouteNetwork {
     segments: [
       { fromNodeId: "m", id: "s1", toNodeId: "n" },
       { fromNodeId: "n", id: "s2", toNodeId: "a" },
+    ],
+  };
+}
+
+function verticalTurnNetwork(): ManualRouteNetwork {
+  return {
+    nodes: [
+      routeNode("a", "route", -1, 0),
+      routeNode("b", "route", 0, 0),
+      { id: "c", kind: "route", position: { x: 0, y: 0, z: 1 } },
+    ],
+    segments: [
+      { fromNodeId: "a", id: "s1", toNodeId: "b" },
+      { fromNodeId: "b", id: "s2", toNodeId: "c" },
+    ],
+  };
+}
+
+function vertexTurnNetwork(): ManualRouteNetwork {
+  return {
+    nodes: [
+      routeNode("a", "route", -2, -2),
+      routeNode("b", "route", 0, 0),
+      routeNode("c", "route", 0, 2),
+    ],
+    segments: [
+      {
+        fromNodeId: "a",
+        id: "s1",
+        toNodeId: "b",
+        vertices: [{ x: -1, y: 0, z: 0 }],
+      },
+      { fromNodeId: "b", id: "s2", toNodeId: "c" },
+    ],
+  };
+}
+
+function invalidIncidentNetwork(): ManualRouteNetwork {
+  return {
+    nodes: [
+      routeNode("a", "route", -1, 0),
+      routeNode("b", "route", 0, 0),
+      routeNode("c", "route", 0, 0),
+    ],
+    segments: [
+      { fromNodeId: "a", id: "s1", toNodeId: "b" },
+      { fromNodeId: "b", id: "s2", toNodeId: "c" },
     ],
   };
 }

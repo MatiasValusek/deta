@@ -7,11 +7,15 @@ import type { WorkbenchEquipment } from "@/lib/equipment/types";
 import type { Point2D } from "@/lib/geometry/types";
 import {
   buildEquipmentIndex,
-  distanceBetween,
   findRouteNodeByEquipment,
   getRouteNeighbors,
   resolveRouteNodePosition,
 } from "@/lib/routing/network";
+import {
+  angleBetweenRouteDirections,
+  resolveIncidentRouteGeometry,
+  type RouteDirectionVector,
+} from "@/lib/routing/incidentGeometry";
 import type {
   ManualRouteNetwork,
   RouteNode,
@@ -141,7 +145,7 @@ type IncidentSegment = {
   neighborPosition: Point2D;
   role: DiameterTransitionSegmentRole;
   segment: RouteSegment;
-  vector: Point2D;
+  vector: RouteDirectionVector;
 };
 
 export function detectDiameterTransitionProposals(params: {
@@ -149,10 +153,10 @@ export function detectDiameterTransitionProposals(params: {
   diameterBySegmentId?: DiameterTransitionDiameterBySegmentId;
   equipment: WorkbenchEquipment[];
   network: ManualRouteNetwork;
+  scaleMetersPerSourceUnit?: number | null;
 }): DiameterTransitionProposal[] {
   const equipmentById = buildEquipmentIndex(params.equipment);
   const nodeById = new Map(params.network.nodes.map((node) => [node.id, node]));
-  const neighbors = getRouteNeighbors(params.network);
   const distancesFromSupply = calculateNodeDistancesFromSupply({
     equipment: params.equipment,
     network: params.network,
@@ -169,7 +173,10 @@ export function detectDiameterTransitionProposals(params: {
       continue;
     }
 
-    const degree = neighbors.get(node.id)?.size ?? 0;
+    const degree = params.network.segments.filter(
+      (segment) =>
+        segment.fromNodeId === node.id || segment.toNodeId === node.id,
+    ).length;
 
     if (degree < 2) {
       continue;
@@ -183,6 +190,7 @@ export function detectDiameterTransitionProposals(params: {
       node,
       nodeById,
       position,
+      scaleMetersPerSourceUnit: params.scaleMetersPerSourceUnit,
     });
     const proposal = createDiameterTransitionProposal({
       degree,
@@ -575,52 +583,27 @@ function resolveIncidentSegments(params: {
   node: RouteNode;
   nodeById: Map<string, RouteNode>;
   position: Point2D;
+  scaleMetersPerSourceUnit?: number | null;
 }): IncidentSegment[] {
   const nodeDistance = params.distancesFromSupply.get(params.node.id);
+  const geometry = resolveIncidentRouteGeometry({
+    equipmentById: params.equipmentById,
+    network: params.network,
+    node: params.node,
+    nodeById: params.nodeById,
+    position: params.position,
+    scaleMetersPerSourceUnit: params.scaleMetersPerSourceUnit,
+  });
 
-  return params.network.segments
-    .filter(
-      (segment) =>
-        segment.fromNodeId === params.node.id ||
-        segment.toNodeId === params.node.id,
-    )
-    .map((segment) => {
-      const neighborNodeId =
-        segment.fromNodeId === params.node.id
-          ? segment.toNodeId
-          : segment.fromNodeId;
-      const neighborNode = params.nodeById.get(neighborNodeId);
-      const neighborPosition = neighborNode
-        ? resolveRouteNodePosition(neighborNode, params.equipmentById)
-        : null;
-
-      if (!neighborNode || !neighborPosition) {
-        return null;
-      }
-
-      return {
-        diameter: getDiameter(params.diameterBySegmentId, segment.id),
-        neighborNodeId,
-        neighborPosition,
-        role: incidentSegmentRole({
-          degree: params.network.segments.filter(
-            (item) =>
-              item.fromNodeId === params.node.id ||
-              item.toNodeId === params.node.id,
-          ).length,
-          neighborDistance: params.distancesFromSupply.get(neighborNodeId),
-          nodeDistance,
-        }),
-        segment,
-        vector: {
-          x: neighborPosition.x - params.position.x,
-          y: neighborPosition.y - params.position.y,
-        },
-      };
-    })
-    .filter((item): item is IncidentSegment => Boolean(item))
-    .filter((item) => distanceBetween(params.position, item.neighborPosition) > 0)
-    .sort((first, second) => first.segment.id.localeCompare(second.segment.id));
+  return geometry.incident.map((item) => ({
+    ...item,
+    diameter: getDiameter(params.diameterBySegmentId, item.segment.id),
+    role: incidentSegmentRole({
+      degree: geometry.topologicalSegmentCount,
+      neighborDistance: params.distancesFromSupply.get(item.neighborNodeId),
+      nodeDistance,
+    }),
+  }));
 }
 
 function incidentSegmentRole(params: {
@@ -763,24 +746,7 @@ function twoSegmentAngle(incident: IncidentSegment[]) {
     return null;
   }
 
-  return angleBetweenVectors(first.vector, second.vector);
-}
-
-function angleBetweenVectors(first: Point2D, second: Point2D) {
-  const firstLength = Math.hypot(first.x, first.y);
-  const secondLength = Math.hypot(second.x, second.y);
-
-  if (firstLength === 0 || secondLength === 0) {
-    return 0;
-  }
-
-  const cosine = clamp(
-    (first.x * second.x + first.y * second.y) / (firstLength * secondLength),
-    -1,
-    1,
-  );
-
-  return (Math.acos(cosine) * 180) / Math.PI;
+  return angleBetweenRouteDirections(first.vector, second.vector);
 }
 
 function classifyTwoSegmentAngle(
@@ -862,10 +828,6 @@ function pointKey(point: Point2D) {
 
 function roundGeometry(value: number) {
   return Number(value.toFixed(GEOMETRY_PRECISION));
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, value));
 }
 
 function hashString(value: string) {

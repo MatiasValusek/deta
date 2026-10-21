@@ -3,10 +3,14 @@ import type { Point2D } from "@/lib/geometry/types";
 import type { AccessoryCatalogSelection } from "@/lib/calculation/accessoryCatalogCandidates";
 import {
   buildEquipmentIndex,
-  distanceBetween,
   getRouteNeighbors,
   resolveRouteNodePosition,
 } from "@/lib/routing/network";
+import {
+  angleBetweenRouteDirections,
+  resolveIncidentRouteGeometry,
+  type ResolvedIncidentRouteSegment,
+} from "@/lib/routing/incidentGeometry";
 import type {
   ManualRouteNetwork,
   RouteAccessoryEquivalentLengthSource,
@@ -138,25 +142,20 @@ export type DetectRouteAccessoryProposalParams = {
   equipment: WorkbenchEquipment[];
   includeNonAccessoryObservations?: boolean;
   network: ManualRouteNetwork;
+  scaleMetersPerSourceUnit?: number | null;
 };
 
 export type AccessoryProposalDiameterBySegmentId =
   | Map<string, AccessoryProposalDiameterReference | null | undefined>
   | Record<string, AccessoryProposalDiameterReference | null | undefined>;
 
-type IncidentSegment = {
-  neighborNodeId: string;
-  neighborPosition: Point2D;
-  segment: RouteSegment;
-  vector: Point2D;
-};
+type IncidentSegment = ResolvedIncidentRouteSegment;
 
 export function detectRouteAccessoryProposals(
   params: DetectRouteAccessoryProposalParams,
 ): AccessoryProposal[] {
   const equipmentById = buildEquipmentIndex(params.equipment);
   const nodeById = new Map(params.network.nodes.map((node) => [node.id, node]));
-  const neighbors = getRouteNeighbors(params.network);
   const distancesFromSupply = calculateNodeDistancesFromSupply(params.network);
   const proposals: AccessoryProposal[] = [];
 
@@ -169,14 +168,16 @@ export function detectRouteAccessoryProposals(
       continue;
     }
 
-    const degree = neighbors.get(node.id)?.size ?? 0;
-    const incident = resolveIncidentSegments({
+    const incidentGeometry = resolveIncidentRouteGeometry({
       equipmentById,
       network: params.network,
       node,
       nodeById,
       position,
+      scaleMetersPerSourceUnit: params.scaleMetersPerSourceUnit,
     });
+    const degree = incidentGeometry.topologicalSegmentCount;
+    const incident = incidentGeometry.incident;
 
     if (degree <= 1 || node.kind === "supply" || node.kind === "appliance") {
       if (params.includeNonAccessoryObservations) {
@@ -204,6 +205,39 @@ export function detectRouteAccessoryProposals(
         );
       }
 
+      continue;
+    }
+
+    if (incidentGeometry.unresolvedSegmentIds.length > 0) {
+      proposals.push(
+        createProposal({
+          confidence: "low",
+          evidence: {
+            angleClassification: "ambiguous",
+            degree,
+            incidentNodeIds: incident.map((item) => item.neighborNodeId).sort(),
+            note: `No se pudo resolver la geometria de los tramos: ${incidentGeometry.unresolvedSegmentIds.join(", ")}.`,
+          },
+          incident,
+          kind: "unsupported",
+          nodeId: node.id,
+          ownerResolution: {
+            candidateSegmentIds: incident.map((item) => item.segment.id).sort(),
+            reason: "Falta geometria suficiente para asignar propietario.",
+            status: "ambiguous",
+          },
+          position,
+          reason: "Nodo con geometria incidente incompleta.",
+          state: "needs_review",
+        }),
+      );
+      continue;
+    }
+
+    if (
+      degree === 2 &&
+      routeNodeHasResolvedTerminalConnection(incident, nodeById)
+    ) {
       continue;
     }
 
@@ -236,7 +270,11 @@ export function detectRouteAccessoryProposals(
         continue;
       }
 
-      const angle = angleBetweenVectors(first.vector, second.vector);
+      const angle = angleBetweenRouteDirections(first.vector, second.vector);
+
+      if (angle === null) {
+        continue;
+      }
       const classification = classifyTwoSegmentAngle(angle);
       const incidentNodeIds = incident.map((item) => item.neighborNodeId).sort();
 
@@ -722,63 +760,21 @@ function createProposal(params: {
   };
 }
 
-function resolveIncidentSegments(params: {
-  equipmentById: Map<string, WorkbenchEquipment>;
-  network: ManualRouteNetwork;
-  node: RouteNode;
-  nodeById: Map<string, RouteNode>;
-  position: Point2D;
-}): IncidentSegment[] {
-  return params.network.segments
-    .filter(
-      (segment) =>
-        segment.fromNodeId === params.node.id ||
-        segment.toNodeId === params.node.id,
-    )
-    .map((segment) => {
-      const neighborNodeId =
-        segment.fromNodeId === params.node.id
-          ? segment.toNodeId
-          : segment.fromNodeId;
-      const neighborNode = params.nodeById.get(neighborNodeId);
-      const neighborPosition = neighborNode
-        ? resolveRouteNodePosition(neighborNode, params.equipmentById)
-        : null;
-
-      if (!neighborNode || !neighborPosition) {
-        return null;
-      }
-
-      return {
-        neighborNodeId,
-        neighborPosition,
-        segment,
-        vector: {
-          x: neighborPosition.x - params.position.x,
-          y: neighborPosition.y - params.position.y,
-        },
-      };
-    })
-    .filter((item): item is IncidentSegment => Boolean(item))
-    .filter((item) => distanceBetween(params.position, item.neighborPosition) > 0)
-    .sort((first, second) => first.segment.id.localeCompare(second.segment.id));
-}
-
-function angleBetweenVectors(first: Point2D, second: Point2D) {
-  const firstLength = Math.hypot(first.x, first.y);
-  const secondLength = Math.hypot(second.x, second.y);
-
-  if (firstLength === 0 || secondLength === 0) {
-    return 0;
-  }
-
-  const cosine = clamp(
-    (first.x * second.x + first.y * second.y) / (firstLength * secondLength),
-    -1,
-    1,
+function routeNodeHasResolvedTerminalConnection(
+  incident: IncidentSegment[],
+  nodeById: Map<string, RouteNode>,
+) {
+  return incident.some(
+    (item) =>
+      nodeById.get(item.neighborNodeId)?.kind === "appliance" &&
+      (item.segment.accessories ?? []).some(
+        (accessory) =>
+          accessory.id.startsWith("route-terminal:") &&
+          accessory.id.endsWith(":terminal") &&
+          accessory.origin === "user_confirmed" &&
+          accessory.equivalentLengthSource === "pipe_system",
+      ),
   );
-
-  return (Math.acos(cosine) * 180) / Math.PI;
 }
 
 function classifyTwoSegmentAngle(
@@ -1044,10 +1040,6 @@ function pointKey(point: Point2D) {
 
 function roundGeometry(value: number) {
   return Number(value.toFixed(GEOMETRY_PRECISION));
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, value));
 }
 
 function hashString(value: string) {

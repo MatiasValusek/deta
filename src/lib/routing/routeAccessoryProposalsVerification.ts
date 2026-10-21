@@ -244,6 +244,33 @@ export function runRouteAccessoryProposalVerifications() {
     assertEqual(JSON.stringify(first), JSON.stringify(second));
   });
 
+  verify(results, "Caso M - giro vertical valido", () => {
+    const proposal = onlyProposal(
+      detectRouteAccessoryProposals({
+        diameterBySegmentId: sameDiameters(["s1", "s2"]),
+        equipment: [],
+        network: verticalElbowNetwork(),
+        scaleMetersPerSourceUnit: 1,
+      }),
+    );
+
+    assertEqual(proposal.kind, "elbow");
+    assertClose(proposal.evidence.angleDegrees, 90);
+    assertEqual(proposal.incidentSegmentIds.join(","), "s1,s2");
+  });
+
+  verify(results, "Caso N - terminal confirmado no duplica propuesta", () => {
+    const fixture = resolvedTerminalConnectionFixture();
+    const proposals = detectRouteAccessoryProposals({
+      diameterBySegmentId: sameDiameters(["s1", "s2"]),
+      equipment: fixture.equipment,
+      network: fixture.network,
+      scaleMetersPerSourceUnit: 1,
+    });
+
+    assertEqual(proposals.length, 0);
+  });
+
   return results;
 }
 
@@ -281,6 +308,65 @@ function straightNetwork(): ManualRouteNetwork {
       segment("s2", "b", "c"),
     ],
   };
+}
+
+function verticalElbowNetwork(): ManualRouteNetwork {
+  return {
+    nodes: [
+      { id: "a", kind: "route", position: { x: -1, y: 0, z: 0 } },
+      { id: "b", kind: "route", position: { x: 0, y: 0, z: 0 } },
+      { id: "c", kind: "route", position: { x: 0, y: 0, z: 1 } },
+    ],
+    segments: [
+      segment("s1", "a", "b"),
+      segment("s2", "b", "c"),
+    ],
+  };
+}
+
+function resolvedTerminalConnectionFixture() {
+  const equipment = [
+    {
+      connectionPoint: { x: 0, y: 0, z: 1 },
+      demandUnit: "m3_h" as const,
+      demandValue: 1,
+      id: "appliance",
+      name: "Artefacto",
+      planBaseId: "plan",
+      role: "appliance" as const,
+      source: "manual" as const,
+      type: "other" as const,
+    },
+  ];
+  const network: ManualRouteNetwork = {
+    nodes: [
+      { id: "a", kind: "route", position: { x: -1, y: 0, z: 0 } },
+      { id: "b", kind: "route", position: { x: 0, y: 0, z: 0 } },
+      { equipmentId: "appliance", id: "c", kind: "appliance" },
+    ],
+    segments: [
+      segment("s1", "a", "b"),
+      {
+        accessories: [
+          {
+            catalogFamilyId: "codo-90-rosca-hembra",
+            equivalentLengthMetersPerUnit: null,
+            equivalentLengthSource: "pipe_system",
+            id: "route-terminal:appliance:terminal",
+            origin: "user_confirmed",
+            quantity: 1,
+            segmentId: "s2",
+            type: "elbow",
+          },
+        ],
+        fromNodeId: "b",
+        id: "s2",
+        toNodeId: "c",
+      },
+    ],
+  };
+
+  return { equipment, network };
 }
 
 function elbowNetwork(): ManualRouteNetwork {

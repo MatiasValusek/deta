@@ -193,6 +193,7 @@ export function solveTechnicalNetworkSizingWithTransitions(params: {
   pipeSystem: PipeSystem;
   routeSegments: RouteSegment[];
   routes: TechnicalRoute[];
+  scaleMetersPerSourceUnit?: number | null;
   searchLimit?: number;
   segments: TechnicalSegmentResult[];
 }): TechnicalTransitionAwareNetworkSizingResult {
@@ -445,6 +446,7 @@ export function evaluateTransitionAwareSizingAssignment(params: {
   pipeSystem: PipeSystem;
   routeSegments: RouteSegment[];
   routes: TechnicalRoute[];
+  scaleMetersPerSourceUnit?: number | null;
   segments: TechnicalSegmentResult[];
 }): TechnicalTransitionAwareAssignmentEvaluation {
   const availableDiametersResolution = params.pipeSystem.getAvailableDiameters();
@@ -528,6 +530,7 @@ export function enumerateTransitionAwareSizingAssignmentsForVerification(params:
   pipeSystem: PipeSystem;
   routeSegments: RouteSegment[];
   routes: TechnicalRoute[];
+  scaleMetersPerSourceUnit?: number | null;
   segments: TechnicalSegmentResult[];
 }): {
   evaluatedStateCount: number;
@@ -634,6 +637,7 @@ function evaluateAssignmentWithCatalog(params: {
     pipeSystem: PipeSystem;
     routeSegments: RouteSegment[];
     routes: TechnicalRoute[];
+    scaleMetersPerSourceUnit?: number | null;
   };
   sortedSegments: TechnicalSegmentResult[];
 }): InternalAssignmentEvaluation {
@@ -646,6 +650,7 @@ function evaluateAssignmentWithCatalog(params: {
     diameterBySegmentId: params.assignment,
     equipment: params.equipment,
     network: params.network,
+    scaleMetersPerSourceUnit: params.params.scaleMetersPerSourceUnit,
   });
   const compoundTurnAccessoryExclusionKeys =
     createCompoundTurnAccessoryExclusionKeys({

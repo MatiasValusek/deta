@@ -742,9 +742,11 @@ function AccessoryDecisionCard({
         result={result}
         segmentIds={proposal.incidentSegmentIds}
       />
-      <div className="mt-1 text-[10px] text-[var(--warning)]">
-        {formatAccessoryProposalProblem(proposal, review)}
-      </div>
+      {!review ? (
+        <div className="mt-1 text-[10px] text-[var(--warning)]">
+          {formatAccessoryProposalProblem(proposal, review)}
+        </div>
+      ) : null}
       {review ? (
         <CandidateSelector
           proposal={proposal}
@@ -817,9 +819,11 @@ function TransitionDecisionCard({
         result={result}
         segmentIds={diameterTransitionSegmentIds(proposal)}
       />
-      <div className="mt-1 text-[10px] text-[var(--warning)]">
-        {formatDiameterTransitionProblem(proposal, review)}
-      </div>
+      {!review ? (
+        <div className="mt-1 text-[10px] text-[var(--warning)]">
+          {formatDiameterTransitionProblem(proposal, review)}
+        </div>
+      ) : null}
       {review ? (
         <DiameterTransitionCandidateSelector
           proposal={proposal}

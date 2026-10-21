@@ -1095,6 +1095,7 @@ export function DxfWorkbench() {
       diameterBySegmentId: accessoryProposalDiameterBySegmentId,
       equipment: planEquipment,
       network: routeNetwork,
+      scaleMetersPerSourceUnit: planScaleMetersPerSourceUnit,
     }).map((proposal) =>
       withAccessoryProposalSystemMatch(
         proposal,
@@ -1106,6 +1107,7 @@ export function DxfWorkbench() {
     planBase?.id,
     planBase?.routeAccessoryProposalDecisions,
     planEquipment,
+    planScaleMetersPerSourceUnit,
     routeNetwork,
   ]);
   const routeAccessoryProposalReviews = useMemo(() => {
@@ -1184,12 +1186,14 @@ export function DxfWorkbench() {
       diameterBySegmentId: finalDiameterBySegmentId,
       equipment: planEquipment,
       network: routeNetwork,
+      scaleMetersPerSourceUnit: planScaleMetersPerSourceUnit,
     });
   }, [
     finalDiameterBySegmentId,
     planBase?.diameterTransitionDecisions,
     planBase?.id,
     planEquipment,
+    planScaleMetersPerSourceUnit,
     routeNetwork,
   ]);
   const diameterTransitionProposalReviews = useMemo(
