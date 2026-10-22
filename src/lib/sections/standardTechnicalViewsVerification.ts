@@ -38,6 +38,7 @@ import {
   countStandardTechnicalReviewGeometryPendingItems,
   createStandardTechnicalAxonometricView,
   createStandardTechnicalSectionView,
+  isStandardTechnicalReviewGeometryPendingMessage,
   type StandardTechnicalSectionView,
 } from "./standardTechnicalViews";
 import {
@@ -75,10 +76,32 @@ export function runStandardTechnicalViewsVerifications() {
       assertRouteNodeZIsInferredFromConfirmedGeometry(fixture);
       assertMissingApplianceZBlocksCalculationButKeepsGeometryVisible(fixture);
       assertConfirmedRouteAccessoryKeepsCalculationContinuationEnabled(fixture);
+      assertCalculationWarningsAreDeferredFromRouteReview();
     },
   );
 
   return results;
+}
+
+function assertCalculationWarningsAreDeferredFromRouteReview() {
+  assert(
+    !isStandardTechnicalReviewGeometryPendingMessage(
+      "Falta diametro adoptado para rotular el tramo en corte.",
+    ),
+    "El diámetro adoptado no debe contarse como observación geométrica.",
+  );
+  assert(
+    !isStandardTechnicalReviewGeometryPendingMessage(
+      "El codigo de accesorio coincide con mas de una fila SIGAS.",
+    ),
+    "La ambigüedad SIGAS debe resolverse en Calcular.",
+  );
+  assert(
+    isStandardTechnicalReviewGeometryPendingMessage(
+      "Falta altura Z en un extremo del tramo.",
+    ),
+    "Las advertencias geométricas deben permanecer visibles en Recorrido.",
+  );
 }
 
 type SimpleReviewFixture = {

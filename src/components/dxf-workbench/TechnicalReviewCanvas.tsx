@@ -24,6 +24,7 @@ import type {
   StandardTechnicalReviewViewId,
   StandardTechnicalSectionView,
 } from "@/lib/sections/standardTechnicalViews";
+import { isStandardTechnicalReviewGeometryPendingMessage } from "@/lib/sections/standardTechnicalViews";
 
 type TechnicalReviewCanvasProps = {
   axonometricView: TechnicalAxonometricView | null;
@@ -465,6 +466,9 @@ function AxonometricCanvas({
     view.segments.some(
       (segment) => segment.fromProjected && segment.toProjected,
     );
+  const geometryPendingItem = view.pendingItems.find((item) =>
+    isStandardTechnicalReviewGeometryPendingMessage(item.message),
+  );
 
   return (
     <g>
@@ -509,9 +513,9 @@ function AxonometricCanvas({
               onHeightTargetSelect={onHeightTargetSelect}
             />
           ))}
-          {view.pendingItems.length > 0 ? (
+          {geometryPendingItem ? (
             <TechnicalViewWarning
-              text={view.pendingItems[0]?.message ?? "Vista pendiente"}
+              text={geometryPendingItem.message}
             />
           ) : null}
         </g>
@@ -1041,10 +1045,22 @@ function collectSectionHeightHandles(
 
 function firstSectionPendingReason(view: StandardTechnicalSectionView) {
   return (
-    view.projection.pendingItems[0]?.reason ??
-    view.projection.segments.find((segment) => segment.pendingReason)
+    view.projection.pendingItems.find((item) =>
+      isStandardTechnicalReviewGeometryPendingMessage(item.reason),
+    )?.reason ??
+    view.projection.segments.find(
+      (segment) =>
+        segment.pendingReason &&
+        isStandardTechnicalReviewGeometryPendingMessage(segment.pendingReason),
+    )
       ?.pendingReason ??
-    view.projection.accessories.find((accessory) => accessory.pendingReason)
+    view.projection.accessories.find(
+      (accessory) =>
+        accessory.pendingReason &&
+        isStandardTechnicalReviewGeometryPendingMessage(
+          accessory.pendingReason,
+        ),
+    )
       ?.pendingReason ??
     null
   );

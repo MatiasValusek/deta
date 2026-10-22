@@ -605,7 +605,7 @@ function assertPhysicalTerminalProposalCanContinueToCalculate(
     scaleMetersPerSourceUnit: SCALE_METERS_PER_SOURCE_UNIT,
   });
 
-  assertEqual(result.status, "valid");
+  assertEqual(result.status, "incomplete");
 
   const inventory = createTechnicalPhysicalAccessoryInventory({ result });
   const equivalentVerificationBySegmentId =

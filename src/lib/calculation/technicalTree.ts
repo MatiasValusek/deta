@@ -1338,7 +1338,25 @@ function resolveSegmentDimensioning(params: {
     );
 
     if (accessoryFailure) {
-      failures.push(createAccessoryDimensioningFailure(accessoryFailure));
+      const failure = createAccessoryDimensioningFailure(accessoryFailure);
+
+      // A catalog ambiguity is missing professional input, not evidence that
+      // the pipe must be enlarged. Stop at the first diameter that needs that
+      // decision instead of skipping ahead to an arbitrary resolvable row.
+      if (
+        failure.data?.requiredInformation ===
+          "threaded_connection_diameter" ||
+        (Array.isArray(failure.data?.matchingRows) &&
+          failure.data.matchingRows.length > 1)
+      ) {
+        return {
+          data: failure.data,
+          reason: failure.reason,
+          status: failure.status,
+        };
+      }
+
+      failures.push(failure);
       continue;
     }
 

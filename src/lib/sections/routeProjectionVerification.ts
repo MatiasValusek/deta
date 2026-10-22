@@ -235,6 +235,7 @@ function terminalValveAccessory(): RouteSegmentAccessory {
 
 function terminalRhAccessory(): RouteSegmentAccessory {
   return {
+    catalogCode: "codo-90-con-rosca-hembra-20-x-1-2",
     catalogFamilyId: "codo-90-rosca-hembra",
     equivalentLengthMetersPerUnit: null,
     equivalentLengthSource: "pipe_system",

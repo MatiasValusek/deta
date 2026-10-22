@@ -3,6 +3,11 @@ import { createTechnicalEquivalentAccessoryVerification } from "@/lib/calculatio
 import { createTechnicalMaterialTakeoff } from "@/lib/calculation/technicalMaterialTakeoff";
 import { createTechnicalPhysicalAccessoryInventory } from "@/lib/calculation/technicalPhysicalAccessories";
 import { SIGAS_PIPE_SYSTEM } from "@/lib/calculation/pipeSystems/sigas";
+import {
+  createSigasAccessoryExactSelectionDecisions,
+  createSigasAccessorySelectionDiameterIndex,
+  selectSigasAccessoryExactCatalogRow,
+} from "@/lib/calculation/pipeSystems/sigas/sigasAccessoryExactSelection";
 import { calculateTechnicalTree } from "@/lib/calculation/technicalTree";
 import {
   confirmEquipmentTerminalConfig,
@@ -82,10 +87,58 @@ function terminalConnectionFixture() {
   assert(secondUpdate.ok, secondUpdate.ok ? "" : secondUpdate.message);
   assertEqual(JSON.stringify(secondUpdate.network), JSON.stringify(firstUpdate.network));
 
-  const result = calculateTechnicalTree({
+  const initialResult = calculateTechnicalTree({
     equipment,
     minSegmentLengthSource: EPSILON,
     network: firstUpdate.network,
+    pipeSystem: SIGAS_PIPE_SYSTEM,
+    scaleMetersPerSourceUnit: SCALE_METERS_PER_SOURCE_UNIT,
+  });
+
+  assertEqual(initialResult.status, "incomplete");
+  const decisions = createSigasAccessoryExactSelectionDecisions({
+    diameterBySegmentId: createSigasAccessorySelectionDiameterIndex({
+      diameterBySegmentId:
+        initialResult.networkSizing?.finalDiameterBySegmentId ?? {},
+      result: initialResult,
+    }),
+    network: firstUpdate.network,
+  });
+  const decision = decisions[0];
+  const threadedHalfInch = decision?.candidates.find(
+    (candidate) => candidate.choiceLabel === "1/2",
+  );
+
+  assertEqual(decisions.length, 1);
+  assert(decision, "Falta decisión del terminal roscado.");
+  assert(threadedHalfInch, "Falta opción de rosca 1/2.");
+  const selection = selectSigasAccessoryExactCatalogRow({
+    accessoryId: decision.accessoryId,
+    catalogCode: threadedHalfInch.catalogCode,
+    diameter: decision.diameter,
+    network: firstUpdate.network,
+    segmentId: decision.segmentId,
+  });
+
+  assert(selection.ok, selection.ok ? "" : selection.message);
+  const reapplied = applyConfirmedEquipmentTerminalConnection({
+    equipment,
+    equipmentId: "stove",
+    network: selection.network,
+    scaleMetersPerSourceUnit: SCALE_METERS_PER_SOURCE_UNIT,
+  });
+
+  assert(reapplied.ok, reapplied.ok ? "" : reapplied.message);
+  assertEqual(
+    reapplied.network.segments
+      .flatMap((segment) => segment.accessories ?? [])
+      .find((accessory) => accessory.id.endsWith(":terminal"))?.catalogCode,
+    threadedHalfInch.catalogCode,
+  );
+  const result = calculateTechnicalTree({
+    equipment,
+    minSegmentLengthSource: EPSILON,
+    network: reapplied.network,
     pipeSystem: SIGAS_PIPE_SYSTEM,
     scaleMetersPerSourceUnit: SCALE_METERS_PER_SOURCE_UNIT,
   });
@@ -118,7 +171,7 @@ function terminalConnectionFixture() {
     equipment,
     inventory,
     materialTakeoff,
-    network: firstUpdate.network,
+    network: reapplied.network,
     result,
   };
 }

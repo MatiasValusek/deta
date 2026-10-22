@@ -191,11 +191,25 @@ function placedPresetEquipment(preset: PresetCase) {
   });
 
   assert(terminalUpdate.ok, terminalUpdate.ok ? "" : terminalUpdate.message);
+  const resolvedTerminalNetwork: ManualRouteNetwork = {
+    ...terminalUpdate.network,
+    segments: terminalUpdate.network.segments.map((segment) => ({
+      ...segment,
+      accessories: segment.accessories?.map((accessory) =>
+        accessory.catalogFamilyId === "codo-90-rosca-hembra"
+          ? {
+              ...accessory,
+              catalogCode: "codo-90-con-rosca-hembra-20-x-1-2",
+            }
+          : accessory,
+      ),
+    })),
+  };
 
   const result = calculateTechnicalTree({
     equipment,
     minSegmentLengthSource: EPSILON,
-    network: terminalUpdate.network,
+    network: resolvedTerminalNetwork,
     pipeSystem: SIGAS_PIPE_SYSTEM,
     scaleMetersPerSourceUnit: SCALE_METERS_PER_SOURCE_UNIT,
   });
@@ -227,7 +241,7 @@ function placedPresetEquipment(preset: PresetCase) {
     equipment,
     inventory,
     link: sectionProjectionLink(),
-    network: terminalUpdate.network,
+    network: resolvedTerminalNetwork,
     result,
     sectionScaleMetersPerSourceUnit: SECTION_SCALE_METERS_PER_SOURCE_UNIT,
     toleranceSource: EPSILON,
@@ -237,7 +251,7 @@ function placedPresetEquipment(preset: PresetCase) {
     equipment,
     inventory: null,
     link: sectionProjectionLink(),
-    network: terminalUpdate.network,
+    network: resolvedTerminalNetwork,
     result,
     sectionScaleMetersPerSourceUnit: SECTION_SCALE_METERS_PER_SOURCE_UNIT,
     toleranceSource: EPSILON,
@@ -249,7 +263,7 @@ function placedPresetEquipment(preset: PresetCase) {
     equipment,
     inventory,
     materialTakeoff,
-    network: terminalUpdate.network,
+    network: resolvedTerminalNetwork,
     result,
     routeOnlySectionProjection,
     sectionProjection,

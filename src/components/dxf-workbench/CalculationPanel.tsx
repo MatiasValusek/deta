@@ -86,6 +86,9 @@ import {
 import {
   downloadTechnicalPdf,
 } from "@/lib/calculation/technicalPdfDownload";
+import type {
+  SigasAccessoryExactSelectionDecision,
+} from "@/lib/calculation/pipeSystems/sigas/sigasAccessoryExactSelection";
 
 type CalculationPanelMode = "calculate" | "deliver";
 
@@ -93,6 +96,7 @@ type CalculationPanelProps = {
   adoptedDiameterDecisions: AdoptedDiameterDecision[];
   accessoryProposals: AccessoryProposal[];
   accessoryProposalReviews: AccessoryProposalTechnicalReview[];
+  accessoryExactSelectionDecisions: SigasAccessoryExactSelectionDecision[];
   diameterTransitionProposals: DiameterTransitionProposal[];
   diameterTransitionReviews: DiameterTransitionTechnicalReview[];
   equipment: WorkbenchEquipment[];
@@ -112,6 +116,10 @@ type CalculationPanelProps = {
   onGoToPlan: () => void;
   onRejectAccessoryProposal: (proposalId: string) => void;
   onRejectDiameterTransition: (transitionId: string) => void;
+  onSelectAccessoryExactCatalogRow: (
+    decisionId: string,
+    catalogCode: string,
+  ) => void;
 };
 
 type CalculationPendingSummary = {
@@ -153,6 +161,11 @@ type PendingCalculationDecision =
     }
   | {
       id: string;
+      kind: "accessory_exact";
+      decision: SigasAccessoryExactSelectionDecision;
+    }
+  | {
+      id: string;
       kind: "adopted_diameter";
       decision: PendingAdoptedDiameterDecision;
     }
@@ -182,6 +195,7 @@ type SharedDecisionCandidate = {
 
 export function CalculationPanel({
   adoptedDiameterDecisions,
+  accessoryExactSelectionDecisions,
   accessoryProposals,
   accessoryProposalReviews,
   diameterTransitionProposals,
@@ -203,6 +217,7 @@ export function CalculationPanel({
   onGoToPlan,
   onRejectAccessoryProposal,
   onRejectDiameterTransition,
+  onSelectAccessoryExactCatalogRow,
 }: CalculationPanelProps) {
   const [selectedSegmentId, setSelectedSegmentId] = useState<string | null>(null);
   const [isExportingExcel, setIsExportingExcel] = useState(false);
@@ -319,6 +334,7 @@ export function CalculationPanel({
   const pendingDecisions = useMemo(
     () =>
       createPendingCalculationDecisions({
+        accessoryExactSelectionDecisions,
         accessoryProposalReviews,
         accessoryProposals,
         adoptedDiameterValidation,
@@ -327,6 +343,7 @@ export function CalculationPanel({
         result,
       }),
     [
+      accessoryExactSelectionDecisions,
       accessoryProposalReviews,
       accessoryProposals,
       adoptedDiameterValidation,
@@ -497,6 +514,9 @@ export function CalculationPanel({
             onGoToPlan={onGoToPlan}
             onRejectAccessoryProposal={onRejectAccessoryProposal}
             onRejectDiameterTransition={onRejectDiameterTransition}
+            onSelectAccessoryExactCatalogRow={
+              onSelectAccessoryExactCatalogRow
+            }
           />
           {isDeliverMode ? (
             <>
@@ -546,6 +566,7 @@ function PendingDecisionList({
   onGoToPlan,
   onRejectAccessoryProposal,
   onRejectDiameterTransition,
+  onSelectAccessoryExactCatalogRow,
 }: {
   decisions: PendingCalculationDecision[];
   equipment: WorkbenchEquipment[];
@@ -557,8 +578,14 @@ function PendingDecisionList({
   onGoToPlan: () => void;
   onRejectAccessoryProposal: (proposalId: string) => void;
   onRejectDiameterTransition: (transitionId: string) => void;
+  onSelectAccessoryExactCatalogRow: (
+    decisionId: string,
+    catalogCode: string,
+  ) => void;
 }) {
   const [selectedAccessoryCandidateById, setSelectedAccessoryCandidateById] =
+    useState<Record<string, string>>({});
+  const [selectedExactCatalogCodeById, setSelectedExactCatalogCodeById] =
     useState<Record<string, string>>({});
   const [selectedTransitionCandidateById, setSelectedTransitionCandidateById] =
     useState<Record<string, string>>({});
@@ -582,6 +609,27 @@ function PendingDecisionList({
       </div>
       <div className="space-y-2">
         {decisions.map((item) => {
+          if (item.kind === "accessory_exact") {
+            return (
+              <AccessoryExactSelectionCard
+                decision={item.decision}
+                equipmentById={equipmentById}
+                key={item.id}
+                result={result}
+                selectedCatalogCode={
+                  selectedExactCatalogCodeById[item.decision.id] ?? ""
+                }
+                onConfirm={onSelectAccessoryExactCatalogRow}
+                onSelect={(catalogCode) =>
+                  setSelectedExactCatalogCodeById((current) => ({
+                    ...current,
+                    [item.decision.id]: catalogCode,
+                  }))
+                }
+              />
+            );
+          }
+
           if (item.kind === "combined") {
             return (
               <CombinedDecisionCard
@@ -755,6 +803,69 @@ function AccessoryDecisionCard({
           onSelect={onSelect}
         />
       ) : null}
+    </DecisionCard>
+  );
+}
+
+function AccessoryExactSelectionCard({
+  decision,
+  equipmentById,
+  result,
+  selectedCatalogCode,
+  onConfirm,
+  onSelect,
+}: {
+  decision: SigasAccessoryExactSelectionDecision;
+  equipmentById: Map<string, WorkbenchEquipment>;
+  result: TechnicalCalculationResult;
+  selectedCatalogCode: string;
+  onConfirm: (decisionId: string, catalogCode: string) => void;
+  onSelect: (catalogCode: string) => void;
+}) {
+  const selectedCandidate = decision.candidates.find(
+    (candidate) => candidate.catalogCode === selectedCatalogCode,
+  );
+
+  return (
+    <DecisionCard
+      primaryAction={
+        <button
+          className="rounded border border-[var(--accent)] bg-[var(--accent)] px-2 py-1 text-[11px] text-white disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={!selectedCandidate}
+          type="button"
+          onClick={() => onConfirm(decision.id, selectedCatalogCode)}
+        >
+          Resolver accesorio
+        </button>
+      }
+      title="Completar accesorio SIGAS"
+    >
+      <DecisionContext
+        diameters={formatDiameterReference(decision.diameter)}
+        equipmentById={equipmentById}
+        result={result}
+        segmentIds={[decision.segmentId]}
+      />
+      <label className="mt-2 block">
+        <span className="text-[10px] font-semibold uppercase text-[var(--muted)]">
+          {decision.fieldLabel}
+        </span>
+        <select
+          className="mt-1 w-full rounded border border-[var(--line)] bg-white px-2 py-1 text-xs"
+          value={selectedCatalogCode}
+          onChange={(event) => onSelect(event.target.value)}
+        >
+          <option value="">Seleccionar</option>
+          {decision.candidates.map((candidate) => (
+            <option key={candidate.catalogCode} value={candidate.catalogCode}>
+              {candidate.choiceLabel}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div className="mt-1 text-[10px] text-[var(--muted)]">
+        {decision.reason}
+      </div>
     </DecisionCard>
   );
 }
@@ -3535,6 +3646,7 @@ function AccessorySummaryRow({
 }
 
 function createPendingCalculationDecisions({
+  accessoryExactSelectionDecisions,
   accessoryProposalReviews,
   accessoryProposals,
   adoptedDiameterValidation,
@@ -3542,6 +3654,7 @@ function createPendingCalculationDecisions({
   diameterTransitionReviews,
   result,
 }: {
+  accessoryExactSelectionDecisions: SigasAccessoryExactSelectionDecision[];
   accessoryProposalReviews: AccessoryProposalTechnicalReview[];
   accessoryProposals: AccessoryProposal[];
   adoptedDiameterValidation: TechnicalAdoptedDiameterValidation;
@@ -3574,7 +3687,12 @@ function createPendingCalculationDecisions({
       first.proposal.nodeId.localeCompare(second.proposal.nodeId),
     );
   const usedTransitionIds = new Set<string>();
-  const decisions: PendingCalculationDecision[] = [];
+  const decisions: PendingCalculationDecision[] =
+    accessoryExactSelectionDecisions.map((decision) => ({
+      decision,
+      id: `accessory-exact:${decision.id}`,
+      kind: "accessory_exact",
+    }));
 
   for (const accessory of accessoryDecisions) {
     const combinedTransition = transitionDecisions.find((transition) => {

@@ -457,6 +457,17 @@ function technicalGeometryPendingKey(params: {
   return `${bucket}:${params.type}:${params.sourceId}`;
 }
 
+export function isStandardTechnicalReviewGeometryPendingMessage(
+  message: string,
+) {
+  const normalized = message
+    .toLocaleLowerCase("es-AR")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  return technicalGeometryPendingBucket(normalized) !== null;
+}
+
 function zEndpointNodeId(message: string) {
   return message.match(/extremo\s+(.+?)\s+del tramo/)?.[1] ?? null;
 }

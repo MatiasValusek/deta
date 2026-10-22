@@ -72,6 +72,12 @@ import {
   matchSigasAccessoryProposal,
 } from "@/lib/calculation/pipeSystems/sigas/sigasAccessoryProposal";
 import {
+  createSigasAccessoryExactSelectionDecisions,
+  createSigasAccessorySelectionDiameterIndex,
+  reconcileSigasAccessoryExactCatalogRows,
+  selectSigasAccessoryExactCatalogRow,
+} from "@/lib/calculation/pipeSystems/sigas/sigasAccessoryExactSelection";
+import {
   equipmentDefinitionForType,
   equipmentTypeLabel,
   hasPendingDemand,
@@ -1085,6 +1091,22 @@ export function DxfWorkbench() {
   }, [technicalCalculationResult]);
   const accessoryProposalDiameterBySegmentId =
     finalDiameterBySegmentId as Map<string, AccessoryProposalDiameterReference>;
+  const sigasAccessorySelectionDiameterBySegmentId = useMemo(
+    () =>
+      createSigasAccessorySelectionDiameterIndex({
+        diameterBySegmentId: finalDiameterBySegmentId,
+        result: technicalCalculationResult,
+      }),
+    [finalDiameterBySegmentId, technicalCalculationResult],
+  );
+  const sigasAccessoryExactSelectionDecisions = useMemo(
+    () =>
+      createSigasAccessoryExactSelectionDecisions({
+        diameterBySegmentId: sigasAccessorySelectionDiameterBySegmentId,
+        network: routeNetwork,
+      }),
+    [routeNetwork, sigasAccessorySelectionDiameterBySegmentId],
+  );
   const routeAccessoryProposals = useMemo(() => {
     if (!planBase) {
       return [];
@@ -1424,6 +1446,33 @@ export function DxfWorkbench() {
     planBase?.routeAccessoryProposalDecisions,
     routeAccessoryProposals,
     routeNetwork,
+  ]);
+
+  useEffect(() => {
+    if (!planBase) {
+      return;
+    }
+
+    const network = reconcileSigasAccessoryExactCatalogRows({
+      diameterBySegmentId: sigasAccessorySelectionDiameterBySegmentId,
+      network: planBase.routeNetwork,
+    });
+
+    if (network === planBase.routeNetwork) {
+      return;
+    }
+
+    updateBase(planBase.id, (base) => ({
+      ...base,
+      routeNetwork: reconcileSigasAccessoryExactCatalogRows({
+        diameterBySegmentId: sigasAccessorySelectionDiameterBySegmentId,
+        network: base.routeNetwork,
+      }),
+    }));
+  }, [
+    planBase?.id,
+    planBase?.routeNetwork,
+    sigasAccessorySelectionDiameterBySegmentId,
   ]);
 
   useEffect(() => {
@@ -5170,6 +5219,46 @@ export function DxfWorkbench() {
     setRouteError(null);
   }
 
+  function handleSelectSigasAccessoryExactCatalogRow(
+    decisionId: string,
+    catalogCode: string,
+  ) {
+    setActiveRightPanelSection("calculation");
+
+    if (!planBase) {
+      return;
+    }
+
+    const decision = sigasAccessoryExactSelectionDecisions.find(
+      (item) => item.id === decisionId,
+    );
+
+    if (!decision) {
+      setRouteError("La decisión del accesorio SIGAS ya no está pendiente.");
+      return;
+    }
+
+    const result = selectSigasAccessoryExactCatalogRow({
+      accessoryId: decision.accessoryId,
+      catalogCode,
+      diameter: decision.diameter,
+      network: planBase.routeNetwork,
+      segmentId: decision.segmentId,
+    });
+
+    if (!result.ok) {
+      setRouteError(result.message);
+      return;
+    }
+
+    updateBase(planBase.id, (base) => ({
+      ...base,
+      routeNetwork: result.network,
+      showRoute: true,
+    }));
+    setRouteError(null);
+  }
+
   function handleRejectAccessoryProposal(proposalId: string) {
     setActiveRightPanelSection("calculation");
 
@@ -6144,8 +6233,8 @@ export function DxfWorkbench() {
             ? "Listo para calcular"
             : `${reviewObservationCount} ${
                 reviewObservationCount === 1
-                  ? "observacion tecnica"
-                  : "observaciones tecnicas"
+                  ? "observacion geometrica"
+                  : "observaciones geometricas"
               }`
           : `${connectedApplianceIds.size} de ${applianceEquipment.length} conectados`
     : "Sin Planta";
@@ -6164,8 +6253,8 @@ export function DxfWorkbench() {
             : reviewObservationCount > 0
               ? `${reviewObservationCount} ${
                   reviewObservationCount === 1
-                    ? "observacion tecnica pendiente"
-                    : "observaciones tecnicas pendientes"
+                    ? "observacion geometrica pendiente"
+                    : "observaciones geometricas pendientes"
                 }.`
               : "Confirma el recorrido antes de calcular.";
 
@@ -6427,6 +6516,7 @@ export function DxfWorkbench() {
           adoptedDiameterDecisions={planBase?.adoptedDiameterDecisions ?? []}
           accessoryProposals={routeAccessoryProposals}
           accessoryProposalReviews={routeAccessoryProposalReviews}
+          accessoryExactSelectionDecisions={sigasAccessoryExactSelectionDecisions}
           diameterTransitionProposals={diameterTransitionProposals}
           diameterTransitionReviews={diameterTransitionProposalReviews}
           equipment={planEquipment}
@@ -6441,6 +6531,9 @@ export function DxfWorkbench() {
           routeTransitionResolutions={routeTransitionResolutions}
           onAdoptSegmentDiameter={handleAdoptSegmentDiameter}
           onConfirmAccessoryProposal={handleConfirmAccessoryProposal}
+          onSelectAccessoryExactCatalogRow={
+            handleSelectSigasAccessoryExactCatalogRow
+          }
           onConfirmDiameterTransition={handleConfirmDiameterTransition}
           onGoToEquipment={handleGoToEquipmentFromCalculation}
           onGoToPlan={handleGoToPlanForRoute}

@@ -95,6 +95,35 @@ export function runSigasPipeSystemVerifications() {
     assertEqual(resolution.status, "unsupported");
   });
 
+  verify(results, "Caso I - familia roscada ambigua", () => {
+    const resolution = resolveSigasAccessoryEquivalentLength({
+      accessoryType: "elbow",
+      catalogFamilyId: "codo-90-rosca-hembra",
+      diameter: { id: "sigas-25", label: "Sigas 25 mm" },
+    });
+
+    assertEqual(resolution.status, "unresolved");
+    assertEqual(
+      Array.isArray(resolution.data?.matchingRows)
+        ? resolution.data.matchingRows.length
+        : 0,
+      2,
+    );
+  });
+
+  verify(results, "Caso J - codigo exacto prevalece sobre familia", () => {
+    const resolution = assertResolved(
+      resolveSigasAccessoryEquivalentLength({
+        accessoryType: "elbow",
+        catalogCode: "codo-90-con-rosca-hembra-25-x-3-4",
+        catalogFamilyId: "codo-90-rosca-hembra",
+        diameter: { id: "sigas-25", label: "Sigas 25 mm" },
+      }),
+    );
+
+    assertEqual(resolution, 0.768);
+  });
+
   verify(results, "Transcripcion - dimensiones y conteos", () => {
     assertEqual(SIGAS_DIAMETERS.length, 9);
     assertEqual(SIGAS_NATURAL_GAS_CAPACITY_TABLE.length, 60);

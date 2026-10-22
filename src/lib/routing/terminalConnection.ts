@@ -133,7 +133,9 @@ export function applyConfirmedEquipmentTerminalConnection(params: {
         ? {
             ...segment,
             accessories: mergeTerminalAccessories(
-              segment.accessories,
+              params.network.segments.find(
+                (current) => current.id === segment.id,
+              )?.accessories ?? segment.accessories,
               terminalAccessories,
             ),
             vertices: vertices.length > 0 ? vertices : undefined,
@@ -413,13 +415,24 @@ function mergeTerminalAccessories(
   current: RouteSegmentAccessory[] | undefined,
   terminalAccessories: RouteSegmentAccessory[],
 ) {
+  const currentById = new Map(
+    (current ?? []).map((accessory) => [accessory.id, accessory]),
+  );
   const terminalIds = new Set(
     terminalAccessories.map((accessory) => accessory.id),
   );
+  const reconciledTerminalAccessories = terminalAccessories.map((accessory) => {
+    const previous = currentById.get(accessory.id);
+
+    return previous?.catalogCode &&
+      previous.catalogFamilyId === accessory.catalogFamilyId
+      ? { ...accessory, catalogCode: previous.catalogCode }
+      : accessory;
+  });
 
   return [
     ...(current ?? []).filter((accessory) => !terminalIds.has(accessory.id)),
-    ...terminalAccessories,
+    ...reconciledTerminalAccessories,
   ].sort((first, second) => first.id.localeCompare(second.id));
 }
 

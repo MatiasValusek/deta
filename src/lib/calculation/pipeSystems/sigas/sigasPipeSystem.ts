@@ -189,9 +189,50 @@ export function resolveSigasAccessoryEquivalentLength(params: {
     };
   }
 
-  const catalogLookup = params.catalogFamilyId ?? params.catalogCode;
+  const exactCatalogRow = params.catalogCode
+    ? ACCESSORIES_BY_CODE.get(params.catalogCode) ?? null
+    : null;
+
+  if (
+    params.catalogFamilyId === "codo-90-rosca-hembra" &&
+    !exactCatalogRow
+  ) {
+    const matchingRows = findAccessoryRowsForCatalogCode(
+      params.catalogFamilyId,
+    ).filter((row) => accessoryRowMatchesDiameter(row, diameter));
+
+    return {
+      data: {
+        catalogCode: params.catalogCode,
+        catalogFamilyId: params.catalogFamilyId,
+        matchingRows: matchingRows.map((row) => row.code),
+        pipeDiameterId: diameter.id,
+        requiredInformation: "threaded_connection_diameter",
+        sourceFile: SIGAS_TABLES_SOURCE.fileName,
+        sourceTable: SIGAS_TABLES_SOURCE.accessoryEquivalentLengthTable,
+      },
+      reason:
+        "Falta el diametro de la conexion roscada para identificar la fila SIGAS.",
+      status: "unresolved",
+    };
+  }
+
+  // An exact catalog row is more specific than its family. Keeping this
+  // precedence is essential for professionally confirmed variants such as
+  // a female-thread elbow with an explicit threaded outlet diameter.
+  const catalogLookup = params.catalogCode ?? params.catalogFamilyId;
 
   if (catalogLookup) {
+    const selectedVariantRow = resolveSelectedAccessoryVariantForDiameter({
+      catalogCode: params.catalogCode,
+      catalogFamilyId: params.catalogFamilyId,
+      diameter,
+    });
+
+    if (selectedVariantRow) {
+      return createResolvedAccessory(selectedVariantRow, diameter);
+    }
+
     const rows = findAccessoryRowsForCatalogCode(catalogLookup);
 
     if (rows.length === 0) {
@@ -422,6 +463,33 @@ export function getSigasAccessoryEquivalentLengthRow(code: string) {
   return ACCESSORIES_BY_CODE.get(code) ?? null;
 }
 
+export function getSigasAccessoryExactCatalogRows(params: {
+  catalogFamilyId: string;
+  diameter: PipeDiameterReference;
+}) {
+  const diameter = resolveSigasDiameter(params.diameter);
+
+  if (!diameter) {
+    return [];
+  }
+
+  return findAccessoryRowsForCatalogCode(params.catalogFamilyId)
+    .filter((row) => accessoryRowMatchesDiameter(row, diameter))
+    .map((row) => ({
+      catalogCode: row.code,
+      equivalentLengthMeters: row.equivalentLengthMeters,
+      label: row.label,
+    }));
+}
+
+export function getSigasAccessoryFamilyCatalogRows(catalogFamilyId: string) {
+  return findAccessoryRowsForCatalogCode(catalogFamilyId).map((row) => ({
+    catalogCode: row.code,
+    equivalentLengthMeters: row.equivalentLengthMeters,
+    label: row.label,
+  }));
+}
+
 function findAccessoryRowsForCatalogCode(catalogCode: string) {
   if (catalogCode === "te-reduc-central") {
     return SIGAS_ACCESSORY_EQUIVALENT_LENGTHS.filter((row) =>
@@ -436,6 +504,42 @@ function findAccessoryRowsForCatalogCode(catalogCode: string) {
   }
 
   return ACCESSORY_FAMILY_ROWS_BY_CODE.get(catalogCode) ?? [];
+}
+
+function resolveSelectedAccessoryVariantForDiameter(params: {
+  catalogCode?: string;
+  catalogFamilyId?: string;
+  diameter: SigasDiameter;
+}) {
+  if (
+    !params.catalogCode ||
+    params.catalogFamilyId !== "codo-90-rosca-hembra"
+  ) {
+    return null;
+  }
+
+  const selectedRow = ACCESSORIES_BY_CODE.get(params.catalogCode);
+  const selectedThread = selectedRow
+    ? femaleThreadDiameterForRow(selectedRow)
+    : null;
+
+  if (!selectedThread) {
+    return null;
+  }
+
+  const matchingRows = (
+    ACCESSORY_FAMILY_ROWS_BY_CODE.get(params.catalogFamilyId) ?? []
+  ).filter(
+    (row) =>
+      accessoryRowMatchesDiameter(row, params.diameter) &&
+      femaleThreadDiameterForRow(row) === selectedThread,
+  );
+
+  return matchingRows.length === 1 ? matchingRows[0] ?? null : null;
+}
+
+function femaleThreadDiameterForRow(row: SigasAccessoryEquivalentLengthRow) {
+  return row.label.match(/\bx\s+(.+)$/i)?.[1]?.trim() ?? null;
 }
 
 function createAccessoryFamilyRowsByCode() {

@@ -34,7 +34,7 @@ export function ReviewPanel({
   const generalStatus = hasValidRoute
     ? "Instalacion lista para calcular"
     : routeRestrictionCount > 0
-      ? "Falta resolver observaciones tecnicas"
+      ? "Falta resolver observaciones geometricas"
     : "Falta confirmar un recorrido valido";
 
   return (
@@ -49,7 +49,7 @@ export function ReviewPanel({
           <dd className="text-right font-mono">
             {connectedApplianceCount}/{totalApplianceCount}
           </dd>
-          <dt>Observaciones</dt>
+          <dt>Observaciones geométricas</dt>
           <dd className="text-right font-mono">{routeRestrictionCount}</dd>
         </dl>
         {!hasValidRoute && calculationBlockReason ? (
