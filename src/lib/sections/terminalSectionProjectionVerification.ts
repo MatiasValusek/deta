@@ -16,6 +16,7 @@ import {
 import {
   confirmEquipmentTerminalConfig,
   createSuggestedEquipmentTerminalConfig,
+  terminalEndHeightMeters,
 } from "@/lib/equipment/terminalConfig";
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
 import type { Point2D } from "@/lib/geometry/types";
@@ -41,8 +42,12 @@ export type TerminalSectionProjectionVerificationResult = {
 };
 
 const EPSILON = 0.000001;
-const INITIAL_TERMINAL_HEIGHT_METERS = 1.1;
-const UPDATED_TERMINAL_HEIGHT_METERS = 1.65;
+const INITIAL_CONNECTION_HEIGHT_METERS = 1.1;
+const INITIAL_END_HEIGHT_METERS = 0.9;
+const UPDATED_END_HEIGHT_METERS = 1.65;
+const UPDATED_CONNECTION_HEIGHT_METERS = 1.85;
+const SUCCESSIVE_END_HEIGHT_METERS = 0.75;
+const SUCCESSIVE_CONNECTION_HEIGHT_METERS = 0.95;
 const PLAN_SCALE_METERS_PER_SOURCE_UNIT = 1;
 const SECTION_SCALE_METERS_PER_SOURCE_UNIT = 0.1;
 const TERMINAL_RH_HALF_INCH_CATALOG_CODE =
@@ -56,16 +61,20 @@ export function runTerminalSectionProjectionVerifications() {
     "10.7D corte representa artefacto y terminal fisica de routeNetwork",
     () => {
       const before = terminalSectionProjectionFixture(
-        INITIAL_TERMINAL_HEIGHT_METERS,
+        INITIAL_CONNECTION_HEIGHT_METERS,
       );
 
-      assertTerminalProjection(before, INITIAL_TERMINAL_HEIGHT_METERS);
+      assertTerminalProjection(
+        before,
+        INITIAL_CONNECTION_HEIGHT_METERS,
+        INITIAL_END_HEIGHT_METERS,
+      );
       assertMissingSectionReferenceIsPending(before);
 
       const target = terminalEquipmentTarget(before.projection);
       const edit = applySectionRouteHeightEdit({
         equipment: before.equipment,
-        heightMeters: UPDATED_TERMINAL_HEIGHT_METERS,
+        heightMeters: UPDATED_END_HEIGHT_METERS,
         network: before.network,
         scaleMetersPerSourceUnit: PLAN_SCALE_METERS_PER_SOURCE_UNIT,
         target,
@@ -74,15 +83,61 @@ export function runTerminalSectionProjectionVerifications() {
       assert(edit.ok, edit.ok ? "" : edit.message);
 
       const after = terminalSectionProjectionFixture(
-        UPDATED_TERMINAL_HEIGHT_METERS,
+        UPDATED_CONNECTION_HEIGHT_METERS,
         edit.network,
         edit.equipment,
       );
 
       assertStableRouteIdentity(before.network, after.network);
-      assertTerminalProjection(after, UPDATED_TERMINAL_HEIGHT_METERS);
-      assertHeightEditUpdatedSameNetwork(before, after);
+      assertTerminalProjection(
+        after,
+        UPDATED_CONNECTION_HEIGHT_METERS,
+        UPDATED_END_HEIGHT_METERS,
+      );
+      assertHeightEditUpdatedSameNetwork(
+        before,
+        after,
+        INITIAL_CONNECTION_HEIGHT_METERS,
+        INITIAL_END_HEIGHT_METERS,
+        UPDATED_CONNECTION_HEIGHT_METERS,
+        UPDATED_END_HEIGHT_METERS,
+      );
       assertNoDuplicateTerminalAccessories(after);
+
+      const successiveEdit = applySectionRouteHeightEdit({
+        equipment: after.equipment,
+        heightMeters: SUCCESSIVE_END_HEIGHT_METERS,
+        network: after.network,
+        scaleMetersPerSourceUnit: PLAN_SCALE_METERS_PER_SOURCE_UNIT,
+        target: terminalEquipmentTarget(after.projection),
+      });
+
+      assert(
+        successiveEdit.ok,
+        successiveEdit.ok ? "" : successiveEdit.message,
+      );
+
+      const successive = terminalSectionProjectionFixture(
+        SUCCESSIVE_CONNECTION_HEIGHT_METERS,
+        successiveEdit.network,
+        successiveEdit.equipment,
+      );
+
+      assertStableRouteIdentity(after.network, successive.network);
+      assertTerminalProjection(
+        successive,
+        SUCCESSIVE_CONNECTION_HEIGHT_METERS,
+        SUCCESSIVE_END_HEIGHT_METERS,
+      );
+      assertHeightEditUpdatedSameNetwork(
+        after,
+        successive,
+        UPDATED_CONNECTION_HEIGHT_METERS,
+        UPDATED_END_HEIGHT_METERS,
+        SUCCESSIVE_CONNECTION_HEIGHT_METERS,
+        SUCCESSIVE_END_HEIGHT_METERS,
+      );
+      assertNoDuplicateTerminalAccessories(successive);
     },
   );
 
@@ -167,6 +222,7 @@ function fixtureEquipment(terminalHeightMeters: number): WorkbenchEquipment[] {
     lateralOffsetMeters: 0.5,
     outletSide: "right",
   });
+  const terminalEndHeight = terminalEndHeightMeters(terminalConfig) ?? 0;
 
   return [
     {
@@ -179,8 +235,8 @@ function fixtureEquipment(terminalHeightMeters: number): WorkbenchEquipment[] {
       type: "meter_regulator",
     },
     {
-      bodyPoint: { x: 2, y: 0, z: terminalHeightMeters },
-      connectionPoint: { x: 2, y: 0, z: terminalHeightMeters },
+      bodyPoint: { x: 2, y: 0, z: terminalEndHeight },
+      connectionPoint: { x: 2, y: 0, z: terminalEndHeight },
       demandUnit: "kcal_h",
       demandValue: 8500,
       id: "stove",
@@ -199,7 +255,7 @@ function fixtureEquipment(terminalHeightMeters: number): WorkbenchEquipment[] {
         referenceKind: "reference_wall",
         source: "dxf",
         status: "anchored",
-        wallPoint: { x: 2, y: 0, z: terminalHeightMeters },
+        wallPoint: { x: 2, y: 0, z: terminalEndHeight },
       },
     },
   ];
@@ -322,7 +378,8 @@ function terminalEquipmentTarget(projection: SectionRouteProjection) {
 
 function assertTerminalProjection(
   fixture: TerminalSectionProjectionFixture,
-  terminalHeightMeters: number,
+  connectionHeightMeters: number,
+  endHeightMeters: number,
 ) {
   assertEqual(
     fixture.projection.pendingItems
@@ -351,12 +408,15 @@ function assertTerminalProjection(
   assertEqual(fixture.axonometricView.status, "resolved");
 
   const branch = projectedSegment(fixture.projection, "D-1");
-  const expectedSectionY = 200 + terminalHeightMeters / SECTION_SCALE_METERS_PER_SOURCE_UNIT;
+  const expectedConnectionSectionY =
+    200 + connectionHeightMeters / SECTION_SCALE_METERS_PER_SOURCE_UNIT;
+  const expectedEndSectionY =
+    200 + endHeightMeters / SECTION_SCALE_METERS_PER_SOURCE_UNIT;
 
   assertEqual(branch.status, "resolved");
   assertEqual(
     branch.points.map((point) => point.source).join(","),
-    "node,vertical,vertex,connection",
+    "node,vertical,vertex,vertex,connection",
   );
   assertProjectionPoint(branch.points[0], {
     elevationMeters: 0,
@@ -364,19 +424,24 @@ function assertTerminalProjection(
     sectionPoint: { x: 150, y: 200 },
   });
   assertProjectionPoint(branch.points[1], {
-    elevationMeters: terminalHeightMeters,
-    planPoint: { x: 2.5, y: -1, z: terminalHeightMeters },
-    sectionPoint: { x: 150, y: expectedSectionY },
+    elevationMeters: connectionHeightMeters,
+    planPoint: { x: 2.5, y: -1, z: connectionHeightMeters },
+    sectionPoint: { x: 150, y: expectedConnectionSectionY },
   });
   assertProjectionPoint(branch.points[2], {
-    elevationMeters: terminalHeightMeters,
-    planPoint: { x: 2.5, y: 0, z: terminalHeightMeters },
-    sectionPoint: { x: 150, y: expectedSectionY },
+    elevationMeters: connectionHeightMeters,
+    planPoint: { x: 2.5, y: 0, z: connectionHeightMeters },
+    sectionPoint: { x: 150, y: expectedConnectionSectionY },
   });
   assertProjectionPoint(branch.points[3], {
-    elevationMeters: terminalHeightMeters,
-    planPoint: { x: 2, y: 0, z: terminalHeightMeters },
-    sectionPoint: { x: 140, y: expectedSectionY },
+    elevationMeters: connectionHeightMeters,
+    planPoint: { x: 2, y: 0, z: connectionHeightMeters },
+    sectionPoint: { x: 140, y: expectedConnectionSectionY },
+  });
+  assertProjectionPoint(branch.points[4], {
+    elevationMeters: endHeightMeters,
+    planPoint: { x: 2, y: 0, z: endHeightMeters },
+    sectionPoint: { x: 140, y: expectedEndSectionY },
   });
 
   const stove =
@@ -385,11 +450,11 @@ function assertTerminalProjection(
 
   assert(stove, "Falta simbolo de cocina proyectado.");
   assertEqual(stove.anchorStatus, "anchored");
-  assertClose(stove.zMeters, terminalHeightMeters);
-  assertPoint(stove.planPoint, { x: 2, y: 0, z: terminalHeightMeters });
-  assertPoint(stove.bodyPlanPoint, { x: 2, y: 0, z: terminalHeightMeters });
-  assertPoint(stove.sectionPoint, { x: 140, y: expectedSectionY });
-  assertPoint(stove.bodySectionPoint, { x: 140, y: expectedSectionY });
+  assertClose(stove.zMeters, endHeightMeters);
+  assertPoint(stove.planPoint, { x: 2, y: 0, z: endHeightMeters });
+  assertPoint(stove.bodyPlanPoint, { x: 2, y: 0, z: endHeightMeters });
+  assertPoint(stove.sectionPoint, { x: 140, y: expectedEndSectionY });
+  assertPoint(stove.bodySectionPoint, { x: 140, y: expectedEndSectionY });
   assertPoint(stove.bodyPlanPoint, stove.planPoint);
 
   const valve = projectedAccessory(fixture.projection, "valve");
@@ -397,10 +462,10 @@ function assertTerminalProjection(
 
   assertEqual(valve.label, "Llave");
   assertEqual(terminal.label, "RH");
-  assertPoint(valve.planPoint, { x: 2.5, y: 0, z: terminalHeightMeters });
-  assertPoint(valve.sectionPoint, { x: 150, y: expectedSectionY });
-  assertPoint(terminal.planPoint, { x: 2, y: 0, z: terminalHeightMeters });
-  assertPoint(terminal.sectionPoint, { x: 140, y: expectedSectionY });
+  assertPoint(valve.planPoint, { x: 2.5, y: 0, z: connectionHeightMeters });
+  assertPoint(valve.sectionPoint, { x: 150, y: expectedConnectionSectionY });
+  assertPoint(terminal.planPoint, { x: 2, y: 0, z: endHeightMeters });
+  assertPoint(terminal.sectionPoint, { x: 140, y: expectedEndSectionY });
   assert(
     valve.sourceIds.some((sourceId) =>
       sourceId.endsWith("D-1:route-terminal:stove:valve"),
@@ -418,6 +483,10 @@ function assertTerminalProjection(
 function assertHeightEditUpdatedSameNetwork(
   before: TerminalSectionProjectionFixture,
   after: TerminalSectionProjectionFixture,
+  beforeConnectionHeightMeters: number,
+  beforeEndHeightMeters: number,
+  afterConnectionHeightMeters: number,
+  afterEndHeightMeters: number,
 ) {
   const beforeBranch = resolvedSegment(before, "D-1");
   const afterBranch = resolvedSegment(after, "D-1");
@@ -426,35 +495,39 @@ function assertHeightEditUpdatedSameNetwork(
   assertPoint(stove.connectionPoint, {
     x: 2,
     y: 0,
-    z: UPDATED_TERMINAL_HEIGHT_METERS,
+    z: afterEndHeightMeters,
   });
   assertPoint(stove.bodyPoint, {
     x: 2,
     y: 0,
-    z: UPDATED_TERMINAL_HEIGHT_METERS,
+    z: afterEndHeightMeters,
   });
   assertPoint(stove.wallAnchor?.wallPoint, {
     x: 2,
     y: 0,
-    z: UPDATED_TERMINAL_HEIGHT_METERS,
+    z: afterEndHeightMeters,
   });
   assertClose(
     stove.terminalConfig?.connectionHeightMeters,
-    UPDATED_TERMINAL_HEIGHT_METERS,
+    afterConnectionHeightMeters,
   );
+  assertEqual(stove.terminalConfig?.heightStatus, "confirmed");
+  assertClose(stove.terminalConfig?.lateralOffsetMeters, 0.5);
+  assertEqual(stove.terminalConfig?.outletSide, "right");
+  assertClose(stove.terminalConfig?.verticalDropMeters, 0.2);
   assertClose(
     routeSegmentPhysicalLengthMeters(
       beforeBranch,
       PLAN_SCALE_METERS_PER_SOURCE_UNIT,
     ),
-    2.6,
+    terminalBranchPhysicalLengthMeters(beforeConnectionHeightMeters),
   );
   assertClose(
     routeSegmentPhysicalLengthMeters(
       afterBranch,
       PLAN_SCALE_METERS_PER_SOURCE_UNIT,
     ),
-    3.15,
+    terminalBranchPhysicalLengthMeters(afterConnectionHeightMeters),
   );
   assertClose(
     routeSegmentPhysicalLengthMeters(
@@ -465,23 +538,30 @@ function assertHeightEditUpdatedSameNetwork(
         beforeBranch,
         PLAN_SCALE_METERS_PER_SOURCE_UNIT,
       ),
-    UPDATED_TERMINAL_HEIGHT_METERS - INITIAL_TERMINAL_HEIGHT_METERS,
+    afterEndHeightMeters - beforeEndHeightMeters,
   );
-  assertClose(segmentResult(after.result, "D-1").segmentPhysicalLengthMeters, 3.15);
+  assertClose(
+    segmentResult(after.result, "D-1").segmentPhysicalLengthMeters,
+    terminalBranchPhysicalLengthMeters(afterConnectionHeightMeters),
+  );
   assertClose(
     after.materialTakeoff.physicalMaterialQuantities.pipeLengthMeters -
       before.materialTakeoff.physicalMaterialQuantities.pipeLengthMeters,
-    UPDATED_TERMINAL_HEIGHT_METERS - INITIAL_TERMINAL_HEIGHT_METERS,
+    afterEndHeightMeters - beforeEndHeightMeters,
   );
   assertClose(
     after.axonometricView.nodes.find((node) => node.id === "1")?.point?.zMeters,
-    UPDATED_TERMINAL_HEIGHT_METERS,
+    afterEndHeightMeters,
   );
   assertClose(
     after.axonometricView.segments.find((segment) => segment.id === "D-1")
       ?.physicalLengthMeters,
-    3.15,
+    terminalBranchPhysicalLengthMeters(afterConnectionHeightMeters),
   );
+}
+
+function terminalBranchPhysicalLengthMeters(connectionHeightMeters: number) {
+  return 1.5 + connectionHeightMeters + 0.2;
 }
 
 function assertStableRouteIdentity(
@@ -495,6 +575,19 @@ function assertStableRouteIdentity(
   assertEqual(
     before.segments.map((segment) => segment.id).sort().join(","),
     after.segments.map((segment) => segment.id).sort().join(","),
+  );
+  assertEqual(JSON.stringify(after.nodes), JSON.stringify(before.nodes));
+
+  const beforeUntouchedSegments = before.segments.filter(
+    (segment) => segment.id !== "D-1",
+  );
+  const afterUntouchedSegments = after.segments.filter(
+    (segment) => segment.id !== "D-1",
+  );
+
+  assertEqual(
+    JSON.stringify(afterUntouchedSegments),
+    JSON.stringify(beforeUntouchedSegments),
   );
 }
 

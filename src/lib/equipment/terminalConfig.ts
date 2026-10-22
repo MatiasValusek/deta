@@ -100,6 +100,13 @@ export function terminalEndHeightMeters(
   );
 }
 
+export function terminalConnectionHeightMetersFromEnd(
+  config: EquipmentTerminalConfig,
+  endHeightMeters: number,
+) {
+  return Math.max(0, endHeightMeters) + terminalVerticalDropMeters(config);
+}
+
 export function terminalVerticalDropMeters(config: EquipmentTerminalConfig) {
   return Number.isFinite(config.verticalDropMeters)
     ? Math.max(0, config.verticalDropMeters)

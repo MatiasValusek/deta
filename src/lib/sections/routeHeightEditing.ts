@@ -1,5 +1,9 @@
 import { withPointZ } from "@/lib/geometry/height";
 import { withEquipmentWallAnchorZ } from "@/lib/equipment/wallAnchoring";
+import {
+  terminalConnectionHeightMetersFromEnd,
+  terminalEndHeightMeters,
+} from "@/lib/equipment/terminalConfig";
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
 import { applyConfirmedEquipmentTerminalConnection } from "@/lib/routing/terminalConnection";
 import type { ManualRouteNetwork } from "@/lib/routing/types";
@@ -74,7 +78,7 @@ export function applySectionRouteHeightEdit(params: {
 
     const nextEquipment = params.equipment.map((item) =>
       item.id === equipment.id
-        ? withEquipmentConnectionHeight(item, params.heightMeters)
+        ? withEquipmentTerminalEndHeight(item, params.heightMeters)
         : item,
     );
     const editedEquipment =
@@ -138,28 +142,40 @@ export function applySectionRouteHeightEdit(params: {
   };
 }
 
-function withEquipmentConnectionHeight(
+function withEquipmentTerminalEndHeight(
   equipment: WorkbenchEquipment,
-  heightMeters: number,
+  endHeightMeters: number,
 ): WorkbenchEquipment {
+  const terminalConfig = equipment.terminalConfig
+    ? {
+        ...equipment.terminalConfig,
+        connectionHeightMeters: terminalConnectionHeightMetersFromEnd(
+          equipment.terminalConfig,
+          endHeightMeters,
+        ),
+      }
+    : null;
+  const resolvedEndHeightMeters = terminalConfig
+    ? terminalEndHeightMeters(terminalConfig) ?? endHeightMeters
+    : endHeightMeters;
+
   return {
     ...equipment,
     ...(equipment.bodyPoint
-      ? { bodyPoint: withPointZ(equipment.bodyPoint, heightMeters) }
+      ? { bodyPoint: withPointZ(equipment.bodyPoint, resolvedEndHeightMeters) }
       : {}),
-    connectionPoint: withPointZ(equipment.connectionPoint, heightMeters),
-    ...(equipment.terminalConfig
-      ? {
-          terminalConfig: {
-            ...equipment.terminalConfig,
-            connectionHeightMeters: heightMeters,
-          },
-        }
-      : {}),
+    connectionPoint: withPointZ(
+      equipment.connectionPoint,
+      resolvedEndHeightMeters,
+    ),
+    ...(terminalConfig ? { terminalConfig } : {}),
     ...(equipment.wallAnchor
       ? {
           wallAnchor:
-            withEquipmentWallAnchorZ(equipment.wallAnchor, heightMeters) ??
+            withEquipmentWallAnchorZ(
+              equipment.wallAnchor,
+              resolvedEndHeightMeters,
+            ) ??
             equipment.wallAnchor,
         }
       : {}),

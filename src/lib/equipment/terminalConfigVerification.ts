@@ -4,6 +4,7 @@ import {
   createEquipmentTerminalConfigFromHeight,
   createSuggestedEquipmentTerminalConfig,
   parseTerminalLateralOffsetInput,
+  terminalConnectionHeightMetersFromEnd,
   terminalEndHeightMeters,
 } from "./terminalConfig";
 
@@ -65,6 +66,52 @@ export function runTerminalConfigVerifications() {
     assertEqual(zeroHeight.connectionHeightMeters, 0);
     assertEqual(zeroHeight.heightStatus, "confirmed");
   });
+
+  verify(
+    results,
+    "10.7B cota final y altura de conexion conservan bajadas nulas y no nulas",
+    () => {
+      const zeroDrop = createSuggestedEquipmentTerminalConfig("other");
+      const stove = createSuggestedEquipmentTerminalConfig("stove");
+      const zeroDropFirstEdit = {
+        ...zeroDrop,
+        connectionHeightMeters: terminalConnectionHeightMetersFromEnd(
+          zeroDrop,
+          1.25,
+        ),
+      };
+      const zeroDropSecondEdit = {
+        ...zeroDropFirstEdit,
+        connectionHeightMeters: terminalConnectionHeightMetersFromEnd(
+          zeroDropFirstEdit,
+          0.75,
+        ),
+      };
+      const stoveFirstEdit = {
+        ...stove,
+        connectionHeightMeters: terminalConnectionHeightMetersFromEnd(
+          stove,
+          1.25,
+        ),
+      };
+      const stoveSecondEdit = {
+        ...stoveFirstEdit,
+        connectionHeightMeters: terminalConnectionHeightMetersFromEnd(
+          stoveFirstEdit,
+          0.75,
+        ),
+      };
+
+      assertClose(zeroDropFirstEdit.connectionHeightMeters, 1.25);
+      assertClose(terminalEndHeightMeters(zeroDropFirstEdit), 1.25);
+      assertClose(terminalEndHeightMeters(zeroDropSecondEdit), 0.75);
+      assertClose(stoveFirstEdit.connectionHeightMeters, 1.45);
+      assertClose(terminalEndHeightMeters(stoveFirstEdit), 1.25);
+      assertClose(stoveSecondEdit.connectionHeightMeters, 0.95);
+      assertClose(terminalEndHeightMeters(stoveSecondEdit), 0.75);
+      assertClose(stoveSecondEdit.verticalDropMeters, stove.verticalDropMeters);
+    },
+  );
 
   return results;
 }
