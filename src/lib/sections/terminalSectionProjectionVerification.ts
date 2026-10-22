@@ -9,6 +9,11 @@ import {
   type TechnicalCalculationResult,
 } from "@/lib/calculation/technicalTree";
 import {
+  createSigasAccessoryExactSelectionDecisions,
+  createSigasAccessorySelectionDiameterIndex,
+  selectSigasAccessoryExactCatalogRow,
+} from "@/lib/calculation/pipeSystems/sigas/sigasAccessoryExactSelection";
+import {
   confirmEquipmentTerminalConfig,
   createSuggestedEquipmentTerminalConfig,
 } from "@/lib/equipment/terminalConfig";
@@ -40,6 +45,8 @@ const INITIAL_TERMINAL_HEIGHT_METERS = 1.1;
 const UPDATED_TERMINAL_HEIGHT_METERS = 1.65;
 const PLAN_SCALE_METERS_PER_SOURCE_UNIT = 1;
 const SECTION_SCALE_METERS_PER_SOURCE_UNIT = 0.1;
+const TERMINAL_RH_HALF_INCH_CATALOG_CODE =
+  "codo-90-con-rosca-hembra-20-x-1-2";
 
 export function runTerminalSectionProjectionVerifications() {
   const results: TerminalSectionProjectionVerificationResult[] = [];
@@ -249,7 +256,44 @@ function confirmedTerminalNetwork(
 
   assert(update.ok, update.ok ? "" : update.message);
 
-  return update.network;
+  const initialResult = calculateTechnicalTree({
+    equipment,
+    minSegmentLengthSource: EPSILON,
+    network: update.network,
+    pipeSystem: SIGAS_PIPE_SYSTEM,
+    scaleMetersPerSourceUnit: PLAN_SCALE_METERS_PER_SOURCE_UNIT,
+  });
+  const decisions = createSigasAccessoryExactSelectionDecisions({
+    diameterBySegmentId: createSigasAccessorySelectionDiameterIndex({
+      diameterBySegmentId:
+        initialResult.networkSizing?.finalDiameterBySegmentId ?? {},
+      result: initialResult,
+    }),
+    network: update.network,
+  });
+  const decision = decisions[0];
+  const threadedHalfInch = decision?.candidates.find(
+    (candidate) =>
+      candidate.catalogCode === TERMINAL_RH_HALF_INCH_CATALOG_CODE,
+  );
+
+  assertEqual(initialResult.status, "incomplete");
+  assertEqual(decisions.length, 1);
+  assert(decision, "Falta decision profesional para el terminal roscado.");
+  assertEqual(decision.fieldLabel, "Diámetro roscado");
+  assert(threadedHalfInch, "Falta la fila SIGAS exacta de rosca 1/2.");
+
+  const selection = selectSigasAccessoryExactCatalogRow({
+    accessoryId: decision.accessoryId,
+    catalogCode: threadedHalfInch.catalogCode,
+    diameter: decision.diameter,
+    network: update.network,
+    segmentId: decision.segmentId,
+  });
+
+  assert(selection.ok, selection.ok ? "" : selection.message);
+
+  return selection.network;
 }
 
 function sectionProjectionLink(): SectionRouteProjectionLink {
@@ -459,9 +503,16 @@ function assertNoDuplicateTerminalAccessories(
 ) {
   const branch = fixture.network.segments.find((segment) => segment.id === "D-1");
   const accessoryIds = branch?.accessories?.map((accessory) => accessory.id) ?? [];
+  const terminalAccessory = branch?.accessories?.find((accessory) =>
+    accessory.id.endsWith(":terminal"),
+  );
 
   assertEqual(accessoryIds.sort().join(","), "route-terminal:stove:terminal,route-terminal:stove:valve");
   assertUnique(accessoryIds);
+  assertEqual(
+    terminalAccessory?.catalogCode,
+    TERMINAL_RH_HALF_INCH_CATALOG_CODE,
+  );
   assertEqual(fixture.inventory.items.length, 2);
   assertEqual(
     fixture.materialTakeoff.physicalMaterialQuantities.accessoryQuantity,

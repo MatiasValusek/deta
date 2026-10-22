@@ -86,6 +86,12 @@ export function runTechnicalPhysicalRouteVerifications() {
     },
   );
 
+  verify(
+    results,
+    "10.6A red XY/Z conserva cotas explicitas al editar vertices",
+    assertExplicitRouteVertexZIsPreserved,
+  );
+
   return results;
 }
 
@@ -138,19 +144,19 @@ function terminalBranchPhysicalRouteFixture() {
   network = insertRouteSegmentVertex({
     index: 0,
     network,
-    point: { x: 2, y: 1.2, z: 9 },
+    point: { x: 2, y: 1.2 },
     segmentId: "D-1",
   });
   network = moveRouteSegmentVertex({
     network,
-    point: { x: 2, y: 1.4, z: 7 },
+    point: { x: 2, y: 1.4 },
     segmentId: "D-1",
     vertexIndex: 0,
   });
   network = insertRouteSegmentVertex({
     index: 1,
     network,
-    point: { x: 4.2, y: 1.4, z: 5 },
+    point: { x: 4.2, y: 1.4 },
     segmentId: "D-1",
   });
   network = insertRouteSegmentVertex({
@@ -214,6 +220,34 @@ function terminalBranchPhysicalRouteFixture() {
     network,
     result,
   };
+}
+
+function assertExplicitRouteVertexZIsPreserved() {
+  let network = insertRouteSegmentVertex({
+    index: 1,
+    network: baseConfirmedNetwork(),
+    point: { x: 2, y: 1, z: 1.25 },
+    segmentId: "M-2",
+  });
+
+  assertPoint(network.segments[0]?.vertices?.[1], {
+    x: 2,
+    y: 1,
+    z: 1.25,
+  });
+
+  network = moveRouteSegmentVertex({
+    network,
+    point: { x: 2.5, y: 1.5, z: 1.75 },
+    segmentId: "M-2",
+    vertexIndex: 1,
+  });
+
+  assertPoint(network.segments[0]?.vertices?.[1], {
+    x: 2.5,
+    y: 1.5,
+    z: 1.75,
+  });
 }
 
 function terminalBranchEquipment(): WorkbenchEquipment[] {
