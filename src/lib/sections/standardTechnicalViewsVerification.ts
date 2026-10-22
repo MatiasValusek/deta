@@ -74,7 +74,7 @@ export function runStandardTechnicalViewsVerifications() {
       assertReadyForCalculation(fixture, views);
       assertXyAndZEditsReachEveryReviewView(fixture);
       assertRouteNodeZIsInferredFromConfirmedGeometry(fixture);
-      assertMissingApplianceZBlocksCalculationButKeepsGeometryVisible(fixture);
+      assertMissingApplianceZUsesDefaultWithoutBlocking(fixture);
       assertConfirmedRouteAccessoryKeepsCalculationContinuationEnabled(fixture);
       assertCalculationWarningsAreDeferredFromRouteReview();
     },
@@ -410,7 +410,7 @@ function assertRouteNodeZIsInferredFromConfirmedGeometry(
   );
 }
 
-function assertMissingApplianceZBlocksCalculationButKeepsGeometryVisible(
+function assertMissingApplianceZUsesDefaultWithoutBlocking(
   fixture: SimpleReviewFixture,
 ) {
   const pendingFixture = {
@@ -445,29 +445,11 @@ function assertMissingApplianceZBlocksCalculationButKeepsGeometryVisible(
     technicalGeometryPendingCount: pendingCount,
   });
 
-  assert(pendingCount > 0, "La Z pendiente debe crear observacion.");
-  assert(
-    pendingItems.some(
-      (item) =>
-        item.sourceLabel.includes("J-A1") ||
-        item.message.includes("tramo J-A1"),
-    ),
-    "La observacion debe mostrar tramo/punto afectado.",
-  );
-  assert(
-    pendingItems.some((item) => item.actionLabel.includes(item.viewLabel)),
-    "La observacion debe tener accion directa a la vista tecnica.",
-  );
-  assert(
-    pendingItems.some(
-      (item) =>
-        item.routeNodeId === "A1" || item.routeSegmentIds.includes("J-A1"),
-    ),
-    "La observacion debe incluir foco accionable de nodo o tramo.",
-  );
+  assertEqual(pendingCount, 0);
+  assertEqual(pendingItems.length, 0);
   assertEqual(routeReviewState.canOpenReview, true);
-  assertEqual(readiness.canContinueToCalculate, false);
-  assert(readiness.observationCount > 0, "La observacion debe mostrarse en Revisar.");
+  assertEqual(readiness.canContinueToCalculate, true);
+  assertEqual(readiness.observationCount, 0);
   assertPoint(
     sectionSegment(pendingViews.sectionAA, "J-A1").points.at(-1)?.planPoint,
     { x: 5, y: 2 },

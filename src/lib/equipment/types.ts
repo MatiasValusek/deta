@@ -1,3 +1,8 @@
+import type {
+  ElevationMetadata,
+  ElevationSource,
+  ElevationVerificationStatus,
+} from "@/lib/geometry/height";
 import type { Point2D } from "@/lib/geometry/types";
 
 export type EquipmentRole = "supply" | "appliance";
@@ -32,10 +37,7 @@ export type EquipmentWallAnchor = {
   wallPoint: Point2D | null;
 };
 
-export type EquipmentTerminalHeightStatus =
-  | "confirmed"
-  | "pending"
-  | "suggested";
+export type EquipmentTerminalHeightStatus = ElevationVerificationStatus;
 
 export type EquipmentTerminalOutletSide = "direct" | "left" | "right";
 
@@ -51,6 +53,7 @@ export type EquipmentTerminalProfile =
 
 export type EquipmentTerminalConfig = {
   connectionHeightMeters: number | null;
+  heightSource?: ElevationSource;
   heightStatus: EquipmentTerminalHeightStatus;
   lateralOffsetMeters: number;
   outletSide: EquipmentTerminalOutletSide;
@@ -68,6 +71,7 @@ export type WorkbenchEquipment = {
   name: string;
   bodyPoint?: Point2D;
   connectionPoint: Point2D;
+  elevation?: ElevationMetadata;
   terminalConfig?: EquipmentTerminalConfig;
   wallAnchor?: EquipmentWallAnchor;
   demandValue?: number;
@@ -94,6 +98,7 @@ export type EquipmentDraft = {
   bodyPoint: Point2D | null;
   connectionPoint: Point2D | null;
   connectionHeightInput: string;
+  elevation?: ElevationMetadata;
   previewPoint: Point2D | null;
   terminalConfig: EquipmentTerminalConfig | null;
   terminalLateralOffsetInput: string;

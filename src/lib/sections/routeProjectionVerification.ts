@@ -62,7 +62,7 @@ export function runSectionRouteProjectionVerifications() {
       assertMissingRegistrationIsPending(first);
       assertMissingScaleIsPending(first);
       assertRouteNodeZIsInferredFromConfirmedGeometry(first);
-      assertMissingApplianceZIsPending(first);
+      assertMissingApplianceZUsesDefaultWithoutBlocking(first);
     },
   );
 
@@ -567,7 +567,7 @@ function assertRouteNodeZIsInferredFromConfirmedGeometry(
   assertClose(branch.points[0]?.elevationMeters, 0);
 }
 
-function assertMissingApplianceZIsPending(
+function assertMissingApplianceZUsesDefaultWithoutBlocking(
   fixture: SectionRouteProjectionFixture,
 ) {
   const equipment = fixture.equipment.map((item) =>
@@ -597,17 +597,17 @@ function assertMissingApplianceZIsPending(
   });
   const branch = projectedSegment(projection, "D-1");
 
-  assertEqual(projection.status, "pending");
-  assertEqual(branch.status, "pending");
+  assertEqual(projection.status, "resolved");
+  assertEqual(branch.status, "resolved");
+  assertClose(
+    branch.points[branch.points.length - 1]?.elevationMeters,
+    0,
+  );
   assert(
-    projection.pendingItems.some(
-      (item) =>
-        item.sourceType === "segment" &&
-        item.sourceId === "D-1" &&
-        item.reason.includes("extremo 1") &&
-        item.reason.includes("tramo D-1"),
+    !projection.pendingItems.some(
+      (item) => item.sourceType === "segment" && item.sourceId === "D-1",
     ),
-    "La falta real de Z debe nombrar el extremo y el tramo afectados.",
+    "La Z predeterminada debe mantener el corte utilizable sin presentarse como dato faltante.",
   );
 }
 

@@ -1,6 +1,16 @@
-import { terminalEndHeightMeters } from "@/lib/equipment/terminalConfig";
+import {
+  equipmentTerminalElevationMetadata,
+  terminalEndHeightMeters,
+} from "@/lib/equipment/terminalConfig";
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
-import { DEFAULT_POINT_Z_METERS, withPointZ } from "@/lib/geometry/height";
+import {
+  DEFAULT_POINT_Z_METERS,
+  DEFAULT_UNVERIFIED_ELEVATION,
+  withPointZ,
+  type ElevationMetadata,
+  type ElevationSource,
+  type ElevationVerificationStatus,
+} from "@/lib/geometry/height";
 import type { Point2D } from "@/lib/geometry/types";
 import {
   buildEquipmentIndex,
@@ -13,17 +23,13 @@ import type {
   RouteNode,
 } from "@/lib/routing/types";
 
-export type TechnicalRouteElevationSource =
-  | "equipment"
-  | "explicit"
-  | "geometry"
-  | "meter"
-  | "preset";
+export type TechnicalRouteElevationSource = ElevationSource;
 
 export type TechnicalRouteNodeElevation = {
   reason: string | null;
   source: TechnicalRouteElevationSource | null;
   status: "pending" | "resolved";
+  verificationStatus: ElevationVerificationStatus;
   zMeters: number | null;
 };
 
@@ -123,12 +129,16 @@ function resolveTechnicalRouteNodeElevation(params: {
 
   const explicitZ = explicitZMeters(point);
 
-  if (explicitZ !== null) {
-    return resolvedElevation(explicitZ, "explicit");
-  }
-
   if (params.node.equipmentId) {
     const equipment = params.equipmentById.get(params.node.equipmentId) ?? null;
+    const metadata = equipment
+      ? resolveEquipmentElevationMetadata(equipment)
+      : DEFAULT_UNVERIFIED_ELEVATION;
+
+    if (explicitZ !== null) {
+      return resolvedElevation(explicitZ, metadata);
+    }
+
     const equipmentElevation = equipment
       ? resolveEquipmentFallbackElevation(equipment)
       : null;
@@ -136,35 +146,38 @@ function resolveTechnicalRouteNodeElevation(params: {
     if (equipmentElevation) {
       return resolvedElevation(
         equipmentElevation.zMeters,
-        equipmentElevation.source,
+        equipmentElevation.metadata,
       );
     }
 
-    return pendingElevation("Falta cota Z confirmada del equipo conectado.");
+    return resolvedElevation(DEFAULT_POINT_Z_METERS, metadata);
   }
 
-  if (params.node.kind === "supply") {
-    return resolvedElevation(DEFAULT_POINT_Z_METERS, "meter");
+  const metadata = params.node.elevation ?? DEFAULT_UNVERIFIED_ELEVATION;
+
+  if (explicitZ !== null) {
+    return resolvedElevation(explicitZ, metadata);
   }
 
-  return resolvedElevation(DEFAULT_POINT_Z_METERS, "geometry");
+  return resolvedElevation(DEFAULT_POINT_Z_METERS, metadata);
 }
 
 function resolveEquipmentFallbackElevation(
   equipment: WorkbenchEquipment,
-): { source: TechnicalRouteElevationSource; zMeters: number } | null {
+): { metadata: ElevationMetadata; zMeters: number } | null {
+  const metadata = resolveEquipmentElevationMetadata(equipment);
   const explicitConnectionZ = explicitZMeters(equipment.connectionPoint);
 
   if (explicitConnectionZ !== null) {
     return {
-      source: "explicit",
+      metadata,
       zMeters: explicitConnectionZ,
     };
   }
 
   if (equipment.role === "supply") {
     return {
-      source: "meter",
+      metadata,
       zMeters: DEFAULT_POINT_Z_METERS,
     };
   }
@@ -177,7 +190,7 @@ function resolveEquipmentFallbackElevation(
     Number.isFinite(config.connectionHeightMeters)
   ) {
     return {
-      source: config.heightStatus === "confirmed" ? "equipment" : "preset",
+      metadata,
       zMeters:
         terminalEndHeightMeters(config) ?? config.connectionHeightMeters,
     };
@@ -187,7 +200,7 @@ function resolveEquipmentFallbackElevation(
 
   if (bodyZ !== null) {
     return {
-      source: "equipment",
+      metadata,
       zMeters: bodyZ,
     };
   }
@@ -196,7 +209,7 @@ function resolveEquipmentFallbackElevation(
 
   if (wallZ !== null) {
     return {
-      source: "equipment",
+      metadata,
       zMeters: wallZ,
     };
   }
@@ -204,14 +217,25 @@ function resolveEquipmentFallbackElevation(
   return null;
 }
 
+function resolveEquipmentElevationMetadata(
+  equipment: WorkbenchEquipment,
+): ElevationMetadata {
+  if (equipment.terminalConfig) {
+    return equipmentTerminalElevationMetadata(equipment.terminalConfig);
+  }
+
+  return equipment.elevation ?? DEFAULT_UNVERIFIED_ELEVATION;
+}
+
 function resolvedElevation(
   zMeters: number,
-  source: TechnicalRouteElevationSource,
+  metadata: ElevationMetadata,
 ): TechnicalRouteNodeElevation {
   return {
     reason: null,
-    source,
+    source: metadata.source,
     status: "resolved",
+    verificationStatus: metadata.status,
     zMeters,
   };
 }
@@ -221,6 +245,7 @@ function pendingElevation(reason: string): TechnicalRouteNodeElevation {
     reason,
     source: null,
     status: "pending",
+    verificationStatus: "unverified",
     zMeters: null,
   };
 }

@@ -95,8 +95,11 @@ import {
   confirmEquipmentTerminalConfig,
   createEquipmentTerminalConfigFromHeight,
   createSuggestedEquipmentTerminalConfig,
+  equipmentTerminalHeightIsConfirmed,
+  normalizeEquipmentTerminalConfigHeightMetadata,
   parseTerminalLateralOffsetInput,
   terminalEndHeightMeters,
+  withEquipmentTerminalValues,
 } from "@/lib/equipment/terminalConfig";
 import {
   DEFAULT_WALL_SNAP_TOLERANCE_SOURCE,
@@ -106,7 +109,12 @@ import {
   type EquipmentPhysicalPlacement,
 } from "@/lib/equipment/wallAnchoring";
 import type { Bounds, DrawingPrimitive, NormalizedDrawing, Point2D } from "@/lib/geometry/types";
-import { pointZMeters, withPointZ } from "@/lib/geometry/height";
+import {
+  DEFAULT_UNVERIFIED_ELEVATION,
+  PROFESSIONAL_CONFIRMED_ELEVATION,
+  pointZMeters,
+  withPointZ,
+} from "@/lib/geometry/height";
 import { worldToScreen, type ViewTransform } from "@/lib/geometry/viewport";
 import { importPdfDocument, type ImportedPdfDocument } from "@/lib/pdf/importPdf";
 import type { PdfDocumentModel } from "@/lib/pdf/types";
@@ -3077,6 +3085,7 @@ export function DxfWorkbench() {
       bodyPoint: null,
       connectionPoint: null,
       connectionHeightInput: "0",
+      elevation: DEFAULT_UNVERIFIED_ELEVATION,
       previewPoint: null,
       terminalConfig: null,
       terminalLateralOffsetInput: "0",
@@ -3204,7 +3213,8 @@ export function DxfWorkbench() {
           ? {
               ...draftTerminalConfig(current),
               connectionHeightMeters: parsedHeight.heightMeters,
-              heightStatus: "suggested" as const,
+              heightSource: "professional_edit" as const,
+              heightStatus: "unverified" as const,
             }
           : null;
       const pointHeightMeters =
@@ -3215,6 +3225,10 @@ export function DxfWorkbench() {
       return {
         ...current,
         ...patch,
+        elevation:
+          current.role === "supply"
+            ? PROFESSIONAL_CONFIRMED_ELEVATION
+            : current.elevation,
         connectionPoint: current.connectionPoint
           ? withPointZ(current.connectionPoint, pointHeightMeters)
           : null,
@@ -3650,6 +3664,7 @@ export function DxfWorkbench() {
       name: current.name.trim(),
       bodyPoint: validation.bodyPoint,
       connectionPoint: validation.connectionPoint,
+      elevation: validation.elevation,
       terminalConfig: validation.terminalConfig,
       wallAnchor: validation.wallAnchor,
       demandValue: validation.demandValue,
@@ -7946,6 +7961,7 @@ function validateEquipmentDraft(
       connectionPoint: Point2D;
       demandUnit?: DemandUnit;
       demandValue?: number;
+      elevation?: WorkbenchEquipment["elevation"];
       terminalConfig?: EquipmentTerminalConfig;
       wallAnchor?: EquipmentWallAnchor;
     }
@@ -8022,6 +8038,10 @@ function validateEquipmentDraft(
     connectionPoint,
     demandUnit: demand.demandUnit,
     demandValue: demand.demandValue,
+    elevation:
+      draft.role === "supply"
+        ? draft.elevation ?? DEFAULT_UNVERIFIED_ELEVATION
+        : undefined,
     terminalConfig: terminal.terminalConfig,
     wallAnchor,
   };
@@ -8081,8 +8101,7 @@ function validateDraftTerminalConfig(
 
   return {
     ok: true,
-    terminalConfig: confirmEquipmentTerminalConfig({
-      ...base,
+    terminalConfig: withEquipmentTerminalValues(base, {
       connectionHeightMeters,
       lateralOffsetMeters: parsedOffset.offsetMeters,
     }),
@@ -8382,10 +8401,13 @@ function createDraftFromEquipment(
 ): EquipmentDraft {
   const terminalConfig =
     equipment.role === "appliance"
-      ? equipment.terminalConfig ??
-        createEquipmentTerminalConfigFromHeight(
-          equipment.type,
-          pointZMeters(equipment.connectionPoint),
+      ? normalizeEquipmentTerminalConfigHeightMetadata(
+          equipment.terminalConfig ??
+            createEquipmentTerminalConfigFromHeight(
+              equipment.type,
+              pointZMeters(equipment.connectionPoint),
+              "unverified",
+            ),
         )
       : null;
 
@@ -8402,6 +8424,11 @@ function createDraftFromEquipment(
       terminalConfig?.connectionHeightMeters ??
         pointZMeters(equipment.connectionPoint),
     ),
+    elevation:
+      equipment.elevation ??
+      (equipment.role === "supply"
+        ? DEFAULT_UNVERIFIED_ELEVATION
+        : undefined),
     previewPoint: equipment.connectionPoint,
     terminalConfig,
     terminalLateralOffsetInput: formatHeightInput(
@@ -8511,8 +8538,8 @@ function ensureEquipmentTerminalRoute(params: {
 
   if (
     equipment.role !== "appliance" ||
-    equipment.terminalConfig?.heightStatus !== "confirmed" ||
-    equipment.terminalConfig.connectionHeightMeters === null
+    !equipmentTerminalHeightIsConfirmed(equipment.terminalConfig) ||
+    equipment.terminalConfig?.connectionHeightMeters === null
   ) {
     return {
       network: params.network,
@@ -10084,7 +10111,10 @@ function createRouteProposalFingerprint(
         formatFingerprintNumber(equipment.connectionPoint.x),
         formatFingerprintNumber(equipment.connectionPoint.y),
         formatFingerprintNumber(pointZMeters(equipment.connectionPoint)),
+        equipment.elevation?.status ?? "",
+        equipment.elevation?.source ?? "",
         terminalConfig?.heightStatus ?? "",
+        terminalConfig?.heightSource ?? "",
         formatFingerprintNumber(terminalConfig?.connectionHeightMeters ?? 0),
         formatFingerprintNumber(terminalConfig?.lateralOffsetMeters ?? 0),
         terminalConfig?.outletSide ?? "",
@@ -10207,6 +10237,8 @@ function routeNetworkSignature(network: ManualRouteNetwork) {
         node.position ? formatFingerprintNumber(node.position.x) : "",
         node.position ? formatFingerprintNumber(node.position.y) : "",
         node.position ? formatFingerprintNumber(pointZMeters(node.position)) : "",
+        node.elevation?.status ?? "",
+        node.elevation?.source ?? "",
       ].join(":"),
     )
     .sort()
@@ -10221,6 +10253,11 @@ function routeNetworkSignature(network: ManualRouteNetwork) {
         ...(segment.vertices ?? []).flatMap((point) => [
           formatFingerprintNumber(point.x),
           formatFingerprintNumber(point.y),
+          formatFingerprintNumber(pointZMeters(point)),
+        ]),
+        ...(segment.vertexElevations ?? []).flatMap((metadata) => [
+          metadata?.status ?? "",
+          metadata?.source ?? "",
         ]),
       ].join(":"),
     )

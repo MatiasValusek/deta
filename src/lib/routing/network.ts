@@ -1,6 +1,9 @@
 import type { Point2D } from "@/lib/geometry/types";
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
-import { pointZMeters } from "@/lib/geometry/height";
+import {
+  pointZMeters,
+  type ElevationMetadata,
+} from "@/lib/geometry/height";
 import {
   projectPointToSegment,
   pointAlmostEqual,
@@ -209,13 +212,20 @@ export function insertRouteSegmentVertex(params: {
   point: Point2D;
   segmentId: string;
 }) {
-  return updateRouteSegmentVertices(params.network, params.segmentId, (vertices) => {
+  return updateRouteSegmentVertices(params.network, params.segmentId, (vertices, elevations) => {
     const index = clampVertexIndex(params.index ?? vertices.length, vertices.length);
-    return [
-      ...vertices.slice(0, index),
-      routeSegmentVertex(params.point),
-      ...vertices.slice(index),
-    ];
+    return {
+      elevations: [
+        ...elevations.slice(0, index),
+        { source: "derived_calculation", status: "unverified" },
+        ...elevations.slice(index),
+      ],
+      vertices: [
+        ...vertices.slice(0, index),
+        routeSegmentVertex(params.point),
+        ...vertices.slice(index),
+      ],
+    };
   });
 }
 
@@ -225,10 +235,15 @@ export function moveRouteSegmentVertex(params: {
   segmentId: string;
   vertexIndex: number;
 }) {
-  return updateRouteSegmentVertices(params.network, params.segmentId, (vertices) =>
-    vertices.map((vertex, index) =>
-      index === params.vertexIndex ? routeSegmentVertex(params.point) : vertex,
-    ),
+  return updateRouteSegmentVertices(
+    params.network,
+    params.segmentId,
+    (vertices, elevations) => ({
+      elevations,
+      vertices: vertices.map((vertex, index) =>
+        index === params.vertexIndex ? routeSegmentVertex(params.point) : vertex,
+      ),
+    }),
   );
 }
 
@@ -237,8 +252,13 @@ export function removeRouteSegmentVertex(params: {
   segmentId: string;
   vertexIndex: number;
 }) {
-  return updateRouteSegmentVertices(params.network, params.segmentId, (vertices) =>
-    vertices.filter((_, index) => index !== params.vertexIndex),
+  return updateRouteSegmentVertices(
+    params.network,
+    params.segmentId,
+    (vertices, elevations) => ({
+      elevations: elevations.filter((_, index) => index !== params.vertexIndex),
+      vertices: vertices.filter((_, index) => index !== params.vertexIndex),
+    }),
   );
 }
 
@@ -1112,7 +1132,13 @@ function routeSegmentVertex(point: Point2D): Point2D {
 function updateRouteSegmentVertices(
   network: ManualRouteNetwork,
   segmentId: string,
-  updater: (vertices: Point2D[]) => Point2D[],
+  updater: (
+    vertices: Point2D[],
+    elevations: Array<ElevationMetadata | null>,
+  ) => {
+    elevations: Array<ElevationMetadata | null>;
+    vertices: Point2D[];
+  },
 ): ManualRouteNetwork {
   return {
     nodes: network.nodes,
@@ -1121,15 +1147,31 @@ function updateRouteSegmentVertices(
         return segment;
       }
 
-      const vertices = updater(routeSegmentVertices(segment));
+      const currentVertices = routeSegmentVertices(segment);
+      const updated = updater(
+        currentVertices,
+        currentVertices.map(
+          (_, index) => segment.vertexElevations?.[index] ?? null,
+        ),
+      );
+      const vertices = updated.vertices;
       if (vertices.length > 0) {
+        const vertexElevations = updated.elevations.some(Boolean)
+          ? updated.elevations
+          : undefined;
+
         return {
           ...segment,
+          vertexElevations,
           vertices,
         };
       }
 
-      const { vertices: _vertices, ...segmentWithoutVertices } = segment;
+      const {
+        vertexElevations: _vertexElevations,
+        vertices: _vertices,
+        ...segmentWithoutVertices
+      } = segment;
 
       return segmentWithoutVertices;
     }),

@@ -442,6 +442,7 @@ function appliance(
     source: "manual",
     terminalConfig: {
       connectionHeightMeters: 1,
+      heightSource: "professional_edit",
       heightStatus: "confirmed",
       lateralOffsetMeters: 1,
       outletSide: "left",

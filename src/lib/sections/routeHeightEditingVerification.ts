@@ -83,6 +83,40 @@ export function runSectionRouteHeightEditingVerifications() {
     },
   );
 
+  verify(
+    results,
+    "01C-A edicion profesional de vertice conserva Z y registra procedencia",
+    () => {
+      const equipment = terminalBranchEquipment(INITIAL_TERMINAL_HEIGHT_METERS);
+      const network = confirmedPhysicalRouteNetwork();
+      const edit = applySectionRouteHeightEdit({
+        equipment,
+        heightMeters: 0.8,
+        network,
+        target: {
+          kind: "segment_vertex",
+          segmentId: "D-1",
+          vertexIndex: 0,
+        },
+      });
+
+      assert(edit.ok, edit.ok ? "" : edit.message);
+
+      const segment = edit.network.segments.find(
+        (candidate) => candidate.id === "D-1",
+      );
+
+      assert(segment, "Falta tramo D-1 editado.");
+      assertClose(segment.vertices?.[0]?.z, 0.8);
+      assertEqual(segment.vertexElevations?.[0]?.status, "confirmed");
+      assertEqual(
+        segment.vertexElevations?.[0]?.source,
+        "professional_edit",
+      );
+      assertEqual(segment.vertexElevations?.[1] ?? null, null);
+    },
+  );
+
   return results;
 }
 
@@ -430,6 +464,8 @@ function assertTerminalHeightEdit(
     y: 1.4,
     z: UPDATED_TERMINAL_HEIGHT_METERS,
   });
+  assertEqual(afterTerminal.elevation?.status, "confirmed");
+  assertEqual(afterTerminal.elevation?.source, "professional_edit");
 }
 
 function assertCalculationUpdated(

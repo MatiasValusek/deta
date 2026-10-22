@@ -1,6 +1,10 @@
-import { withPointZ } from "@/lib/geometry/height";
+import {
+  PROFESSIONAL_CONFIRMED_ELEVATION,
+  withPointZ,
+} from "@/lib/geometry/height";
 import { withEquipmentWallAnchorZ } from "@/lib/equipment/wallAnchoring";
 import {
+  equipmentTerminalHeightIsConfirmed,
   terminalConnectionHeightMetersFromEnd,
   terminalEndHeightMeters,
 } from "@/lib/equipment/terminalConfig";
@@ -86,7 +90,7 @@ export function applySectionRouteHeightEdit(params: {
 
     if (
       editedEquipment.role === "appliance" &&
-      editedEquipment.terminalConfig?.heightStatus === "confirmed"
+      equipmentTerminalHeightIsConfirmed(editedEquipment.terminalConfig)
     ) {
       const terminalUpdate = applyConfirmedEquipmentTerminalConnection({
         equipment: nextEquipment,
@@ -133,6 +137,7 @@ export function applySectionRouteHeightEdit(params: {
         item.id === node.id
           ? {
               ...item,
+              elevation: PROFESSIONAL_CONFIRMED_ELEVATION,
               position: withPointZ(nodePosition, params.heightMeters),
             }
           : item,
@@ -153,6 +158,8 @@ function withEquipmentTerminalEndHeight(
           equipment.terminalConfig,
           endHeightMeters,
         ),
+        heightSource: "professional_edit" as const,
+        heightStatus: "confirmed" as const,
       }
     : null;
   const resolvedEndHeightMeters = terminalConfig
@@ -161,6 +168,9 @@ function withEquipmentTerminalEndHeight(
 
   return {
     ...equipment,
+    ...(!terminalConfig
+      ? { elevation: PROFESSIONAL_CONFIRMED_ELEVATION }
+      : {}),
     ...(equipment.bodyPoint
       ? { bodyPoint: withPointZ(equipment.bodyPoint, resolvedEndHeightMeters) }
       : {}),
@@ -228,6 +238,11 @@ function applySegmentVertexHeightEdit(params: {
         item.id === segment.id
           ? {
               ...item,
+              vertexElevations: (item.vertices ?? []).map((_, index) =>
+                index === params.target.vertexIndex
+                  ? PROFESSIONAL_CONFIRMED_ELEVATION
+                  : item.vertexElevations?.[index] ?? null,
+              ),
               vertices: (item.vertices ?? []).map((point, index) =>
                 index === params.target.vertexIndex
                   ? withPointZ(point, params.heightMeters)

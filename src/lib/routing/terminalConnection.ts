@@ -1,7 +1,13 @@
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
-import { terminalEndHeightMeters } from "@/lib/equipment/terminalConfig";
+import {
+  equipmentTerminalHeightIsConfirmed,
+  terminalEndHeightMeters,
+} from "@/lib/equipment/terminalConfig";
 import type { Point2D } from "@/lib/geometry/types";
-import { pointZMeters } from "@/lib/geometry/height";
+import {
+  PROFESSIONAL_CONFIRMED_ELEVATION,
+  pointZMeters,
+} from "@/lib/geometry/height";
 import {
   buildEquipmentIndex,
   findRouteNodeByEquipment,
@@ -49,7 +55,7 @@ export function applyConfirmedEquipmentTerminalConnection(params: {
 
   if (
     !terminalConfig ||
-    terminalConfig.heightStatus !== "confirmed" ||
+    !equipmentTerminalHeightIsConfirmed(terminalConfig) ||
     terminalConfig.connectionHeightMeters === null
   ) {
     const network = removeGeneratedTerminalConnection({
@@ -138,6 +144,13 @@ export function applyConfirmedEquipmentTerminalConnection(params: {
               )?.accessories ?? segment.accessories,
               terminalAccessories,
             ),
+            vertexElevations:
+              vertices.length > 0
+                ? vertices.map(() => ({
+                    ...PROFESSIONAL_CONFIRMED_ELEVATION,
+                    source: "derived_calculation" as const,
+                  }))
+                : undefined,
             vertices: vertices.length > 0 ? vertices : undefined,
           }
         : segment,
@@ -406,6 +419,12 @@ function removeGeneratedTerminalConnection(params: {
           segment.id === branch.segment.id
             ? undefined
             : segment.vertices,
+        vertexElevations:
+          branch.ok &&
+          hadGeneratedTerminalAccessory &&
+          segment.id === branch.segment.id
+            ? undefined
+            : segment.vertexElevations,
       };
     }),
   };

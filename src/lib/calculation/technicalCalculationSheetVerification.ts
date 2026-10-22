@@ -102,7 +102,7 @@ export function runTechnicalCalculationSheetVerifications() {
     assertClose(row.initialRouteLengthMeters, 10.75);
     assertClose(row.accessoryEquivalentLengthMeters, 10.97);
     assertClose(row.finalCalculationLengthMeters, 21.72);
-    assertEqual(row.calculatedDiameter?.id, "sigas-32");
+    assertEqual(row.calculatedDiameter?.id, "sigas-25");
     assertEqual(row.effectiveDiameter?.id, "sigas-32");
   });
 

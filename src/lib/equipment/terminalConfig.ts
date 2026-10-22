@@ -5,6 +5,10 @@ import type {
   EquipmentTerminalProfile,
   EquipmentType,
 } from "./types";
+import type {
+  ElevationMetadata,
+  ElevationSource,
+} from "@/lib/geometry/height";
 
 type TerminalProfileDefinition = EquipmentTerminalConfig & {
   profileLabel: string;
@@ -68,11 +72,12 @@ export function createSuggestedEquipmentTerminalConfig(
 export function createEquipmentTerminalConfigFromHeight(
   type: EquipmentType,
   heightMeters: number,
-  status: Exclude<EquipmentTerminalHeightStatus, "pending"> = "suggested",
+  status: EquipmentTerminalHeightStatus = "suggested",
 ): EquipmentTerminalConfig {
   return {
     ...createSuggestedEquipmentTerminalConfig(type),
     connectionHeightMeters: heightMeters,
+    heightSource: terminalHeightSourceForStatus(status),
     heightStatus: status,
   };
 }
@@ -82,8 +87,75 @@ export function confirmEquipmentTerminalConfig(
 ): EquipmentTerminalConfig {
   return {
     ...config,
+    heightSource: "professional_edit",
     heightStatus:
-      config.connectionHeightMeters === null ? "pending" : "confirmed",
+      config.connectionHeightMeters === null ? "unverified" : "confirmed",
+  };
+}
+
+export function normalizeEquipmentTerminalConfigHeightMetadata(
+  config: EquipmentTerminalConfig,
+): EquipmentTerminalConfig {
+  const legacyStatus = config.heightStatus as string;
+
+  if (config.heightSource) {
+    return legacyStatus === "pending"
+      ? { ...config, heightStatus: "unverified" }
+      : config;
+  }
+
+  if (legacyStatus === "suggested") {
+    return {
+      ...config,
+      heightSource: "equipment_preset",
+      heightStatus: "suggested",
+    };
+  }
+
+  return {
+    ...config,
+    heightSource: "default_value",
+    heightStatus: "unverified",
+  };
+}
+
+export function equipmentTerminalElevationMetadata(
+  config: EquipmentTerminalConfig,
+): ElevationMetadata {
+  const normalized = normalizeEquipmentTerminalConfigHeightMetadata(config);
+
+  return {
+    source: normalized.heightSource ?? "default_value",
+    status: normalized.heightStatus,
+  };
+}
+
+export function equipmentTerminalHeightIsConfirmed(
+  config: EquipmentTerminalConfig | null | undefined,
+) {
+  if (!config) {
+    return false;
+  }
+
+  const metadata = equipmentTerminalElevationMetadata(config);
+
+  return (
+    metadata.status === "confirmed" &&
+    metadata.source === "professional_edit"
+  );
+}
+
+export function withEquipmentTerminalValues(
+  config: EquipmentTerminalConfig,
+  values: {
+    connectionHeightMeters: number;
+    lateralOffsetMeters: number;
+  },
+): EquipmentTerminalConfig {
+  return {
+    ...normalizeEquipmentTerminalConfigHeightMetadata(config),
+    connectionHeightMeters: values.connectionHeightMeters,
+    lateralOffsetMeters: values.lateralOffsetMeters,
   };
 }
 
@@ -144,7 +216,7 @@ export function terminalHeightStatusLabel(
     return "Confirmada";
   }
 
-  return status === "suggested" ? "Sugerida" : "Pendiente";
+  return status === "suggested" ? "Sugerida" : "No verificada";
 }
 
 export function terminalOutletSideLabel(side: EquipmentTerminalOutletSide) {
@@ -172,6 +244,7 @@ function terminalProfile(
 
   return {
     connectionHeightMeters,
+    heightSource: "equipment_preset",
     heightStatus: "suggested",
     lateralOffsetMeters,
     outletSide:
@@ -181,4 +254,14 @@ function terminalProfile(
     terminalProfile,
     verticalDropMeters: options.verticalDropMeters ?? 0,
   };
+}
+
+function terminalHeightSourceForStatus(
+  status: EquipmentTerminalHeightStatus,
+): ElevationSource {
+  if (status === "confirmed") {
+    return "professional_edit";
+  }
+
+  return status === "suggested" ? "equipment_preset" : "default_value";
 }

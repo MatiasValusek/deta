@@ -1,3 +1,4 @@
+import type { ElevationMetadata } from "@/lib/geometry/height";
 import type { Point2D } from "@/lib/geometry/types";
 
 export type RouteNodeKind = "supply" | "appliance" | "route";
@@ -13,6 +14,7 @@ export type RouteAccessoryOrigin =
   | "user_confirmed";
 
 export type RouteNode = {
+  elevation?: ElevationMetadata;
   id: string;
   kind: RouteNodeKind;
   equipmentId?: string;
@@ -39,6 +41,7 @@ export type RouteSegment = {
   fromNodeId: string;
   origin?: RouteElementOrigin;
   toNodeId: string;
+  vertexElevations?: Array<ElevationMetadata | null>;
   vertices?: Point2D[];
 };
 

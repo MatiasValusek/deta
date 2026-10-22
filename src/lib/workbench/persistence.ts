@@ -1,6 +1,13 @@
 import type { ConfirmedCalibration, PendingCalibration } from "@/lib/calibration/types";
 import type { ManualConstraint } from "@/lib/constraints/types";
+import {
+  normalizeEquipmentTerminalConfigHeightMetadata,
+} from "@/lib/equipment/terminalConfig";
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
+import {
+  DEFAULT_UNVERIFIED_ELEVATION,
+  isElevationMetadata,
+} from "@/lib/geometry/height";
 import type { NormalizedDrawing, Point2D } from "@/lib/geometry/types";
 import type { PdfDocumentModel } from "@/lib/pdf/types";
 import type {
@@ -297,7 +304,7 @@ function createPersistedWorkbenchBase(
     semanticAssignments: base.semanticAssignments,
     constraints: base.constraints,
     showConstraints: base.showConstraints,
-    equipment: base.equipment,
+    equipment: normalizePersistedEquipmentHeightMetadata(base.equipment),
     showEquipment: base.showEquipment,
     routeIntentConnections: base.routeIntentConnections,
     adoptedDiameterDecisions: base.adoptedDiameterDecisions,
@@ -429,7 +436,7 @@ function parseWorkbenchBase(value: unknown): PersistedWorkbenchBase | null {
     semanticAssignments: value.semanticAssignments,
     constraints: value.constraints,
     showConstraints: value.showConstraints,
-    equipment: value.equipment,
+    equipment: normalizePersistedEquipmentHeightMetadata(value.equipment),
     showEquipment: value.showEquipment,
     routeIntentConnections: value.routeIntentConnections,
     adoptedDiameterDecisions: value.adoptedDiameterDecisions ?? [],
@@ -816,6 +823,8 @@ function isEquipmentArray(value: unknown): value is WorkbenchEquipment[] {
         isString(equipment.name) &&
         (equipment.bodyPoint === undefined || isPoint(equipment.bodyPoint)) &&
         isPoint(equipment.connectionPoint) &&
+        (equipment.elevation === undefined ||
+          isElevationMetadata(equipment.elevation)) &&
         isOptionalEquipmentTerminalConfig(equipment.terminalConfig) &&
         isOptionalEquipmentWallAnchor(equipment.wallAnchor) &&
         (equipment.demandValue === undefined ||
@@ -826,6 +835,25 @@ function isEquipmentArray(value: unknown): value is WorkbenchEquipment[] {
         equipment.source === "manual",
     )
   );
+}
+
+function normalizePersistedEquipmentHeightMetadata(
+  equipment: WorkbenchEquipment[],
+) {
+  return equipment.map((item): WorkbenchEquipment => {
+    const terminalConfig = item.terminalConfig
+      ? normalizeEquipmentTerminalConfigHeightMetadata(item.terminalConfig)
+      : undefined;
+    const elevation = terminalConfig
+      ? item.elevation
+      : item.elevation ?? DEFAULT_UNVERIFIED_ELEVATION;
+
+    return {
+      ...item,
+      ...(elevation ? { elevation } : {}),
+      ...(terminalConfig ? { terminalConfig } : {}),
+    };
+  });
 }
 
 function isOptionalEquipmentTerminalConfig(value: unknown) {
@@ -839,7 +867,13 @@ function isOptionalEquipmentTerminalConfig(value: unknown) {
       isFiniteNumber(value.connectionHeightMeters)) &&
     (value.heightStatus === "confirmed" ||
       value.heightStatus === "pending" ||
-      value.heightStatus === "suggested") &&
+      value.heightStatus === "suggested" ||
+      value.heightStatus === "unverified") &&
+    (value.heightSource === undefined ||
+      value.heightSource === "derived_calculation" ||
+      value.heightSource === "equipment_preset" ||
+      value.heightSource === "professional_edit" ||
+      value.heightSource === "default_value") &&
     isFiniteNumber(value.lateralOffsetMeters) &&
     (value.outletSide === "direct" ||
       value.outletSide === "left" ||
@@ -1002,6 +1036,7 @@ function isRouteNetwork(value: unknown): value is ManualRouteNetwork {
           node.origin === "manual" ||
           node.origin === "automatic") &&
         (node.pdfPageNumber === undefined || isFiniteNumber(node.pdfPageNumber)) &&
+        (node.elevation === undefined || isElevationMetadata(node.elevation)) &&
         (node.position === undefined || isPoint(node.position)),
     ) &&
     Array.isArray(value.segments) &&
@@ -1017,6 +1052,12 @@ function isRouteNetwork(value: unknown): value is ManualRouteNetwork {
         (segment.vertices === undefined ||
           (Array.isArray(segment.vertices) &&
             segment.vertices.every(isPoint))) &&
+        (segment.vertexElevations === undefined ||
+          (Array.isArray(segment.vertexElevations) &&
+            segment.vertexElevations.every(
+              (metadata) =>
+                metadata === null || isElevationMetadata(metadata),
+            ))) &&
         (segment.accessories === undefined ||
           isRouteAccessoryArray(segment.accessories)),
     )

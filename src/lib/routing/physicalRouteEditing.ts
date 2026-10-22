@@ -219,6 +219,21 @@ export function insertPhysicalRouteVertex(params: {
         candidate.id === segment.id
           ? {
               ...candidate,
+              vertexElevations: [
+                ...(candidate.vertices ?? [])
+                  .slice(0, vertexIndex)
+                  .map(
+                    (_point, index) =>
+                      candidate.vertexElevations?.[index] ?? null,
+                  ),
+                { source: "derived_calculation", status: "unverified" },
+                ...(candidate.vertices ?? [])
+                  .slice(vertexIndex)
+                  .map(
+                    (_point, index) =>
+                      candidate.vertexElevations?.[vertexIndex + index] ?? null,
+                  ),
+              ],
               vertices: [
                 ...(candidate.vertices ?? []).slice(0, vertexIndex),
                 projection.point,
@@ -261,14 +276,26 @@ export function removePhysicalRouteVertex(params: {
         const vertices = (candidate.vertices ?? []).filter(
           (_point, index) => index !== params.vertexIndex,
         );
+        const vertexElevations = (candidate.vertices ?? []).flatMap(
+          (_point, index) =>
+            index === params.vertexIndex
+              ? []
+              : [candidate.vertexElevations?.[index] ?? null],
+        );
 
         if (vertices.length === 0) {
-          const { vertices: _vertices, ...withoutVertices } = candidate;
+          const {
+            vertexElevations: _vertexElevations,
+            vertices: _vertices,
+            ...withoutVertices
+          } = candidate;
           return withoutVertices;
         }
 
         return {
           ...candidate,
+          vertexElevations:
+            vertexElevations.some(Boolean) ? vertexElevations : undefined,
           vertices,
         };
       }),

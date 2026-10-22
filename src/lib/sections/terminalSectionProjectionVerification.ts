@@ -512,9 +512,27 @@ function assertHeightEditUpdatedSameNetwork(
     afterConnectionHeightMeters,
   );
   assertEqual(stove.terminalConfig?.heightStatus, "confirmed");
+  assertEqual(stove.terminalConfig?.heightSource, "professional_edit");
   assertClose(stove.terminalConfig?.lateralOffsetMeters, 0.5);
   assertEqual(stove.terminalConfig?.outletSide, "right");
   assertClose(stove.terminalConfig?.verticalDropMeters, 0.2);
+  const terminalSegment = after.network.segments.find(
+    (segment) => segment.id === "D-1",
+  );
+
+  assert(terminalSegment, "Falta tramo terminal D-1.");
+  assertEqual(
+    terminalSegment.vertexElevations?.length,
+    terminalSegment.vertices?.length,
+  );
+  assert(
+    terminalSegment.vertexElevations?.every(
+      (metadata) =>
+        metadata?.status === "confirmed" &&
+        metadata.source === "derived_calculation",
+    ),
+    "Las cotas terminales derivadas deben conservar su procedencia.",
+  );
   assertClose(
     routeSegmentPhysicalLengthMeters(
       beforeBranch,
