@@ -5,7 +5,11 @@ import { createTechnicalEquivalentAccessoryVerification } from "@/lib/calculatio
 import { createTechnicalPhysicalAccessoryInventory } from "@/lib/calculation/technicalPhysicalAccessories";
 import { calculateTechnicalTree } from "@/lib/calculation/technicalTree";
 import type { Point2D } from "@/lib/geometry/types";
-import { generateAutomaticRouteProposal } from "@/lib/routing/autoProposal";
+import {
+  generateAutomaticRouteProposal,
+  generateLegacyAutomaticRouteProposal,
+  type GenerateAutomaticRouteProposalInput,
+} from "@/lib/routing/autoProposal";
 import {
   routeProposalAcceptanceBlockReason,
   routeProposalCanBeAccepted,
@@ -132,16 +136,132 @@ export function runRouteProposalFlowVerifications() {
     },
   );
 
+  verify(
+    results,
+    "01B seleccion inteligente mejora el mismo caso de tres artefactos",
+    () => {
+      const comparison = createThreeApplianceRouteComparison();
+
+      assertEqual(comparison.legacy.status, "ready");
+      assertEqual(comparison.intelligent.status, "ready");
+      assertEqual(comparison.legacy.restrictionCount, 0);
+      assertEqual(comparison.intelligent.restrictionCount, 0);
+      assert(
+        compareComparisonMetrics(
+          comparison.intelligent,
+          comparison.legacy,
+        ) < 0,
+        "La seleccion inteligente no mejoro el caso de tres artefactos.",
+      );
+    },
+  );
+
+  verify(
+    results,
+    "01B desempata redes equivalentes por derivaciones mas simples",
+    () => {
+      const input = simpleRouteInput([
+        [7, 5],
+        [2, 7],
+        [4, 9],
+        [4, 3],
+      ]);
+      const legacy = generateLegacyAutomaticRouteProposal(input);
+      const intelligent = generateAutomaticRouteProposal(input);
+
+      assertEqual(intelligent.status, "ready");
+      assertClose(intelligent.lengthSource, legacy.lengthSource);
+      assertEqual(intelligent.turnCount, legacy.turnCount);
+      assert(
+        intelligent.derivationCount < legacy.derivationCount,
+        "No se simplificaron las derivaciones equivalentes.",
+      );
+    },
+  );
+
+  verify(
+    results,
+    "01B prioriza una alternativa admisible con restricciones duras",
+    () => {
+      const input = simpleRouteInput([
+        [8, 2],
+        [1, 8],
+        [7, 8],
+      ]);
+      input.restrictions = [
+        {
+          from: point(4, -1),
+          id: "fixture-hard-structure",
+          kind: "segment",
+          to: point(4, 5),
+        },
+      ];
+      const legacy = generateLegacyAutomaticRouteProposal(input);
+      const intelligent = generateAutomaticRouteProposal(input);
+
+      assertEqual(legacy.status, "partial");
+      assertEqual(intelligent.status, "ready");
+      assertEqual(intelligent.validation.restrictionCount, 0);
+      assertEqual(intelligent.validation.hasCrossingsWithoutNode, false);
+    },
+  );
+
   return results;
+}
+
+export type RouteComparisonMetrics = {
+  derivations: number;
+  interferences: number;
+  lengthSource: number;
+  milliseconds: number;
+  restrictionCount: number;
+  status: "ready" | "partial" | "invalid";
+  turns: number;
+};
+
+export function createThreeApplianceRouteComparison() {
+  const input = createThreeApplianceRouteInput();
+
+  generateLegacyAutomaticRouteProposal(input);
+  generateAutomaticRouteProposal(input);
+
+  return {
+    intelligent: measureProposal(
+      () => generateAutomaticRouteProposal(input),
+      5,
+    ),
+    legacy: measureProposal(
+      () => generateLegacyAutomaticRouteProposal(input),
+      5,
+    ),
+  };
 }
 
 type RouteProposalFlowFixture = ReturnType<typeof routeProposalFlowFixture>;
 
 function routeProposalFlowFixture() {
-  const equipment = fixtureEquipment();
-  const baseNetwork = terminalOnlyNetwork(equipment);
-  const proposal = generateAutomaticRouteProposal({
+  const input = createThreeApplianceRouteInput();
+  const equipment = input.equipment;
+  const baseNetwork = input.baseNetwork as ManualRouteNetwork;
+  const proposal = generateAutomaticRouteProposal(input);
+  const acceptedNetwork: ManualRouteNetwork = {
+    nodes: proposal.nodes,
+    segments: proposal.segments,
+  };
+
+  return {
+    acceptedNetwork,
     baseNetwork,
+    equipment,
+    proposal,
+  };
+}
+
+function createThreeApplianceRouteInput(): GenerateAutomaticRouteProposalInput {
+  const equipment = fixtureEquipment();
+
+  return {
+    baseNetwork: terminalOnlyNetwork(equipment),
     bounds: {
       maxX: 7,
       maxY: 5,
@@ -155,17 +275,44 @@ function routeProposalFlowFixture() {
     planBaseId: PLAN_BASE_ID,
     restrictions: [],
     scaleMetersPerSourceUnit: SCALE_METERS_PER_SOURCE_UNIT,
-  });
-  const acceptedNetwork: ManualRouteNetwork = {
-    nodes: proposal.nodes,
-    segments: proposal.segments,
   };
+}
+
+function simpleRouteInput(
+  applianceCoordinates: Array<[number, number]>,
+): GenerateAutomaticRouteProposalInput {
+  const equipment: WorkbenchEquipment[] = [
+    {
+      connectionPoint: point(0, 0),
+      id: "meter",
+      name: "Medidor",
+      planBaseId: PLAN_BASE_ID,
+      role: "supply",
+      source: "manual",
+      type: "meter_regulator",
+    },
+    ...applianceCoordinates.map(([x, y], index) => ({
+      connectionPoint: point(x, y),
+      demandUnit: "kcal_h" as const,
+      demandValue: 2500,
+      id: `fixture-appliance-${index}`,
+      name: `Artefacto ${index + 1}`,
+      planBaseId: PLAN_BASE_ID,
+      role: "appliance" as const,
+      source: "manual" as const,
+      type: "stove" as const,
+    })),
+  ];
 
   return {
-    acceptedNetwork,
-    baseNetwork,
+    bounds: { maxX: 12, maxY: 11, minX: -1, minY: -1 },
     equipment,
-    proposal,
+    fingerprint: `01B-simple-${applianceCoordinates.join("-")}`,
+    marginMeters: 0,
+    minSegmentLengthSource: EPSILON,
+    planBaseId: PLAN_BASE_ID,
+    restrictions: [],
+    scaleMetersPerSourceUnit: SCALE_METERS_PER_SOURCE_UNIT,
   };
 }
 
@@ -212,6 +359,45 @@ function proposalWithStaleAcceptFlag(
       canAccept: false,
     },
   };
+}
+
+function measureProposal(
+  createProposal: () => ReturnType<typeof generateAutomaticRouteProposal>,
+  repetitions = 1,
+): RouteComparisonMetrics {
+  const startedAt = performance.now();
+  let proposal = createProposal();
+
+  for (let index = 1; index < repetitions; index += 1) {
+    proposal = createProposal();
+  }
+
+  return {
+    derivations: proposal.derivationCount,
+    interferences: proposal.architecturalWarnings.reduce(
+      (total, warning) => total + warning.featureIds.length,
+      0,
+    ),
+    lengthSource: proposal.lengthSource,
+    milliseconds: (performance.now() - startedAt) / repetitions,
+    restrictionCount: proposal.validation.restrictionCount,
+    status: proposal.status,
+    turns: proposal.turnCount,
+  };
+}
+
+function compareComparisonMetrics(
+  first: RouteComparisonMetrics,
+  second: RouteComparisonMetrics,
+) {
+  return (
+    Number(first.status !== "ready") - Number(second.status !== "ready") ||
+    first.restrictionCount - second.restrictionCount ||
+    first.lengthSource - second.lengthSource ||
+    first.turns - second.turns ||
+    first.derivations - second.derivations ||
+    first.interferences - second.interferences
+  );
 }
 
 function fixtureEquipment(): WorkbenchEquipment[] {

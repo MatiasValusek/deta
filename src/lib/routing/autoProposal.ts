@@ -99,6 +99,9 @@ const MAX_COORDINATE_COUNT = 72;
 const MAX_GRID_NODE_COUNT = 5200;
 const MAX_SEARCH_VISITS = 16000;
 const MAX_GUIDE_COORDINATE_SEGMENTS = 48;
+const MAX_ROUTE_ALTERNATIVES = 6;
+const MEDIUM_PLAN_APPLIANCE_COUNT = 8;
+const LARGE_PLAN_APPLIANCE_COUNT = 14;
 const ROUTE_HASH_PREFIX = "route-proposal";
 
 function cloneRouteNetwork(network: ManualRouteNetwork | undefined): ManualRouteNetwork {
@@ -115,6 +118,29 @@ function cloneRouteNetwork(network: ManualRouteNetwork | undefined): ManualRoute
 }
 
 export function generateAutomaticRouteProposal(
+  input: GenerateAutomaticRouteProposalInput,
+): AutomaticRouteProposal {
+  const baseline = generateLegacyAutomaticRouteProposal(input);
+
+  if (input.preferredApplianceOrder?.length) {
+    return baseline;
+  }
+
+  const alternatives = [baseline];
+
+  for (const preferredApplianceOrder of createAlternativeApplianceOrders(input)) {
+    alternatives.push(
+      generateLegacyAutomaticRouteProposal({
+        ...input,
+        preferredApplianceOrder,
+      }),
+    );
+  }
+
+  return selectBestAutomaticRouteProposal(alternatives, input);
+}
+
+export function generateLegacyAutomaticRouteProposal(
   input: GenerateAutomaticRouteProposalInput,
 ): AutomaticRouteProposal {
   const proposalId = `${ROUTE_HASH_PREFIX}:${input.planBaseId}:${stableHash(
@@ -219,27 +245,39 @@ export function generateAutomaticRouteProposal(
   });
 
   while (remaining.length > 0) {
-    const candidates = remaining
-      .map((equipment) => {
-        const candidate = findPathFromTreeToEquipment(
-          input,
-          network,
-          equipment,
-          guideIndex,
-          input.preferredBranchEquipmentIdsByApplianceId?.[equipment.id] ?? [],
-        );
-        return candidate
-          ? {
-              equipment,
-              guidedLengthSource: candidate.guidedLengthSource,
-              path: candidate.path,
-              routeLengthSource: candidate.routeLengthSource,
-              turnCount: candidate.turnCount,
-            }
-          : null;
-      })
-      .filter((candidate): candidate is TreePathCandidate => Boolean(candidate))
-      .sort(comparePathCandidates);
+    const completePreferredOrder = preferredOrderCoversRemaining(
+      input.preferredApplianceOrder,
+      remaining,
+    );
+    const equipmentToSearch = completePreferredOrder
+      ? sortEquipmentByPreferredOrder(
+          remaining,
+          input.preferredApplianceOrder as string[],
+        )
+      : remaining;
+    const candidates: TreePathCandidate[] = [];
+
+    for (const equipment of equipmentToSearch) {
+      const candidate = findPathFromTreeToEquipment(
+        input,
+        network,
+        equipment,
+        guideIndex,
+        input.preferredBranchEquipmentIdsByApplianceId?.[equipment.id] ?? [],
+      );
+
+      if (!candidate) {
+        continue;
+      }
+
+      candidates.push({ equipment, ...candidate });
+
+      if (completePreferredOrder) {
+        break;
+      }
+    }
+
+    candidates.sort(comparePathCandidates);
 
     const chosen = choosePathCandidate(candidates, input.preferredApplianceOrder);
 
@@ -327,6 +365,208 @@ export function generateAutomaticRouteProposal(
     unreachedEquipmentIds,
     validation,
   };
+}
+
+function createAlternativeApplianceOrders(
+  input: GenerateAutomaticRouteProposalInput,
+) {
+  const appliances = input.equipment
+    .filter((item) => item.role === "appliance")
+    .sort(compareEquipmentById);
+
+  if (appliances.length < 2) {
+    return [];
+  }
+
+  const supply = input.equipment.find((item) => item.role === "supply") ?? null;
+  const supplyPoint = supply?.connectionPoint ?? { x: 0, y: 0 };
+  // These orders only diversify the bounded search. They do not approve a route;
+  // every resulting network is validated and compared below with the same criteria.
+  const candidateOrders = [
+    [...appliances].sort((first, second) =>
+      compareNumbers(
+        distanceBetween(first.connectionPoint, supplyPoint),
+        distanceBetween(second.connectionPoint, supplyPoint),
+      ) || compareEquipmentById(first, second),
+    ),
+    [...appliances].sort((first, second) =>
+      compareNumbers(
+        distanceBetween(second.connectionPoint, supplyPoint),
+        distanceBetween(first.connectionPoint, supplyPoint),
+      ) || compareEquipmentById(first, second),
+    ),
+    [...appliances].sort(
+      (first, second) =>
+        compareNumbers(first.connectionPoint.x, second.connectionPoint.x) ||
+        compareNumbers(first.connectionPoint.y, second.connectionPoint.y) ||
+        compareEquipmentById(first, second),
+    ),
+    [...appliances].sort(
+      (first, second) =>
+        compareNumbers(first.connectionPoint.y, second.connectionPoint.y) ||
+        compareNumbers(first.connectionPoint.x, second.connectionPoint.x) ||
+        compareEquipmentById(first, second),
+    ),
+    [...appliances].sort(
+      (first, second) =>
+        compareNumbers(second.connectionPoint.x, first.connectionPoint.x) ||
+        compareNumbers(second.connectionPoint.y, first.connectionPoint.y) ||
+        compareEquipmentById(first, second),
+    ),
+    [...appliances].sort(
+      (first, second) =>
+        compareNumbers(second.connectionPoint.y, first.connectionPoint.y) ||
+        compareNumbers(second.connectionPoint.x, first.connectionPoint.x) ||
+        compareEquipmentById(first, second),
+    ),
+  ];
+  const alternativeLimit =
+    appliances.length > LARGE_PLAN_APPLIANCE_COUNT
+      ? 2
+      : appliances.length > MEDIUM_PLAN_APPLIANCE_COUNT
+        ? 4
+        : MAX_ROUTE_ALTERNATIVES;
+  const seen = new Set<string>();
+  const orders: string[][] = [];
+
+  for (const order of candidateOrders) {
+    const ids = order.map((item) => item.id);
+    const key = ids.join("|");
+
+    if (!seen.has(key)) {
+      seen.add(key);
+      orders.push(ids);
+    }
+
+    if (orders.length >= alternativeLimit) {
+      break;
+    }
+  }
+
+  return orders;
+}
+
+function selectBestAutomaticRouteProposal(
+  proposals: AutomaticRouteProposal[],
+  input: GenerateAutomaticRouteProposalInput,
+) {
+  const unique = new Map<string, AutomaticRouteProposal>();
+
+  for (const proposal of proposals) {
+    const key = automaticRouteProposalGeometryKey(proposal, input.equipment);
+    const current = unique.get(key);
+
+    if (!current || compareAutomaticRouteProposals(proposal, current, input) < 0) {
+      unique.set(key, proposal);
+    }
+  }
+
+  return [...unique.values()].sort((first, second) =>
+    compareAutomaticRouteProposals(first, second, input),
+  )[0];
+}
+
+function compareAutomaticRouteProposals(
+  first: AutomaticRouteProposal,
+  second: AutomaticRouteProposal,
+  input: GenerateAutomaticRouteProposalInput,
+) {
+  return (
+    compareNumbers(
+      proposalAdmissibilityRank(first),
+      proposalAdmissibilityRank(second),
+    ) ||
+    compareNumbers(
+      first.unreachedEquipmentIds.length,
+      second.unreachedEquipmentIds.length,
+    ) ||
+    compareNumbers(
+      first.validation.restrictionCount,
+      second.validation.restrictionCount,
+    ) ||
+    compareNumbers(first.lengthSource, second.lengthSource) ||
+    compareNumbers(first.turnCount, second.turnCount) ||
+    compareNumbers(first.derivationCount, second.derivationCount) ||
+    compareNumbers(
+      proposalInterferenceCount(first),
+      proposalInterferenceCount(second),
+    ) ||
+    compareNumbers(
+      proposalBranchComplexity(first),
+      proposalBranchComplexity(second),
+    ) ||
+    compareNumbers(
+      proposalGuidedLength(second, input),
+      proposalGuidedLength(first, input),
+    ) ||
+    compareNumbers(first.segmentCount, second.segmentCount) ||
+    automaticRouteProposalGeometryKey(first, input.equipment).localeCompare(
+      automaticRouteProposalGeometryKey(second, input.equipment),
+    )
+  );
+}
+
+function proposalAdmissibilityRank(proposal: AutomaticRouteProposal) {
+  if (proposal.validation.canAccept && proposal.status === "ready") {
+    return 0;
+  }
+
+  return proposal.status === "partial" ? 1 : 2;
+}
+
+function proposalInterferenceCount(proposal: AutomaticRouteProposal) {
+  return proposal.architecturalWarnings.reduce(
+    (total, warning) => total + warning.featureIds.length,
+    0,
+  );
+}
+
+function proposalBranchComplexity(proposal: AutomaticRouteProposal) {
+  const network = { nodes: proposal.nodes, segments: proposal.segments };
+
+  return proposal.nodes.reduce(
+    (total, node) => total + Math.max(0, getRouteNodeDegree(network, node.id) - 3),
+    0,
+  );
+}
+
+function proposalGuidedLength(
+  proposal: AutomaticRouteProposal,
+  input: GenerateAutomaticRouteProposalInput,
+) {
+  const guideIndex = createGuideIndex(input.architecture?.guides ?? []);
+
+  return resolveRouteSegments(
+    { nodes: proposal.nodes, segments: proposal.segments },
+    input.equipment,
+  ).reduce(
+    (total, segment) =>
+      total +
+      routeSegmentPlanLegs(segment).reduce(
+        (segmentTotal, leg) =>
+          segmentTotal + guidedLengthBetween(leg.from, leg.to, guideIndex),
+        0,
+      ),
+    0,
+  );
+}
+
+function automaticRouteProposalGeometryKey(
+  proposal: AutomaticRouteProposal,
+  equipment: WorkbenchEquipment[],
+) {
+  return resolveRouteSegments(
+    { nodes: proposal.nodes, segments: proposal.segments },
+    equipment,
+  )
+    .flatMap((segment) =>
+      routeSegmentPlanLegs(segment).map((leg) => {
+        const endpoints = [pointKey(leg.from), pointKey(leg.to)].sort();
+        return endpoints.join("->");
+      }),
+    )
+    .sort()
+    .join("|");
 }
 
 function findPathFromTreeToEquipment(
@@ -1519,6 +1759,34 @@ function choosePathCandidate(
 
     return comparePathCandidates(first, second);
   })[0];
+}
+
+function preferredOrderCoversRemaining(
+  preferredApplianceOrder: string[] | undefined,
+  remaining: WorkbenchEquipment[],
+) {
+  if (!preferredApplianceOrder?.length) {
+    return false;
+  }
+
+  const preferredIds = new Set(preferredApplianceOrder);
+  return remaining.every((equipment) => preferredIds.has(equipment.id));
+}
+
+function sortEquipmentByPreferredOrder(
+  equipment: WorkbenchEquipment[],
+  preferredApplianceOrder: string[],
+) {
+  const rank = new Map(
+    preferredApplianceOrder.map((equipmentId, index) => [equipmentId, index]),
+  );
+
+  return [...equipment].sort(
+    (first, second) =>
+      (rank.get(first.id) ?? Number.POSITIVE_INFINITY) -
+        (rank.get(second.id) ?? Number.POSITIVE_INFINITY) ||
+      compareEquipmentById(first, second),
+  );
 }
 
 function compareStateRecords(first: StateRecord, second: StateRecord) {
