@@ -298,6 +298,40 @@ export function runCoordinatedInstallationDraftVerifications() {
 
   verify(
     results,
+    "02C2 mantiene editable una propuesta incompleta y actualiza sus pendientes",
+    () => {
+      const snapshot = snapshotWithAccessoryDecision();
+      const confirmedNetwork = JSON.stringify(snapshot.network);
+      const proposal = createCoordinatedInstallationProposal(snapshot);
+      const initial = requiredDraft(
+        createCoordinatedInstallationDraft({ proposal, snapshot }),
+      );
+      const incomplete = requiredEditedDraft(initial, snapshot, {
+        kind: "move_node",
+        nodeId: "B",
+        point: { x: 5, y: 0 },
+        tolerance: EPSILON,
+      });
+
+      assertEqual(incomplete.evaluation.status, "incomplete");
+      assert(incomplete.evaluation.pendingDecisions.length > 0, "Falta el pendiente esperado.");
+
+      const resolved = requiredEditedDraft(incomplete, snapshot, {
+        kind: "move_node",
+        nodeId: "B",
+        point: { x: 4, y: 0 },
+        tolerance: EPSILON,
+      });
+
+      assertEqual(resolved.evaluation.status, "complete");
+      assertEqual(resolved.evaluation.pendingDecisions.length, 0);
+      assertEqual(resolved.revision, 2);
+      assertEqual(JSON.stringify(snapshot.network), confirmedNetwork);
+    },
+  );
+
+  verify(
+    results,
     "02B revalida restricciones confirmadas despues de editar XY",
     () => {
       const snapshot: CoordinatedInstallationSnapshot = {

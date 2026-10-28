@@ -77,6 +77,7 @@ type RoutePanelProps = {
   onEditInstallation: () => void;
   onEditProposal: () => void;
   onExitEditRoute: () => void;
+  onFocusProposalReferences: (referenceIds: string[]) => void;
   onGenerateProposal: () => void;
   onGoToPlan: () => void;
   onGoToScale: () => void;
@@ -136,6 +137,7 @@ export function RoutePanel({
   onEditInstallation,
   onEditProposal,
   onExitEditRoute,
+  onFocusProposalReferences,
   onGenerateProposal,
   onGoToPlan,
   onGoToScale,
@@ -160,7 +162,8 @@ export function RoutePanel({
     hasAppliances &&
     !draft &&
     !intentDraft &&
-    (!proposal || isEditingRoute);
+    (!proposal || isEditingRoute) &&
+    coordinatedStatus === null;
   const canGenerateProposal =
     planReady &&
     isPlanActive &&
@@ -182,6 +185,7 @@ export function RoutePanel({
     !isGeneratingProposal &&
     !proposalRequiresScale &&
     (!proposal || isEditingRoute) &&
+    coordinatedStatus === null &&
     marginIsValid;
 
   function handleEditInstallation() {
@@ -321,6 +325,7 @@ export function RoutePanel({
           disabled={
             !planReady ||
             segmentCount === 0 ||
+            coordinatedStatus !== null ||
             Boolean(draft) ||
             Boolean(intentDraft)
           }
@@ -341,7 +346,11 @@ export function RoutePanel({
           </div>
           <button
             className="shrink-0 rounded border border-[var(--line)] px-2 py-1 hover:border-[var(--accent)] disabled:text-[var(--muted)]"
-            disabled={intentConnections.length === 0 || Boolean(intentDraft)}
+            disabled={
+              coordinatedStatus !== null ||
+              intentConnections.length === 0 ||
+              Boolean(intentDraft)
+            }
             type="button"
             onClick={onClearIntentConnections}
           >
@@ -365,7 +374,9 @@ export function RoutePanel({
                 </span>
                 <button
                   className="rounded border border-[var(--line)] px-2 py-1 hover:border-[var(--accent)] disabled:text-[var(--muted)]"
-                  disabled={Boolean(intentDraft)}
+                  disabled={
+                    coordinatedStatus !== null || Boolean(intentDraft)
+                  }
                   type="button"
                   onClick={() => onDeleteIntentConnection(connection.id)}
                 >
@@ -463,6 +474,7 @@ export function RoutePanel({
             proposal={proposal}
             onAcceptProposal={onAcceptProposal}
             onDiscardProposal={onDiscardProposal}
+            onFocusProposalReferences={onFocusProposalReferences}
             onGenerateProposal={onRegenerateProposal}
           />
         ) : null}
@@ -542,7 +554,11 @@ export function RoutePanel({
                   {status.isConnected ? (
                     <button
                       className="shrink-0 rounded border border-[var(--line)] px-2 py-1 hover:border-[var(--accent)]"
-                      disabled={Boolean(draft) || Boolean(intentDraft)}
+                      disabled={
+                        coordinatedStatus !== null ||
+                        Boolean(draft) ||
+                        Boolean(intentDraft)
+                      }
                       type="button"
                       onClick={() => onDisconnectAppliance(status.equipment.id)}
                     >
@@ -615,17 +631,26 @@ function RouteMainFlow({
 
   if (routeState === "proposal" && proposal) {
     const canAcceptProposal =
-      coordinatedStatus === null &&
-      routeProposalCanBeAccepted(
-        proposal,
-        totalAppliances,
-        proposalOutdated,
-      );
-    const acceptBlockReason = routeProposalAcceptanceBlockReason(
-      proposal,
-      totalAppliances,
-      proposalOutdated,
-    );
+      coordinatedStatus !== null
+        ? coordinatedStatus === "complete" && !proposalOutdated
+        : routeProposalCanBeAccepted(
+            proposal,
+            totalAppliances,
+            proposalOutdated,
+          );
+    const acceptBlockReason = coordinatedStatus
+      ? coordinatedStatus === "incomplete"
+        ? "Resolve las decisiones pendientes antes de aceptar."
+        : coordinatedStatus === "invalid"
+          ? "La propuesta invalida no puede aceptarse."
+          : proposalOutdated
+            ? "La propuesta esta desactualizada."
+            : null
+      : routeProposalAcceptanceBlockReason(
+          proposal,
+          totalAppliances,
+          proposalOutdated,
+        );
     const unreachedNames = proposal.unreachedEquipmentIds
       .map(
         (equipmentId) =>
@@ -670,11 +695,6 @@ function RouteMainFlow({
             {!canAcceptProposal && acceptBlockReason ? (
               <div>{acceptBlockReason}</div>
             ) : null}
-            {coordinatedStatus ? (
-              <div>
-                Visualizacion XY/Z activa. La edicion y aceptacion se habilitaran en 02C2.
-              </div>
-            ) : null}
           </div>
         ) : null}
 
@@ -682,9 +702,7 @@ function RouteMainFlow({
           <button
             className="rounded border border-[var(--line)] bg-white px-2 py-1 hover:border-[var(--accent)] disabled:text-[var(--muted)]"
             disabled={
-              coordinatedStatus !== null ||
-              proposalOutdated ||
-              proposal.segmentCount === 0
+              proposalOutdated
             }
             type="button"
             onClick={onEditProposal}
@@ -759,6 +777,7 @@ function ProposalSummary({
   proposal,
   onAcceptProposal,
   onDiscardProposal,
+  onFocusProposalReferences,
   onGenerateProposal,
 }: {
   applianceStatuses: RouteApplianceStatus[];
@@ -770,6 +789,7 @@ function ProposalSummary({
   proposal: AutomaticRouteProposal;
   onAcceptProposal: () => void;
   onDiscardProposal: () => void;
+  onFocusProposalReferences: (referenceIds: string[]) => void;
   onGenerateProposal: () => void;
 }) {
   const unreachedNames = proposal.unreachedEquipmentIds
@@ -780,17 +800,28 @@ function ProposalSummary({
     )
     .sort();
   const canAcceptProposal =
-    coordinatedStatus === null &&
-    routeProposalCanBeAccepted(
-      proposal,
-      applianceStatuses.length,
-      isOutdated,
-    );
-  const acceptBlockReason = routeProposalAcceptanceBlockReason(
-    proposal,
-    applianceStatuses.length,
-    isOutdated,
-  );
+    coordinatedStatus !== null
+      ? coordinatedStatus === "complete" && !isOutdated
+      : routeProposalCanBeAccepted(
+          proposal,
+          applianceStatuses.length,
+          isOutdated,
+        );
+  const acceptBlockReason = coordinatedStatus
+    ? coordinatedStatus === "incomplete"
+      ? coordinatedPendingDecisions[0]?.message ??
+        "Resolve las decisiones pendientes antes de aceptar."
+      : coordinatedStatus === "invalid"
+        ? coordinatedInvalidities[0]?.message ??
+          "La propuesta invalida no puede aceptarse."
+        : isOutdated
+          ? "La propuesta esta desactualizada."
+          : null
+    : routeProposalAcceptanceBlockReason(
+        proposal,
+        applianceStatuses.length,
+        isOutdated,
+      );
 
   return (
     <section className="mt-3 border-t border-[var(--line)] pt-2">
@@ -842,19 +873,37 @@ function ProposalSummary({
 
       {coordinatedPendingDecisions.map((pending) => (
         <div
-          className="mt-2 rounded border border-[#f1d28a] bg-[#fffaf0] px-2 py-1 text-[var(--warning)]"
+          className="mt-2 flex items-start justify-between gap-2 rounded border border-[#f1d28a] bg-[#fffaf0] px-2 py-1 text-[var(--warning)]"
           key={`${pending.code}:${pending.referenceIds.join(":")}`}
         >
-          Pendiente: {pending.message}
+          <span>Pendiente: {pending.message}</span>
+          {pending.referenceIds.length > 0 ? (
+            <button
+              className="shrink-0 rounded border border-[var(--line)] bg-white px-2 py-0.5 text-[var(--foreground)] hover:border-[var(--accent)]"
+              type="button"
+              onClick={() => onFocusProposalReferences(pending.referenceIds)}
+            >
+              Ver
+            </button>
+          ) : null}
         </div>
       ))}
 
       {coordinatedInvalidities.map((invalidity) => (
         <div
-          className="mt-2 rounded border border-red-200 bg-red-50 px-2 py-1 text-red-800"
+          className="mt-2 flex items-start justify-between gap-2 rounded border border-red-200 bg-red-50 px-2 py-1 text-red-800"
           key={`${invalidity.code}:${invalidity.referenceIds.join(":")}`}
         >
-          Invalida: {invalidity.message}
+          <span>Invalida: {invalidity.message}</span>
+          {invalidity.referenceIds.length > 0 ? (
+            <button
+              className="shrink-0 rounded border border-[var(--line)] bg-white px-2 py-0.5 text-[var(--foreground)] hover:border-[var(--accent)]"
+              type="button"
+              onClick={() => onFocusProposalReferences(invalidity.referenceIds)}
+            >
+              Ver
+            </button>
+          ) : null}
         </div>
       ))}
 
@@ -907,11 +956,6 @@ function ProposalSummary({
       {!canAcceptProposal && acceptBlockReason ? (
         <div className="mt-2 rounded border border-[#f1d28a] bg-[#fffaf0] px-2 py-1 text-[var(--warning)]">
           {acceptBlockReason}
-        </div>
-      ) : null}
-      {coordinatedStatus ? (
-        <div className="mt-2 text-[10px] text-[var(--muted)]">
-          La aceptacion definitiva y la edicion visual corresponden a 02C2.
         </div>
       ) : null}
     </section>
