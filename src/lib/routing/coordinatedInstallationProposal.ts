@@ -40,6 +40,7 @@ import {
   hasSegmentsWithMissingEndpoints,
   hasZeroLengthSegments,
   resolveRouteSegments,
+  resolveRouteNodePosition,
   routeEquipmentNodeId,
   routeEquipmentTerminalSegmentId,
   routeEquipmentTerminalStartNodeId,
@@ -161,6 +162,7 @@ export function createCoordinatedInstallationProposal(
   snapshot: CoordinatedInstallationSnapshot,
 ): CoordinatedInstallationProposal {
   const fingerprint = createCoordinatedInstallationFingerprint(snapshot);
+  const xyFingerprint = createCoordinatedInstallationXyFingerprint(snapshot);
   const copied = cloneSnapshotState(snapshot);
   const invalidities = validateSnapshotInput(snapshot);
   const pendingDecisions: CoordinatedInstallationPendingDecision[] = [];
@@ -203,7 +205,7 @@ export function createCoordinatedInstallationProposal(
       baseNetwork: terminalPreparation.network,
       bounds: snapshot.bounds ? { ...snapshot.bounds } : null,
       equipment: candidateEquipment,
-      fingerprint,
+      fingerprint: xyFingerprint,
       marginMeters: snapshot.marginMeters,
       minSegmentLengthSource: snapshot.minSegmentLengthSource,
       pdfPageNumber: snapshot.pdfPageNumber,
@@ -221,10 +223,12 @@ export function createCoordinatedInstallationProposal(
       scaleMetersPerSourceUnit: snapshot.scaleMetersPerSourceUnit ?? 0,
     };
     xyProposal = generateAutomaticRouteProposal(xyInput);
-    candidateNetwork = cloneRouteNetwork({
-      nodes: xyProposal.nodes,
-      segments: xyProposal.segments,
-    });
+    if (xyProposal.status !== "invalid") {
+      candidateNetwork = cloneRouteNetwork({
+        nodes: xyProposal.nodes,
+        segments: xyProposal.segments,
+      });
+    }
     justification.push(
       `El motor XY conecto ${xyProposal.reachedEquipmentIds.length} artefactos con ${xyProposal.segmentCount} tramos y ${xyProposal.turnCount} giros.`,
     );
@@ -262,7 +266,7 @@ export function createCoordinatedInstallationProposal(
       } else if (recommendedInternal) {
         candidateNetwork = cloneRouteNetwork(recommendedInternal.network);
         simulation = clonePlainRecord(recommendedInternal.simulation);
-      } else if (heightResult.automaticRisers) {
+      } else if (heightResult.automaticRisers?.status === "ready") {
         candidateNetwork = cloneRouteNetwork(
           heightResult.automaticRisers.network,
         );
@@ -270,6 +274,7 @@ export function createCoordinatedInstallationProposal(
 
       appendHeightOutcome({
         heightResult,
+        invalidities,
         justification,
         pendingDecisions,
         warnings,
@@ -314,6 +319,7 @@ export function createCoordinatedInstallationProposal(
       equipment: candidateEquipment,
       minSegmentLengthSource: snapshot.minSegmentLengthSource,
       network: candidateNetwork,
+      requireAllAppliances: xyProposal?.status !== "partial",
     }),
     ...validatePreservedConfirmedState({
       afterEquipment: candidateEquipment,
@@ -438,7 +444,7 @@ export function createCoordinatedInstallationFingerprint(
     adoptedDiameterDecisions: sortedByStableKey(
       snapshot.adoptedDiameterDecisions ?? [],
     ),
-    architecture: snapshot.architecture ?? null,
+    architecture: canonicalArchitecture(snapshot.architecture),
     bounds: snapshot.bounds,
     diameterTransitionDecisions: sortedByStableKey(
       snapshot.diameterTransitionDecisions ?? [],
@@ -459,8 +465,9 @@ export function createCoordinatedInstallationFingerprint(
     professionalDistributionHeight:
       snapshot.professionalDistributionHeight ?? null,
     projectGas: snapshot.projectGas ?? null,
-    restrictions:
+    restrictions: canonicalRestrictions(
       snapshot.restrictions ?? snapshot.architecture?.restrictions ?? [],
+    ),
     routeAccessoryProposalDecisions: sortedByStableKey(
       snapshot.routeAccessoryProposalDecisions ?? [],
     ),
@@ -468,6 +475,32 @@ export function createCoordinatedInstallationFingerprint(
   });
 
   return `${stableHash(signature)}:${signature.length}`;
+}
+
+function createCoordinatedInstallationXyFingerprint(
+  snapshot: CoordinatedInstallationSnapshot,
+) {
+  const signature = stableSerialize({
+    architecture: canonicalArchitecture(snapshot.architecture),
+    bounds: snapshot.bounds,
+    equipment: [...snapshot.equipment].sort((a, b) =>
+      a.id.localeCompare(b.id),
+    ),
+    marginMeters: snapshot.marginMeters,
+    minSegmentLengthSource: snapshot.minSegmentLengthSource,
+    network: canonicalNetwork(snapshot.network),
+    pdfPageNumber: snapshot.pdfPageNumber ?? null,
+    planBaseId: snapshot.planBaseId,
+    preferredApplianceOrder: snapshot.preferredApplianceOrder ?? [],
+    preferredBranchEquipmentIdsByApplianceId:
+      snapshot.preferredBranchEquipmentIdsByApplianceId ?? {},
+    restrictions: canonicalRestrictions(
+      snapshot.restrictions ?? snapshot.architecture?.restrictions ?? [],
+    ),
+    scaleMetersPerSourceUnit: snapshot.scaleMetersPerSourceUnit,
+  });
+
+  return `xy:${stableHash(signature)}:${signature.length}`;
 }
 
 function validateSnapshotInput(
@@ -510,6 +543,7 @@ function validateSnapshotInput(
 
 function appendHeightOutcome(params: {
   heightResult: RouteHeightProposalEngineResult;
+  invalidities: CoordinatedInstallationInvalidity[];
   justification: string[];
   pendingDecisions: CoordinatedInstallationPendingDecision[];
   warnings: CoordinatedInstallationWarning[];
@@ -558,6 +592,27 @@ function appendHeightOutcome(params: {
           referenceIds: [item.riserId],
         })),
     );
+    if (risers.status === "invalid") {
+      params.invalidities.push(
+        ...risers.diagnostics
+          .filter(
+            (diagnostic) =>
+              diagnostic.code === "invalid_vertical_geometry" ||
+              diagnostic.code === "known_restriction_collision",
+          )
+          .map((diagnostic) => ({
+            code:
+              diagnostic.code === "known_restriction_collision"
+                ? ("known_restriction_collision" as const)
+                : ("invalid_riser_geometry" as const),
+            message: diagnostic.message,
+            referenceIds: [
+              diagnostic.equipmentId,
+              diagnostic.segmentId,
+            ].filter((value): value is string => Boolean(value)),
+          })),
+      );
+    }
     if (risers.status === "incomplete") {
       params.pendingDecisions.push(
         ...risers.diagnostics.map((diagnostic) => ({
@@ -627,6 +682,7 @@ function validateCandidateGeometry(params: {
   equipment: WorkbenchEquipment[];
   minSegmentLengthSource: number;
   network: ManualRouteNetwork;
+  requireAllAppliances: boolean;
 }): CoordinatedInstallationInvalidity[] {
   const issues: CoordinatedInstallationInvalidity[] = [];
   const network = params.network;
@@ -663,6 +719,7 @@ function validateCandidateGeometry(params: {
     (item) => item.role === "appliance",
   ).length;
   if (
+    params.requireAllAppliances &&
     getConnectedApplianceEquipmentIds(network, params.equipment).size !==
     applianceCount
   ) {
@@ -677,7 +734,7 @@ function validateCandidateGeometry(params: {
     .filter((segment) =>
       segment.path.some((point, index) => {
         const next = segment.path[index + 1];
-        return next ? changedAxisCount(point, next) > 1 : false;
+        return next ? legMovesInPlanAndHeight(point, next) : false;
       }),
     )
     .map((segment) => segment.id);
@@ -714,6 +771,9 @@ function validatePreservedConfirmedState(params: {
   const afterEquipmentById = new Map(
     params.afterEquipment.map((item) => [item.id, item]),
   );
+  const beforeEquipmentById = new Map(
+    params.beforeEquipment.map((item) => [item.id, item]),
+  );
   const afterNodeById = new Map(
     params.afterNetwork.nodes.map((node) => [node.id, node]),
   );
@@ -730,10 +790,12 @@ function validatePreservedConfirmedState(params: {
     if (
       !after ||
       (confirmedEquipmentHeight &&
-        !sameNumber(
+        (!sameNumber(
           pointZMeters(before.connectionPoint),
           pointZMeters(after.connectionPoint),
-        )) ||
+        ) ||
+          stableSerialize(after.elevation) !==
+            stableSerialize(before.elevation))) ||
       (confirmedTerminalHeight &&
         stableSerialize(before.terminalConfig) !==
           stableSerialize(after.terminalConfig))
@@ -751,7 +813,18 @@ function validatePreservedConfirmedState(params: {
       continue;
     }
     const after = afterNodeById.get(before.id);
-    if (!after || !samePoint3d(before.position, after.position)) {
+    const beforePosition = resolveRouteNodePosition(
+      before,
+      beforeEquipmentById,
+    );
+    const afterPosition = after
+      ? resolveRouteNodePosition(after, afterEquipmentById)
+      : null;
+    if (
+      !after ||
+      !samePoint3d(beforePosition, afterPosition) ||
+      stableSerialize(after.elevation) !== stableSerialize(before.elevation)
+    ) {
       issues.push({
         code: "confirmed_elevation_lost",
         message: `La propuesta no conserva la cota confirmada del nodo ${before.id}.`,
@@ -762,13 +835,19 @@ function validatePreservedConfirmedState(params: {
 
   for (const before of params.beforeNetwork.segments) {
     const after = afterSegmentById.get(before.id);
-    const confirmedPoints = (before.vertices ?? []).filter(
-      (_, index) => before.vertexElevations?.[index]?.status === "confirmed",
-    );
+    const confirmedPoints = (before.vertices ?? []).flatMap((point, index) => {
+      const elevation = before.vertexElevations?.[index];
+      return elevation?.status === "confirmed" ? [{ elevation, point }] : [];
+    });
     if (
       confirmedPoints.some(
-        (point) =>
-          !after?.vertices?.some((candidate) => samePoint3d(point, candidate)),
+        ({ elevation, point }) =>
+          !after?.vertices?.some(
+            (candidate, index) =>
+              samePoint3d(point, candidate) &&
+              stableSerialize(after.vertexElevations?.[index]) ===
+                stableSerialize(elevation),
+          ),
       )
     ) {
       issues.push({
@@ -1110,8 +1189,39 @@ function clonePlainRecord<T>(value: T): T {
 function canonicalNetwork(network: ManualRouteNetwork) {
   return {
     nodes: [...network.nodes].sort((a, b) => a.id.localeCompare(b.id)),
-    segments: [...network.segments].sort((a, b) => a.id.localeCompare(b.id)),
+    segments: [...network.segments]
+      .map((segment) => ({
+        ...segment,
+        ...(segment.accessories
+          ? {
+              accessories: [...segment.accessories].sort((a, b) =>
+                a.id.localeCompare(b.id),
+              ),
+            }
+          : {}),
+      }))
+      .sort((a, b) => a.id.localeCompare(b.id)),
   };
+}
+
+function canonicalArchitecture(
+  architecture: ArchitecturalRouteContext | undefined,
+) {
+  if (!architecture) {
+    return null;
+  }
+
+  return {
+    features: sortedByStableKey(architecture.features),
+    guides: sortedByStableKey(architecture.guides),
+    openings: sortedByStableKey(architecture.openings),
+    pendingStructures: sortedByStableKey(architecture.pendingStructures),
+    restrictions: canonicalRestrictions(architecture.restrictions),
+  };
+}
+
+function canonicalRestrictions(restrictions: AutomaticRouteRestriction[]) {
+  return sortedByStableKey(restrictions);
 }
 
 function sortedByStableKey<T>(items: T[]) {
@@ -1130,12 +1240,14 @@ function networksEquivalent(
   );
 }
 
-function changedAxisCount(first: Point2D, second: Point2D) {
-  return [
-    Math.abs(first.x - second.x),
-    Math.abs(first.y - second.y),
-    Math.abs(pointZMeters(first) - pointZMeters(second)),
-  ].filter((delta) => delta > GEOMETRY_EPSILON).length;
+function legMovesInPlanAndHeight(first: Point2D, second: Point2D) {
+  const movesInPlan =
+    !sameNumber(first.x, second.x) || !sameNumber(first.y, second.y);
+  const changesHeight = !sameNumber(
+    pointZMeters(first),
+    pointZMeters(second),
+  );
+  return movesInPlan && changesHeight;
 }
 
 function samePoint3d(
@@ -1157,6 +1269,7 @@ function sameNumber(first: number, second: number) {
 
 function isPreservedAccessory(accessory: RouteSegmentAccessory) {
   return (
+    accessory.origin === undefined ||
     accessory.origin === "manual" ||
     accessory.origin === "user_confirmed" ||
     accessory.origin === "automatic_confirmed"
