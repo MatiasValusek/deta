@@ -24,6 +24,7 @@ import {
 } from "@/lib/routing/network";
 import type { AccessoryProposal } from "@/lib/routing/routeAccessoryProposals";
 import type {
+  AutomaticRouteRestriction,
   ManualRouteNetwork,
   RouteNode,
   RouteSegment,
@@ -34,6 +35,10 @@ import {
   type SectionRouteHeightTarget,
 } from "@/lib/sections/routeHeightEditing";
 import { createTechnicalRouteNodeElevationIndex } from "@/lib/sections/technicalRouteElevation";
+import {
+  generateAutomaticRouteRisers,
+  type AutomaticRouteRiserProposal,
+} from "@/lib/sections/routeRiserProposals";
 
 const HEIGHT_EPSILON_METERS = 0.000001;
 
@@ -48,6 +53,7 @@ export type RouteHeightConfirmedReference = {
 };
 
 export type RouteHeightProposalDiagnosticCode =
+  | "automatic_risers_incomplete"
   | "invalid_distribution_height"
   | "insufficient_confirmed_references"
   | "level_change_requires_definition"
@@ -187,6 +193,7 @@ export type RouteHeightProposalMainRoute = {
 };
 
 export type RouteHeightProposalEngineResult = {
+  automaticRisers: AutomaticRouteRiserProposal | null;
   coordinatedSimulation: CoordinatedRouteHeightProposalSimulation | null;
   confirmedReferences: RouteHeightConfirmedReference[];
   diagnostics: RouteHeightProposalDiagnostic[];
@@ -210,6 +217,7 @@ export type RouteHeightProposalEngineParams = {
   pipeSystem?: PipeSystem;
   professionalDistributionHeight?: ProfessionalDistributionHeight | null;
   projectGas?: ProjectGasConfig | null;
+  restrictions?: AutomaticRouteRestriction[];
   scaleMetersPerSourceUnit: number | null;
 };
 
@@ -252,6 +260,7 @@ export function createRouteHeightProposals(
 
   if (!mainRouteSelection) {
     return {
+      automaticRisers: null,
       coordinatedSimulation: null,
       confirmedReferences: [],
       diagnostics: [
@@ -324,6 +333,7 @@ export function createRouteHeightProposals(
   }
 
   return {
+    automaticRisers: null,
     coordinatedSimulation: null,
     confirmedReferences,
     diagnostics,
@@ -349,6 +359,7 @@ function createProfessionalDistributionHeightProposals(params: {
 }): RouteHeightProposalEngineResult {
   if (!Number.isFinite(params.reference.heightMeters)) {
     return {
+      automaticRisers: null,
       coordinatedSimulation: null,
       confirmedReferences: [],
       diagnostics: [
@@ -384,6 +395,7 @@ function createProfessionalDistributionHeightProposals(params: {
 
   if (params.baseline.status === "invalid") {
     return {
+      automaticRisers: null,
       coordinatedSimulation: null,
       confirmedReferences: [],
       diagnostics: [
@@ -446,10 +458,37 @@ function createProfessionalDistributionHeightProposals(params: {
     params: params.params,
     proposals,
   });
+  const automaticallyResolvedSegmentIds = new Set(
+    coordinated.riserProposal.status === "ready"
+      ? coordinated.riserProposal.risers.map((riser) => riser.segmentId)
+      : [],
+  );
+  const analysisDiagnostics = analysis.diagnostics.filter(
+    (diagnostic) =>
+      !diagnosticResolvedByAutomaticRiser(
+        diagnostic,
+        analysis.sectors,
+        automaticallyResolvedSegmentIds,
+      ),
+  );
+  const analysisSectors = analysis.sectors.map((sector) =>
+    sector.status === "requires_decision" &&
+    sector.segmentIds.some((segmentId) =>
+      automaticallyResolvedSegmentIds.has(segmentId),
+    )
+      ? {
+          ...sector,
+          neededData: null,
+          reason:
+            "El cambio entre la cota terminal confirmada y la distribucion queda resuelto por un montante automatico ortogonal.",
+          status: "resolved_by_proposal" as const,
+        }
+      : sector,
+  );
   const proposedTargetKeys = new Set(
     proposals.map((proposal) => proposal.targetKey),
   );
-  const individuallyEvaluatedSectors = analysis.sectors.map((sector) =>
+  const individuallyEvaluatedSectors = analysisSectors.map((sector) =>
     sector.status === "resolved_by_proposal" &&
     sector.targetKeys.some((targetKey) => !proposedTargetKeys.has(targetKey))
       ? {
@@ -465,6 +504,19 @@ function createProfessionalDistributionHeightProposals(params: {
 
   if (!coordinated.ok) {
     diagnostics.push(coordinated.diagnostic);
+  } else if (coordinated.riserProposal.status === "incomplete") {
+    diagnostics.push({
+      code: "automatic_risers_incomplete",
+      message:
+        "La distribucion en altura pudo simularse, pero uno o mas montantes necesitan datos profesionales.",
+      neededData:
+        coordinated.riserProposal.diagnostics[0]?.neededData ??
+        "Complete las cotas y configuraciones pendientes de medidor y terminales.",
+      referenceTargetKeys: [],
+      targetKeys: coordinated.riserProposal.diagnostics.flatMap((diagnostic) =>
+        diagnostic.segmentId ? [`segment:${diagnostic.segmentId}`] : [],
+      ),
+    });
   }
 
   const acceptedProposals = coordinated.ok
@@ -489,6 +541,7 @@ function createProfessionalDistributionHeightProposals(params: {
       );
 
   return {
+    automaticRisers: coordinated.riserProposal,
     coordinatedSimulation: coordinated.ok
       ? {
           proposalIds: acceptedProposals.map((proposal) => proposal.id),
@@ -498,7 +551,7 @@ function createProfessionalDistributionHeightProposals(params: {
       : null,
     confirmedReferences: analysis.confirmedReferences,
     diagnostics: [
-      ...analysis.diagnostics,
+      ...analysisDiagnostics,
       ...diagnostics,
     ],
     mainRoute: params.mainRouteSelection
@@ -511,6 +564,32 @@ function createProfessionalDistributionHeightProposals(params: {
     proposals: acceptedProposals,
     sectors,
   };
+}
+
+function diagnosticResolvedByAutomaticRiser(
+  diagnostic: RouteHeightProposalDiagnostic,
+  sectors: RouteHeightProposalSector[],
+  resolvedSegmentIds: Set<string>,
+) {
+  if (
+    diagnostic.code !== "level_change_requires_definition" ||
+    resolvedSegmentIds.size === 0
+  ) {
+    return false;
+  }
+
+  return sectors.some(
+    (sector) =>
+      sector.segmentIds.some((segmentId) =>
+        resolvedSegmentIds.has(segmentId),
+      ) &&
+      diagnostic.referenceTargetKeys.every((targetKey) =>
+        sector.confirmedReferenceTargetKeys.includes(targetKey),
+      ) &&
+      diagnostic.targetKeys.every((targetKey) =>
+        sector.targetKeys.includes(targetKey),
+      ),
+  );
 }
 
 function analyzeDistributionNetwork(params: {
@@ -802,8 +881,16 @@ function simulateCoordinatedHeightProposals(params: {
   params: RouteHeightProposalEngineParams;
   proposals: RouteHeightProposal[];
 }):
-  | { ok: true; simulation: RouteHeightProposalSimulation }
-  | { diagnostic: RouteHeightProposalDiagnostic; ok: false } {
+  | {
+      ok: true;
+      riserProposal: AutomaticRouteRiserProposal;
+      simulation: RouteHeightProposalSimulation;
+    }
+  | {
+      diagnostic: RouteHeightProposalDiagnostic;
+      ok: false;
+      riserProposal: AutomaticRouteRiserProposal;
+    } {
   const copied = cloneHeightProposalState(
     params.params.equipment,
     params.params.network,
@@ -821,6 +908,14 @@ function simulateCoordinatedHeightProposals(params: {
     });
 
     if (!edit.ok) {
+      const riserProposal = generateAutomaticRouteRisers({
+        distributionHeightMeters:
+          params.params.professionalDistributionHeight?.heightMeters ?? NaN,
+        equipment,
+        network,
+        restrictions: params.params.restrictions,
+        scaleMetersPerSourceUnit: params.params.scaleMetersPerSourceUnit,
+      });
       return {
         diagnostic: {
           ...simulationFailureDiagnostic(
@@ -835,6 +930,7 @@ function simulateCoordinatedHeightProposals(params: {
           message: `Fallo la simulacion coordinada en ${proposal.targetKey}: ${edit.message}`,
         },
         ok: false,
+        riserProposal,
       };
     }
 
@@ -842,12 +938,43 @@ function simulateCoordinatedHeightProposals(params: {
     network = edit.network;
   }
 
-  const candidate = calculateHeightProposalTechnicalTree(params.params, {
+  const riserProposal = generateAutomaticRouteRisers({
+    distributionHeightMeters:
+      params.params.professionalDistributionHeight?.heightMeters ?? NaN,
     equipment,
     network,
+    restrictions: params.params.restrictions,
+    scaleMetersPerSourceUnit: params.params.scaleMetersPerSourceUnit,
+  });
+
+  if (riserProposal.status === "invalid") {
+    return {
+      diagnostic: {
+        code: "simulation_failed",
+        message:
+          "La geometria automatica de montantes contiene una interferencia o una pata invalida.",
+        neededData:
+          riserProposal.diagnostics[0]?.neededData ??
+          "Revise la ubicacion y geometria de los montantes propuestos.",
+        referenceTargetKeys: [],
+        targetKeys: riserProposal.diagnostics.flatMap((diagnostic) =>
+          diagnostic.segmentId ? [`segment:${diagnostic.segmentId}`] : [],
+        ),
+      },
+      ok: false,
+      riserProposal,
+    };
+  }
+
+  const simulatedNetwork =
+    riserProposal.status === "ready" ? riserProposal.network : network;
+
+  const candidate = calculateHeightProposalTechnicalTree(params.params, {
+    equipment,
+    network: simulatedNetwork,
   });
   const simulation = createHeightProposalSimulation({
-    after: { equipment, network, result: candidate },
+    after: { equipment, network: simulatedNetwork, result: candidate },
     baseline: params.baseline,
     params: params.params,
   });
@@ -864,10 +991,11 @@ function simulateCoordinatedHeightProposals(params: {
         targetKeys: params.proposals.map((proposal) => proposal.targetKey),
       },
       ok: false,
+      riserProposal,
     };
   }
 
-  return { ok: true, simulation };
+  return { ok: true, riserProposal, simulation };
 }
 
 function simulateHeightProposal(params: {
