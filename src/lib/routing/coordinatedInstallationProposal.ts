@@ -1,4 +1,7 @@
-import type { ArchitecturalRouteContext } from "@/lib/architecture/routeContext";
+import {
+  createArchitecturalRouteWarnings,
+  type ArchitecturalRouteContext,
+} from "@/lib/architecture/routeContext";
 import type { AdoptedDiameterDecision } from "@/lib/calculation/professionalDiameterAdoption";
 import type {
   PipeSegmentPipeContext,
@@ -44,7 +47,12 @@ import {
   routeEquipmentNodeId,
   routeEquipmentTerminalSegmentId,
   routeEquipmentTerminalStartNodeId,
+  routeSegmentPlanLegs,
 } from "@/lib/routing/network";
+import {
+  segmentIntersectsPolygon,
+  segmentsIntersect,
+} from "@/lib/routing/geometry";
 import {
   detectRouteAccessoryProposals,
   type AccessoryProposal,
@@ -152,6 +160,19 @@ export type CoordinatedInstallationProposal = {
   technicalResult: TechnicalCalculationResult;
   warnings: CoordinatedInstallationWarning[];
   xyProposal: AutomaticRouteProposal | null;
+};
+
+export type CoordinatedInstallationCandidateEvaluation = {
+  accessoryProposals: AccessoryProposal[];
+  candidateEquipment: WorkbenchEquipment[];
+  candidateNetwork: ManualRouteNetwork;
+  fingerprint: string;
+  invalidities: CoordinatedInstallationInvalidity[];
+  materialTakeoff: TechnicalMaterialTakeoff;
+  pendingDecisions: CoordinatedInstallationPendingDecision[];
+  status: CoordinatedInstallationProposalStatus;
+  technicalResult: TechnicalCalculationResult;
+  warnings: CoordinatedInstallationWarning[];
 };
 
 /**
@@ -321,6 +342,11 @@ export function createCoordinatedInstallationProposal(
       network: candidateNetwork,
       requireAllAppliances: xyProposal?.status !== "partial",
     }),
+    ...validateCandidateRestrictions({
+      equipment: candidateEquipment,
+      network: candidateNetwork,
+      restrictions,
+    }),
     ...validatePreservedConfirmedState({
       afterEquipment: candidateEquipment,
       afterNetwork: candidateNetwork,
@@ -340,46 +366,12 @@ export function createCoordinatedInstallationProposal(
       transitionProposals,
     }),
   );
-
-  if (technicalResult.status === "invalid") {
-    invalidities.push({
-      code: "invalid_technical_result",
-      message:
-        technicalResult.issues[0]?.message ??
-        "La red candidata no produce un arbol tecnico valido.",
-      referenceIds: technicalResult.issues.flatMap((issue) =>
-        issue.segmentId ? [issue.segmentId] : [],
-      ),
-    });
-  } else if (technicalResult.status === "incomplete") {
-    pendingDecisions.push(
-      ...technicalResult.issues.map((issue) => ({
-        code: "technical_definition_required" as const,
-        message: issue.message,
-        neededData:
-          "Complete o revise el dato tecnico indicado antes de aceptar la propuesta como completa.",
-        referenceIds: [issue.segmentId, issue.equipmentId, issue.nodeId].filter(
-          (value): value is string => Boolean(value),
-        ),
-      })),
-    );
-  }
-
-  if (materialTakeoff.status === "pending") {
-    pendingDecisions.push(
-      ...materialTakeoff.pendingItems.map((item) => ({
-        code: "material_definition_required" as const,
-        message: item.reason,
-        neededData:
-          "Resuelva la seleccion tecnica pendiente para cerrar el computo de materiales.",
-        referenceIds: [
-          item.segmentId,
-          item.transitionId,
-          item.sourceId,
-        ].filter((value): value is string => Boolean(value)),
-      })),
-    );
-  }
+  appendTechnicalOutcome({
+    invalidities,
+    materialTakeoff,
+    pendingDecisions,
+    technicalResult,
+  });
 
   if (xyProposal?.status === "invalid") {
     invalidities.push({
@@ -435,6 +427,147 @@ export function createCoordinatedInstallationProposal(
     warnings: dedupedWarnings,
     xyProposal: xyProposal ? clonePlainRecord(xyProposal) : null,
   };
+}
+
+/**
+ * Revalidates an edited candidate without regenerating XY or Z and without
+ * mutating either the confirmed snapshot or the candidate supplied by caller.
+ */
+export function evaluateCoordinatedInstallationCandidate(params: {
+  candidateEquipment: WorkbenchEquipment[];
+  candidateNetwork: ManualRouteNetwork;
+  inheritedWarnings?: CoordinatedInstallationWarning[];
+  snapshot: CoordinatedInstallationSnapshot;
+}): CoordinatedInstallationCandidateEvaluation {
+  const snapshot = params.snapshot;
+  const candidateEquipment = cloneEquipment(params.candidateEquipment);
+  const candidateNetwork = cloneRouteNetwork(params.candidateNetwork);
+  const copied = cloneSnapshotState(snapshot);
+  const invalidities = validateSnapshotInput(snapshot);
+  const pendingDecisions: CoordinatedInstallationPendingDecision[] = [];
+  const restrictions = cloneRestrictions(
+    snapshot.restrictions ?? snapshot.architecture?.restrictions ?? [],
+  );
+  const technicalResult = calculateTechnicalTree({
+    adoptedDiameterDecisions: snapshot.adoptedDiameterDecisions,
+    diameterTransitionDecisions: snapshot.diameterTransitionDecisions,
+    equipment: candidateEquipment,
+    minSegmentLengthSource: snapshot.minSegmentLengthSource,
+    network: candidateNetwork,
+    pipeContextBySegmentId: copied.pipeContextBySegmentId,
+    pipeSystem: snapshot.pipeSystem,
+    projectGas: copied.projectGas,
+    scaleMetersPerSourceUnit: snapshot.scaleMetersPerSourceUnit,
+  });
+  const accessoryProposals = detectRouteAccessoryProposals({
+    decisions: snapshot.routeAccessoryProposalDecisions,
+    equipment: candidateEquipment,
+    network: candidateNetwork,
+    scaleMetersPerSourceUnit: snapshot.scaleMetersPerSourceUnit,
+  });
+  const transitionProposals =
+    technicalResult.transitionAwareNetworkSizing?.transitions ?? [];
+  const materialTakeoff = createTechnicalMaterialTakeoff({
+    accessoryProposals,
+    diameterTransitionProposals: transitionProposals,
+    result: technicalResult,
+  });
+
+  invalidities.push(
+    ...validateCandidateGeometry({
+      equipment: candidateEquipment,
+      minSegmentLengthSource: snapshot.minSegmentLengthSource,
+      network: candidateNetwork,
+      requireAllAppliances: true,
+    }),
+    ...validateCandidateRestrictions({
+      equipment: candidateEquipment,
+      network: candidateNetwork,
+      restrictions,
+    }),
+    ...validatePreservedConfirmedState({
+      afterEquipment: candidateEquipment,
+      afterNetwork: candidateNetwork,
+      beforeEquipment: copied.equipment,
+      beforeNetwork: copied.network,
+    }),
+  );
+  pendingDecisions.push(
+    ...invalidTechnicalReferences({
+      accessoryDecisions: snapshot.routeAccessoryProposalDecisions ?? [],
+      accessoryProposals,
+      adoptedDiameterDecisions: snapshot.adoptedDiameterDecisions ?? [],
+      candidateNetwork,
+      diameterTransitionDecisions:
+        snapshot.diameterTransitionDecisions ?? [],
+      pipeContextBySegmentId: copied.pipeContextBySegmentId,
+      transitionProposals,
+    }),
+  );
+  appendTechnicalOutcome({
+    invalidities,
+    materialTakeoff,
+    pendingDecisions,
+    technicalResult,
+  });
+
+  const warnings = [...(params.inheritedWarnings ?? [])];
+  for (const warning of createArchitecturalRouteWarnings({
+    equipment: candidateEquipment,
+    network: candidateNetwork,
+    pendingStructures: snapshot.architecture?.pendingStructures ?? [],
+  })) {
+    warnings.push({
+      code: "architectural_reference_unverified",
+      message: warning.message,
+      referenceIds: [...warning.featureIds],
+    });
+  }
+
+  const dedupedInvalidities = dedupeByKey(invalidities, invalidityKey);
+  const dedupedPending = dedupeByKey(pendingDecisions, pendingDecisionKey);
+  const dedupedWarnings = dedupeByKey(warnings, warningKey);
+  const status: CoordinatedInstallationProposalStatus =
+    dedupedInvalidities.length > 0
+      ? "invalid"
+      : dedupedPending.length > 0
+        ? "incomplete"
+        : "complete";
+
+  return {
+    accessoryProposals: clonePlainRecord(accessoryProposals),
+    candidateEquipment,
+    candidateNetwork,
+    fingerprint: createCoordinatedInstallationCandidateFingerprint({
+      candidateEquipment,
+      candidateNetwork,
+      snapshot,
+    }),
+    invalidities: dedupedInvalidities,
+    materialTakeoff: clonePlainRecord(materialTakeoff),
+    pendingDecisions: dedupedPending,
+    status,
+    technicalResult: clonePlainRecord(technicalResult),
+    warnings: dedupedWarnings,
+  };
+}
+
+export function createCoordinatedInstallationCandidateFingerprint(params: {
+  candidateEquipment: WorkbenchEquipment[];
+  candidateNetwork: ManualRouteNetwork;
+  snapshot: CoordinatedInstallationSnapshot;
+}) {
+  const signature = stableSerialize({
+    candidateEquipment: [...params.candidateEquipment].sort((a, b) =>
+      a.id.localeCompare(b.id),
+    ),
+    candidateNetwork: canonicalNetwork(params.candidateNetwork),
+    confirmedFingerprint: createCoordinatedInstallationFingerprint(
+      params.snapshot,
+    ),
+  });
+
+  return `installation-candidate:${stableHash(signature)}:${signature.length}`;
 }
 
 export function createCoordinatedInstallationFingerprint(
@@ -539,6 +672,53 @@ function validateSnapshotInput(
   }
 
   return issues;
+}
+
+function appendTechnicalOutcome(params: {
+  invalidities: CoordinatedInstallationInvalidity[];
+  materialTakeoff: TechnicalMaterialTakeoff;
+  pendingDecisions: CoordinatedInstallationPendingDecision[];
+  technicalResult: TechnicalCalculationResult;
+}) {
+  if (params.technicalResult.status === "invalid") {
+    params.invalidities.push({
+      code: "invalid_technical_result",
+      message:
+        params.technicalResult.issues[0]?.message ??
+        "La red candidata no produce un arbol tecnico valido.",
+      referenceIds: params.technicalResult.issues.flatMap((issue) =>
+        issue.segmentId ? [issue.segmentId] : [],
+      ),
+    });
+  } else if (params.technicalResult.status === "incomplete") {
+    params.pendingDecisions.push(
+      ...params.technicalResult.issues.map((issue) => ({
+        code: "technical_definition_required" as const,
+        message: issue.message,
+        neededData:
+          "Complete o revise el dato tecnico indicado antes de aceptar la propuesta como completa.",
+        referenceIds: [issue.segmentId, issue.equipmentId, issue.nodeId].filter(
+          (value): value is string => Boolean(value),
+        ),
+      })),
+    );
+  }
+
+  if (params.materialTakeoff.status === "pending") {
+    params.pendingDecisions.push(
+      ...params.materialTakeoff.pendingItems.map((item) => ({
+        code: "material_definition_required" as const,
+        message: item.reason,
+        neededData:
+          "Resuelva la seleccion tecnica pendiente para cerrar el computo de materiales.",
+        referenceIds: [
+          item.segmentId,
+          item.transitionId,
+          item.sourceId,
+        ].filter((value): value is string => Boolean(value)),
+      })),
+    );
+  }
 }
 
 function appendHeightOutcome(params: {
@@ -761,6 +941,54 @@ function validateCandidateGeometry(params: {
   return issues;
 }
 
+function validateCandidateRestrictions(params: {
+  equipment: WorkbenchEquipment[];
+  network: ManualRouteNetwork;
+  restrictions: AutomaticRouteRestriction[];
+}): CoordinatedInstallationInvalidity[] {
+  if (params.restrictions.length === 0) {
+    return [];
+  }
+
+  const issues: CoordinatedInstallationInvalidity[] = [];
+
+  for (const segment of resolveRouteSegments(
+    params.network,
+    params.equipment,
+  )) {
+    const restrictionIds = new Set<string>();
+
+    for (const leg of routeSegmentPlanLegs(segment)) {
+      for (const restriction of params.restrictions) {
+        const intersects =
+          restriction.kind === "polygon"
+            ? segmentIntersectsPolygon(leg.from, leg.to, restriction.polygon)
+            : segmentsIntersect(
+                leg.from,
+                leg.to,
+                restriction.from,
+                restriction.to,
+              );
+
+        if (intersects) {
+          restrictionIds.add(restriction.id);
+        }
+      }
+    }
+
+    if (restrictionIds.size > 0) {
+      const references = [...restrictionIds].sort();
+      issues.push({
+        code: "known_restriction_collision",
+        message: `El tramo ${segment.id} intersecta restricciones confirmadas (${references.join(", ")}).`,
+        referenceIds: [segment.id, ...references],
+      });
+    }
+  }
+
+  return issues;
+}
+
 function validatePreservedConfirmedState(params: {
   afterEquipment: WorkbenchEquipment[];
   afterNetwork: ManualRouteNetwork;
@@ -822,7 +1050,12 @@ function validatePreservedConfirmedState(params: {
       : null;
     if (
       !after ||
-      !samePoint3d(beforePosition, afterPosition) ||
+      !beforePosition ||
+      !afterPosition ||
+      !sameNumber(
+        pointZMeters(beforePosition),
+        pointZMeters(afterPosition),
+      ) ||
       stableSerialize(after.elevation) !== stableSerialize(before.elevation)
     ) {
       issues.push({
@@ -835,21 +1068,14 @@ function validatePreservedConfirmedState(params: {
 
   for (const before of params.beforeNetwork.segments) {
     const after = afterSegmentById.get(before.id);
-    const confirmedPoints = (before.vertices ?? []).flatMap((point, index) => {
-      const elevation = before.vertexElevations?.[index];
-      return elevation?.status === "confirmed" ? [{ elevation, point }] : [];
-    });
-    if (
-      confirmedPoints.some(
-        ({ elevation, point }) =>
-          !after?.vertices?.some(
-            (candidate, index) =>
-              samePoint3d(point, candidate) &&
-              stableSerialize(after.vertexElevations?.[index]) ===
-                stableSerialize(elevation),
-          ),
-      )
-    ) {
+    const beforeConfirmed = confirmedVertexElevationCounts(before);
+    const afterConfirmed = after
+      ? confirmedVertexElevationCounts(after)
+      : new Map<string, number>();
+    const lostConfirmedElevation = [...beforeConfirmed].some(
+      ([key, count]) => (afterConfirmed.get(key) ?? 0) < count,
+    );
+    if (lostConfirmedElevation) {
       issues.push({
         code: "confirmed_elevation_lost",
         message: `La propuesta no conserva vertices confirmados del tramo ${before.id}.`,
@@ -880,6 +1106,23 @@ function validatePreservedConfirmedState(params: {
   }
 
   return issues;
+}
+
+function confirmedVertexElevationCounts(
+  segment: ManualRouteNetwork["segments"][number],
+) {
+  const counts = new Map<string, number>();
+
+  (segment.vertices ?? []).forEach((point, index) => {
+    const elevation = segment.vertexElevations?.[index];
+    if (elevation?.status !== "confirmed") {
+      return;
+    }
+    const key = `${pointZMeters(point).toFixed(6)}:${stableSerialize(elevation)}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  });
+
+  return counts;
 }
 
 function invalidTechnicalReferences(params: {
@@ -1248,19 +1491,6 @@ function legMovesInPlanAndHeight(first: Point2D, second: Point2D) {
     pointZMeters(second),
   );
   return movesInPlan && changesHeight;
-}
-
-function samePoint3d(
-  first: Point2D | null | undefined,
-  second: Point2D | null | undefined,
-) {
-  return Boolean(
-    first &&
-      second &&
-      sameNumber(first.x, second.x) &&
-      sameNumber(first.y, second.y) &&
-      sameNumber(pointZMeters(first), pointZMeters(second)),
-  );
 }
 
 function sameNumber(first: number, second: number) {
