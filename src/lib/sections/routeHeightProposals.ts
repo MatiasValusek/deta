@@ -179,9 +179,12 @@ export type RouteHeightProposalSector = {
 };
 
 export type CoordinatedRouteHeightProposalSimulation = {
+  candidateEquipment: WorkbenchEquipment[];
+  candidateNetwork: ManualRouteNetwork;
   proposalIds: string[];
   simulation: RouteHeightProposalSimulation;
   targetKeys: string[];
+  technicalResult: TechnicalCalculationResult;
 };
 
 export type RouteHeightProposal = {
@@ -609,9 +612,12 @@ function createProfessionalDistributionHeightProposals(params: {
     automaticRisers: coordinated.riserProposal,
     coordinatedSimulation: coordinated.ok
       ? {
+          candidateEquipment: coordinated.candidateEquipment,
+          candidateNetwork: coordinated.candidateNetwork,
           proposalIds: acceptedProposals.map((proposal) => proposal.id),
           simulation: coordinated.simulation,
           targetKeys: acceptedProposals.map((proposal) => proposal.targetKey),
+          technicalResult: coordinated.technicalResult,
         }
       : null,
     confirmedReferences: analysis.confirmedReferences,
@@ -948,10 +954,13 @@ function simulateCoordinatedHeightProposals(params: {
   proposals: RouteHeightProposal[];
 }):
   | {
+      candidateEquipment: WorkbenchEquipment[];
+      candidateNetwork: ManualRouteNetwork;
       internalLevelChanges: RouteInternalLevelProposalEvaluation | null;
       ok: true;
       riserProposal: AutomaticRouteRiserProposal;
       simulation: RouteHeightProposalSimulation;
+      technicalResult: TechnicalCalculationResult;
     }
   | {
       diagnostic: RouteHeightProposalDiagnostic;
@@ -1092,7 +1101,15 @@ function simulateCoordinatedHeightProposals(params: {
     };
   }
 
-  return { internalLevelChanges, ok: true, riserProposal, simulation };
+  return {
+    candidateEquipment: equipment,
+    candidateNetwork: simulatedNetwork,
+    internalLevelChanges,
+    ok: true,
+    riserProposal,
+    simulation,
+    technicalResult: candidate,
+  };
 }
 
 function evaluateInternalLevelChanges(params: {
