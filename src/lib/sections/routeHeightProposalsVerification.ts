@@ -1,7 +1,12 @@
 import { SIGAS_PIPE_SYSTEM } from "@/lib/calculation/pipeSystems/sigas";
+import { createTechnicalAxonometricView } from "@/lib/calculation/technicalAxonometric";
+import { createTechnicalPhysicalAccessoryInventory } from "@/lib/calculation/technicalPhysicalAccessories";
+import { calculateTechnicalTree } from "@/lib/calculation/technicalTree";
 import { createSuggestedEquipmentTerminalConfig } from "@/lib/equipment/terminalConfig";
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
 import type { ManualRouteNetwork } from "@/lib/routing/types";
+import { resolveTechnicalRouteSegments } from "@/lib/sections/technicalRouteElevation";
+import { createTechnicalRoutePolyline } from "@/lib/sections/technicalRoutePolyline";
 import {
   createRouteHeightProposals,
   type RouteHeightProposalEngineParams,
@@ -234,11 +239,12 @@ export function runRouteHeightProposalsVerifications() {
 
   verify(
     results,
-    "01C-B cotas confirmadas diferentes delimitan sectores pendientes",
+    "01C-C2 cotas confirmadas diferentes generan cambio interno sugerido",
     () => {
       const fixture = branchedDistributionFixture({
         differentRouteHeight: true,
       });
+      const originalNetwork = JSON.stringify(fixture.network);
       const result = createRouteHeightProposals(fixture);
 
       assert(
@@ -259,20 +265,89 @@ export function runRouteHeightProposalsVerifications() {
       );
       assertEqual(
         requiredSector(result, "D-B2").status,
-        "requires_decision",
+        "resolved_by_proposal",
       );
-      assertEqual(
-        requiredSector(result, "D-B2").neededData,
-        "Defina el punto y la geometria del cambio de nivel en este sector.",
+      assertEqual(requiredSector(result, "D-B2").neededData, null);
+      assertEqual(result.internalLevelChanges?.status, "ready");
+      assert(result.internalLevelChanges?.recommendedAlternativeId, "Falta alternativa interna recomendada.");
+      const internalAlternative = result.internalLevelChanges.alternatives.find(
+        (alternative) =>
+          alternative.id === result.internalLevelChanges?.recommendedAlternativeId,
+      );
+      assert(internalAlternative, "Falta la alternativa interna evaluada.");
+      assert(
+        internalAlternative.changes.some(
+          (change) => change.segmentId === "D-B2",
+        ),
+        "Falta el cambio interno sobre D-B2.",
       );
       assert(
-        result.diagnostics.some(
+        internalAlternative.interferences.some(
+          (interference) =>
+            interference.kind === "unverified_3d_clearance" &&
+            interference.status === "unverified",
+        ),
+        "Falta conservar la incertidumbre 3D.",
+      );
+      assertEqual(
+        internalAlternative.simulation.calculations.validationsPreserved,
+        true,
+      );
+      assertEqual(
+        internalAlternative.simulation.connections.topologyChanged,
+        false,
+      );
+      assert(
+        (internalAlternative.simulation.lengths.totalDeltaMeters ?? 0) > 0,
+        "La simulacion no incorporo la longitud vertical interna.",
+      );
+      const resolvedSegment = resolveTechnicalRouteSegments({
+        equipment: fixture.equipment,
+        network: internalAlternative.network,
+      }).find((segment) => segment.id === "D-B2");
+      assert(resolvedSegment, "Falta el tramo interno resuelto.");
+      const polyline = createTechnicalRoutePolyline(resolvedSegment);
+      assert(
+        polyline.points.some((point) => point.source === "vertical"),
+        "Corte no recibe el montante interno explicito.",
+      );
+      const calculation = calculateTechnicalTree({
+        equipment: fixture.equipment,
+        minSegmentLengthSource: fixture.minSegmentLengthSource,
+        network: internalAlternative.network,
+        pipeSystem: fixture.pipeSystem,
+        scaleMetersPerSourceUnit: fixture.scaleMetersPerSourceUnit,
+      });
+      assert(calculation.status !== "invalid", "El calculo interno quedo invalido.");
+      const inventory = createTechnicalPhysicalAccessoryInventory({
+        equipment: fixture.equipment,
+        network: internalAlternative.network,
+        result: calculation,
+        routeTransitionResolutions:
+          calculation.transitionAwareNetworkSizing?.routeTransitionResolutions,
+      });
+      const axonometric = createTechnicalAxonometricView({
+        equipment: fixture.equipment,
+        inventory,
+        network: internalAlternative.network,
+        result: calculation,
+        scaleMetersPerSourceUnit: fixture.scaleMetersPerSourceUnit,
+      });
+      assert(
+        axonometric.segments
+          .find((segment) => segment.id === "D-B2")
+          ?.path.some((point) => point.source === "vertical"),
+        "Axonometrica no recibe el montante interno explicito.",
+      );
+      assert(
+        !result.diagnostics.some(
           (diagnostic) =>
             diagnostic.code === "level_change_requires_definition" &&
             diagnostic.referenceTargetKeys.includes("node:B2"),
         ),
-        "Falta diagnostico del cambio de nivel.",
+        "El sector resuelto conserva un diagnostico pendiente obsoleto.",
       );
+      assertEqual(JSON.stringify(fixture.network), originalNetwork);
     },
   );
 

@@ -39,6 +39,11 @@ import {
   generateAutomaticRouteRisers,
   type AutomaticRouteRiserProposal,
 } from "@/lib/sections/routeRiserProposals";
+import {
+  generateAutomaticInternalLevelChanges,
+  type AutomaticInternalLevelProposal,
+  type InternalLevelAlternative,
+} from "@/lib/sections/routeInternalLevelProposals";
 
 const HEIGHT_EPSILON_METERS = 0.000001;
 
@@ -54,6 +59,7 @@ export type RouteHeightConfirmedReference = {
 
 export type RouteHeightProposalDiagnosticCode =
   | "automatic_risers_incomplete"
+  | "internal_level_changes_incomplete"
   | "invalid_distribution_height"
   | "insufficient_confirmed_references"
   | "level_change_requires_definition"
@@ -134,6 +140,28 @@ export type RouteHeightProposalSimulation = {
   status: "ready";
 };
 
+export type RouteInternalLevelAlternativeEvaluation =
+  InternalLevelAlternative & {
+    score: {
+      accessoryCount: number;
+      addedCalculationIssueCount: number;
+      directionChangeCount: number;
+      physicalLengthMeters: number | null;
+      pipeLengthMeters: number;
+      topologyChanged: boolean;
+    };
+    simulation: RouteHeightProposalSimulation;
+    technicallyViable: boolean;
+  };
+
+export type RouteInternalLevelProposalEvaluation = Omit<
+  AutomaticInternalLevelProposal,
+  "alternatives"
+> & {
+  alternatives: RouteInternalLevelAlternativeEvaluation[];
+  recommendedAlternativeId: string | null;
+};
+
 export type ProfessionalDistributionHeight = {
   heightMeters: number;
   reference: "project_datum";
@@ -198,6 +226,7 @@ export type RouteHeightProposalEngineResult = {
   confirmedReferences: RouteHeightConfirmedReference[];
   diagnostics: RouteHeightProposalDiagnostic[];
   mainRoute: RouteHeightProposalMainRoute | null;
+  internalLevelChanges: RouteInternalLevelProposalEvaluation | null;
   mode:
     | "matching_confirmed_boundaries"
     | "professional_distribution_height";
@@ -274,6 +303,7 @@ export function createRouteHeightProposals(
           targetKeys: [],
         },
       ],
+      internalLevelChanges: null,
       mainRoute: null,
       mode: "matching_confirmed_boundaries",
       proposals: [],
@@ -332,11 +362,35 @@ export function createRouteHeightProposals(
     }
   }
 
+  const internalLevelChanges = evaluateInternalLevelChanges({
+    baseline,
+    equipment: params.equipment,
+    network: params.network,
+    params,
+  });
+  const effectiveDiagnostics =
+    internalLevelChanges.status === "ready" &&
+    internalLevelChanges.requiredChangeCount > 0 &&
+    internalLevelChanges.recommendedAlternativeId
+      ? diagnostics.filter(
+          (diagnostic) =>
+            diagnostic.code !== "level_change_requires_definition",
+        )
+      : diagnostics;
+
+  if (
+    internalLevelChanges.requiredChangeCount > 0 &&
+    !internalLevelChanges.recommendedAlternativeId
+  ) {
+    effectiveDiagnostics.push(internalLevelChangeDiagnostic(internalLevelChanges));
+  }
+
   return {
     automaticRisers: null,
     coordinatedSimulation: null,
     confirmedReferences,
-    diagnostics,
+    diagnostics: effectiveDiagnostics,
+    internalLevelChanges,
     mainRoute: mainRouteResult(
       mainRouteSelection,
       params.scaleMetersPerSourceUnit,
@@ -344,7 +398,7 @@ export function createRouteHeightProposals(
     mode: "matching_confirmed_boundaries",
     proposals,
     sectors: fallbackRouteSectors({
-      diagnostics,
+      diagnostics: effectiveDiagnostics,
       proposals,
       route: mainRouteSelection.route,
     }),
@@ -372,6 +426,7 @@ function createProfessionalDistributionHeightProposals(params: {
           targetKeys: [],
         },
       ],
+      internalLevelChanges: null,
       mainRoute: params.mainRouteSelection
         ? mainRouteResult(
             params.mainRouteSelection,
@@ -409,6 +464,7 @@ function createProfessionalDistributionHeightProposals(params: {
           targetKeys: [],
         },
       ],
+      internalLevelChanges: null,
       mainRoute: params.mainRouteSelection
         ? mainRouteResult(
             params.mainRouteSelection,
@@ -458,11 +514,20 @@ function createProfessionalDistributionHeightProposals(params: {
     params: params.params,
     proposals,
   });
-  const automaticallyResolvedSegmentIds = new Set(
-    coordinated.riserProposal.status === "ready"
+  const recommendedInternalAlternative =
+    coordinated.internalLevelChanges?.alternatives.find(
+      (alternative) =>
+        alternative.id ===
+        coordinated.internalLevelChanges?.recommendedAlternativeId,
+    ) ?? null;
+  const automaticallyResolvedSegmentIds = new Set([
+    ...(coordinated.riserProposal.status === "ready"
       ? coordinated.riserProposal.risers.map((riser) => riser.segmentId)
-      : [],
-  );
+      : []),
+    ...(recommendedInternalAlternative?.changes.map(
+      (change) => change.segmentId,
+    ) ?? []),
+  ]);
   const analysisDiagnostics = analysis.diagnostics.filter(
     (diagnostic) =>
       !diagnosticResolvedByAutomaticRiser(
@@ -480,7 +545,7 @@ function createProfessionalDistributionHeightProposals(params: {
           ...sector,
           neededData: null,
           reason:
-            "El cambio entre la cota terminal confirmada y la distribucion queda resuelto por un montante automatico ortogonal.",
+            "El cambio entre cotas conocidas queda resuelto por un montante automatico ortogonal propuesto.",
           status: "resolved_by_proposal" as const,
         }
       : sector,
@@ -554,6 +619,7 @@ function createProfessionalDistributionHeightProposals(params: {
       ...analysisDiagnostics,
       ...diagnostics,
     ],
+    internalLevelChanges: coordinated.internalLevelChanges,
     mainRoute: params.mainRouteSelection
       ? mainRouteResult(
           params.mainRouteSelection,
@@ -882,12 +948,14 @@ function simulateCoordinatedHeightProposals(params: {
   proposals: RouteHeightProposal[];
 }):
   | {
+      internalLevelChanges: RouteInternalLevelProposalEvaluation | null;
       ok: true;
       riserProposal: AutomaticRouteRiserProposal;
       simulation: RouteHeightProposalSimulation;
     }
   | {
       diagnostic: RouteHeightProposalDiagnostic;
+      internalLevelChanges: RouteInternalLevelProposalEvaluation | null;
       ok: false;
       riserProposal: AutomaticRouteRiserProposal;
     } {
@@ -929,6 +997,7 @@ function simulateCoordinatedHeightProposals(params: {
           ),
           message: `Fallo la simulacion coordinada en ${proposal.targetKey}: ${edit.message}`,
         },
+        internalLevelChanges: null,
         ok: false,
         riserProposal,
       };
@@ -961,13 +1030,40 @@ function simulateCoordinatedHeightProposals(params: {
           diagnostic.segmentId ? [`segment:${diagnostic.segmentId}`] : [],
         ),
       },
+      internalLevelChanges: null,
+      ok: false,
+      riserProposal,
+    };
+  }
+
+  const boundaryNetwork =
+    riserProposal.status === "ready" ? riserProposal.network : network;
+  const internalLevelChanges = evaluateInternalLevelChanges({
+    baseline: params.baseline,
+    equipment,
+    network: boundaryNetwork,
+    params: params.params,
+  });
+  const recommendedInternalAlternative =
+    internalLevelChanges.alternatives.find(
+      (alternative) =>
+        alternative.id === internalLevelChanges.recommendedAlternativeId,
+    ) ?? null;
+
+  if (
+    internalLevelChanges.requiredChangeCount > 0 &&
+    !recommendedInternalAlternative
+  ) {
+    return {
+      diagnostic: internalLevelChangeDiagnostic(internalLevelChanges),
+      internalLevelChanges,
       ok: false,
       riserProposal,
     };
   }
 
   const simulatedNetwork =
-    riserProposal.status === "ready" ? riserProposal.network : network;
+    recommendedInternalAlternative?.network ?? boundaryNetwork;
 
   const candidate = calculateHeightProposalTechnicalTree(params.params, {
     equipment,
@@ -990,12 +1086,119 @@ function simulateCoordinatedHeightProposals(params: {
         referenceTargetKeys: [],
         targetKeys: params.proposals.map((proposal) => proposal.targetKey),
       },
+      internalLevelChanges,
       ok: false,
       riserProposal,
     };
   }
 
-  return { ok: true, riserProposal, simulation };
+  return { internalLevelChanges, ok: true, riserProposal, simulation };
+}
+
+function evaluateInternalLevelChanges(params: {
+  baseline: TechnicalCalculationResult;
+  equipment: WorkbenchEquipment[];
+  network: ManualRouteNetwork;
+  params: RouteHeightProposalEngineParams;
+}): RouteInternalLevelProposalEvaluation {
+  const generated = generateAutomaticInternalLevelChanges({
+    equipment: params.equipment,
+    network: params.network,
+    restrictions: params.params.restrictions,
+    scaleMetersPerSourceUnit: params.params.scaleMetersPerSourceUnit,
+  });
+  const alternatives = generated.alternatives
+    .map<RouteInternalLevelAlternativeEvaluation>((alternative) => {
+      const result = calculateHeightProposalTechnicalTree(params.params, {
+        equipment: params.equipment,
+        network: alternative.network,
+      });
+      const simulation = createHeightProposalSimulation({
+        after: {
+          equipment: params.equipment,
+          network: alternative.network,
+          result,
+        },
+        baseline: params.baseline,
+        params: params.params,
+      });
+
+      return {
+        ...alternative,
+        score: {
+          accessoryCount: simulation.accessories.physicalCountAfter,
+          addedCalculationIssueCount:
+            simulation.calculations.addedIssues.length,
+          directionChangeCount: alternative.metrics.directionChangeCount,
+          physicalLengthMeters: simulation.lengths.totalAfterMeters,
+          pipeLengthMeters: simulation.materials.pipeLengthAfterMeters,
+          topologyChanged: simulation.connections.topologyChanged,
+        },
+        simulation,
+        technicallyViable:
+          simulation.calculations.validationsPreserved &&
+          !simulation.connections.topologyChanged,
+      };
+    })
+    .sort(compareInternalLevelAlternatives);
+  const recommended = alternatives.find(
+    (alternative) => alternative.technicallyViable,
+  );
+
+  return {
+    ...generated,
+    alternatives,
+    recommendedAlternativeId: recommended?.id ?? null,
+    status:
+      generated.status === "ready" && !recommended
+        ? "invalid"
+        : generated.status,
+  };
+}
+
+function compareInternalLevelAlternatives(
+  first: RouteInternalLevelAlternativeEvaluation,
+  second: RouteInternalLevelAlternativeEvaluation,
+) {
+  return (
+    Number(second.technicallyViable) - Number(first.technicallyViable) ||
+    Number(first.score.topologyChanged) - Number(second.score.topologyChanged) ||
+    first.score.addedCalculationIssueCount -
+      second.score.addedCalculationIssueCount ||
+    first.score.directionChangeCount - second.score.directionChangeCount ||
+    first.score.accessoryCount - second.score.accessoryCount ||
+    nullableNumberForRanking(first.score.physicalLengthMeters) -
+      nullableNumberForRanking(second.score.physicalLengthMeters) ||
+    first.score.pipeLengthMeters - second.score.pipeLengthMeters ||
+    first.id.localeCompare(second.id)
+  );
+}
+
+function internalLevelChangeDiagnostic(
+  proposal: RouteInternalLevelProposalEvaluation,
+): RouteHeightProposalDiagnostic {
+  const blocking = proposal.diagnostics.find(
+    (diagnostic) => diagnostic.severity === "blocking",
+  );
+
+  return {
+    code: "internal_level_changes_incomplete",
+    message:
+      proposal.status === "invalid"
+        ? "Las ubicaciones internas evaluadas no conservan una geometria y simulacion tecnica validas."
+        : "No hay una ubicacion interna justificable con los datos actualmente disponibles.",
+    neededData:
+      blocking?.neededData ??
+      "Defina profesionalmente el nodo o vertice del cambio de nivel y verifique sus interferencias tridimensionales.",
+    referenceTargetKeys: [],
+    targetKeys: proposal.diagnostics.flatMap((diagnostic) =>
+      diagnostic.sectorId ? [diagnostic.sectorId] : [],
+    ),
+  };
+}
+
+function nullableNumberForRanking(value: number | null) {
+  return value ?? Number.POSITIVE_INFINITY;
 }
 
 function simulateHeightProposal(params: {
