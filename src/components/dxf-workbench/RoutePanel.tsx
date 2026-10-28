@@ -19,6 +19,12 @@ import {
   routeProposalAcceptanceBlockReason,
   routeProposalCanBeAccepted,
 } from "@/lib/routing/proposalAcceptance";
+import type {
+  CoordinatedInstallationInvalidity,
+  CoordinatedInstallationPendingDecision,
+  CoordinatedInstallationProposalStatus,
+  CoordinatedInstallationWarning,
+} from "@/lib/routing/coordinatedInstallationProposal";
 
 type RouteApplianceStatus = {
   equipment: WorkbenchEquipment;
@@ -28,6 +34,10 @@ type RouteApplianceStatus = {
 
 type RoutePanelProps = {
   applianceStatuses: RouteApplianceStatus[];
+  coordinatedInvalidities: CoordinatedInstallationInvalidity[];
+  coordinatedPendingDecisions: CoordinatedInstallationPendingDecision[];
+  coordinatedStatus: CoordinatedInstallationProposalStatus | null;
+  coordinatedWarnings: CoordinatedInstallationWarning[];
   connectedCount: number;
   derivationCount: number;
   draft: RouteDraft | null;
@@ -83,6 +93,10 @@ type RoutePanelProps = {
 
 export function RoutePanel({
   applianceStatuses,
+  coordinatedInvalidities,
+  coordinatedPendingDecisions,
+  coordinatedStatus,
+  coordinatedWarnings,
   connectedCount,
   derivationCount,
   draft,
@@ -218,6 +232,7 @@ export function RoutePanel({
         <RouteMainFlow
           applianceStatuses={applianceStatuses}
           canGenerateProposal={canGenerateProposal}
+          coordinatedStatus={coordinatedStatus}
           connectedCount={connectedCount}
           isGeneratingProposal={isGeneratingProposal}
           pendingStatuses={pendingStatuses}
@@ -440,6 +455,10 @@ export function RoutePanel({
         {proposal ? (
           <ProposalSummary
             applianceStatuses={applianceStatuses}
+            coordinatedInvalidities={coordinatedInvalidities}
+            coordinatedPendingDecisions={coordinatedPendingDecisions}
+            coordinatedStatus={coordinatedStatus}
+            coordinatedWarnings={coordinatedWarnings}
             isOutdated={proposalOutdated}
             proposal={proposal}
             onAcceptProposal={onAcceptProposal}
@@ -545,6 +564,7 @@ export function RoutePanel({
 function RouteMainFlow({
   applianceStatuses,
   canGenerateProposal,
+  coordinatedStatus,
   connectedCount,
   isGeneratingProposal,
   pendingStatuses,
@@ -560,6 +580,7 @@ function RouteMainFlow({
 }: {
   applianceStatuses: RouteApplianceStatus[];
   canGenerateProposal: boolean;
+  coordinatedStatus: CoordinatedInstallationProposalStatus | null;
   connectedCount: number;
   isGeneratingProposal: boolean;
   pendingStatuses: RouteApplianceStatus[];
@@ -593,11 +614,13 @@ function RouteMainFlow({
   }
 
   if (routeState === "proposal" && proposal) {
-    const canAcceptProposal = routeProposalCanBeAccepted(
-      proposal,
-      totalAppliances,
-      proposalOutdated,
-    );
+    const canAcceptProposal =
+      coordinatedStatus === null &&
+      routeProposalCanBeAccepted(
+        proposal,
+        totalAppliances,
+        proposalOutdated,
+      );
     const acceptBlockReason = routeProposalAcceptanceBlockReason(
       proposal,
       totalAppliances,
@@ -625,7 +648,13 @@ function RouteMainFlow({
               ? `✓ ${proposalConnectedCount} artefactos conectados`
               : `${proposalConnectedCount} de ${totalAppliances} artefactos conectados`}
           </div>
-          <div>{canAcceptProposal ? "✓ Recorrido válido" : "Recorrido a revisar"}</div>
+          <div>
+            {coordinatedStatus
+              ? `Propuesta coordinada ${coordinatedProposalStatusLabel(coordinatedStatus)}`
+              : canAcceptProposal
+                ? "✓ Recorrido válido"
+                : "Recorrido a revisar"}
+          </div>
         </div>
 
         {hasProblem ? (
@@ -641,13 +670,22 @@ function RouteMainFlow({
             {!canAcceptProposal && acceptBlockReason ? (
               <div>{acceptBlockReason}</div>
             ) : null}
+            {coordinatedStatus ? (
+              <div>
+                Visualizacion XY/Z activa. La edicion y aceptacion se habilitaran en 02C2.
+              </div>
+            ) : null}
           </div>
         ) : null}
 
         <div className="mt-2 grid grid-cols-2 gap-1">
           <button
             className="rounded border border-[var(--line)] bg-white px-2 py-1 hover:border-[var(--accent)] disabled:text-[var(--muted)]"
-            disabled={proposalOutdated || proposal.segmentCount === 0}
+            disabled={
+              coordinatedStatus !== null ||
+              proposalOutdated ||
+              proposal.segmentCount === 0
+            }
             type="button"
             onClick={onEditProposal}
           >
@@ -713,6 +751,10 @@ function RouteMainFlow({
 
 function ProposalSummary({
   applianceStatuses,
+  coordinatedInvalidities,
+  coordinatedPendingDecisions,
+  coordinatedStatus,
+  coordinatedWarnings,
   isOutdated,
   proposal,
   onAcceptProposal,
@@ -720,6 +762,10 @@ function ProposalSummary({
   onGenerateProposal,
 }: {
   applianceStatuses: RouteApplianceStatus[];
+  coordinatedInvalidities: CoordinatedInstallationInvalidity[];
+  coordinatedPendingDecisions: CoordinatedInstallationPendingDecision[];
+  coordinatedStatus: CoordinatedInstallationProposalStatus | null;
+  coordinatedWarnings: CoordinatedInstallationWarning[];
   isOutdated: boolean;
   proposal: AutomaticRouteProposal;
   onAcceptProposal: () => void;
@@ -733,11 +779,13 @@ function ProposalSummary({
           ?.equipment.name ?? equipmentId,
     )
     .sort();
-  const canAcceptProposal = routeProposalCanBeAccepted(
-    proposal,
-    applianceStatuses.length,
-    isOutdated,
-  );
+  const canAcceptProposal =
+    coordinatedStatus === null &&
+    routeProposalCanBeAccepted(
+      proposal,
+      applianceStatuses.length,
+      isOutdated,
+    );
   const acceptBlockReason = routeProposalAcceptanceBlockReason(
     proposal,
     applianceStatuses.length,
@@ -751,7 +799,9 @@ function ProposalSummary({
           {isOutdated ? "Propuesta desactualizada" : "Resumen"}
         </div>
         <span className="font-mono text-[10px] uppercase text-[var(--muted)]">
-          {proposal.status}
+          {coordinatedStatus
+            ? coordinatedProposalStatusLabel(coordinatedStatus)
+            : proposal.status}
         </span>
       </div>
 
@@ -790,6 +840,40 @@ function ProposalSummary({
         </div>
       ))}
 
+      {coordinatedPendingDecisions.map((pending) => (
+        <div
+          className="mt-2 rounded border border-[#f1d28a] bg-[#fffaf0] px-2 py-1 text-[var(--warning)]"
+          key={`${pending.code}:${pending.referenceIds.join(":")}`}
+        >
+          Pendiente: {pending.message}
+        </div>
+      ))}
+
+      {coordinatedInvalidities.map((invalidity) => (
+        <div
+          className="mt-2 rounded border border-red-200 bg-red-50 px-2 py-1 text-red-800"
+          key={`${invalidity.code}:${invalidity.referenceIds.join(":")}`}
+        >
+          Invalida: {invalidity.message}
+        </div>
+      ))}
+
+      {coordinatedWarnings.map((warning) => (
+        <div
+          className="mt-2 rounded border border-[#f1d28a] bg-[#fffaf0] px-2 py-1 text-[var(--warning)]"
+          key={`${warning.code}:${warning.referenceIds.join(":")}`}
+        >
+          {warning.message}
+        </div>
+      ))}
+
+      {coordinatedStatus ? (
+        <div className="mt-2 rounded border border-[#f1d28a] bg-[#fffaf0] px-2 py-1 text-[var(--warning)]">
+          Aceptacion geometrica no implica aprobacion tecnica. Las interferencias
+          constructivas 3D permanecen sin verificar.
+        </div>
+      ) : null}
+
       {isOutdated ? (
         <div className="mt-2 rounded border border-[#f1d28a] bg-[#fffaf0] px-2 py-1 text-[var(--warning)]">
           Cambiaron equipos, escala o restricciones. Regenera antes de aceptar.
@@ -825,8 +909,27 @@ function ProposalSummary({
           {acceptBlockReason}
         </div>
       ) : null}
+      {coordinatedStatus ? (
+        <div className="mt-2 text-[10px] text-[var(--muted)]">
+          La aceptacion definitiva y la edicion visual corresponden a 02C2.
+        </div>
+      ) : null}
     </section>
   );
+}
+
+function coordinatedProposalStatusLabel(
+  status: CoordinatedInstallationProposalStatus,
+) {
+  if (status === "complete") {
+    return "completa";
+  }
+
+  if (status === "incomplete") {
+    return "incompleta";
+  }
+
+  return "invalida";
 }
 
 function RoutePhysicalEditControls({
