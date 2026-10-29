@@ -18,7 +18,9 @@ import type {
 import type { DiameterTransitionDecision } from "@/lib/calculation/diameterTransitionProposals";
 import type { AdoptedDiameterDecision } from "@/lib/calculation/professionalDiameterAdoption";
 import type { AccessoryProposalDecision } from "@/lib/routing/routeAccessoryProposals";
+import type { CoordinatedInstallationDraftSnapshot } from "@/lib/routing/coordinatedInstallationDraft";
 import type { SectionRegistration } from "@/lib/sections/registration";
+import type { ProfessionalDistributionHeight } from "@/lib/sections/routeHeightProposals";
 import type {
   ClassificationProposal,
   ConfirmedClassification,
@@ -82,10 +84,17 @@ export type PersistedSectionPlanLink = {
   registration?: SectionRegistration;
 };
 
+export type PersistedCoordinatedRouteProposal = {
+  draft: CoordinatedInstallationDraftSnapshot;
+  planBaseId: string;
+  professionalDistributionHeight: ProfessionalDistributionHeight | null;
+};
+
 export type PersistedWorkbenchProject = {
   version: typeof WORKBENCH_PROJECT_VERSION;
   activeBaseId: string | null;
   bases: PersistedWorkbenchBase[];
+  coordinatedRouteProposal: PersistedCoordinatedRouteProposal | null;
   nextSectionNumber: number;
   routeProposal: AutomaticRouteProposal | null;
   routeProposalMarginInput: string;
@@ -143,6 +152,7 @@ const EMPTY_CALIBRATION_DRAFT: PendingCalibration = {
 export function createPersistedWorkbenchProject(params: {
   activeBaseId: string | null;
   bases: PersistableWorkbenchBase[];
+  coordinatedRouteProposal?: PersistedCoordinatedRouteProposal | null;
   nextSectionNumber: number;
   routeProposal: AutomaticRouteProposal | null;
   routeProposalMarginInput: string;
@@ -150,6 +160,11 @@ export function createPersistedWorkbenchProject(params: {
   sectionPlanLinks: PersistedSectionPlanLink[];
 }): PersistedWorkbenchProject {
   const baseIds = new Set(params.bases.map((base) => base.id));
+  const coordinatedRouteProposal =
+    params.coordinatedRouteProposal &&
+    baseIds.has(params.coordinatedRouteProposal.planBaseId)
+      ? params.coordinatedRouteProposal
+      : null;
 
   return {
     version: WORKBENCH_PROJECT_VERSION,
@@ -158,8 +173,9 @@ export function createPersistedWorkbenchProject(params: {
         ? params.activeBaseId
         : params.bases[0]?.id ?? null,
     bases: params.bases.map(createPersistedWorkbenchBase),
+    coordinatedRouteProposal,
     nextSectionNumber: Math.max(1, Math.trunc(params.nextSectionNumber)),
-    routeProposal: params.routeProposal,
+    routeProposal: coordinatedRouteProposal ? null : params.routeProposal,
     routeProposalMarginInput: params.routeProposalMarginInput,
     routeProposalMode: params.routeProposalMode,
     sectionPlanLinks: params.sectionPlanLinks,
@@ -170,6 +186,7 @@ export function hasPersistedWorkbenchContent(project: PersistedWorkbenchProject)
   return (
     project.bases.length > 0 ||
     project.sectionPlanLinks.length > 0 ||
+    project.coordinatedRouteProposal !== null ||
     project.routeProposal !== null
   );
 }
@@ -344,6 +361,11 @@ function parseProjectRecord(
 
   const bases = value.bases.map(parseWorkbenchBase);
   const sectionPlanLinks = value.sectionPlanLinks.map(parseSectionPlanLink);
+  const coordinatedRouteProposal =
+    value.coordinatedRouteProposal === undefined ||
+    value.coordinatedRouteProposal === null
+      ? null
+      : parseCoordinatedRouteProposal(value.coordinatedRouteProposal);
 
   if (bases.some((base) => base === null) || sectionPlanLinks.some((link) => link === null)) {
     return null;
@@ -365,11 +387,40 @@ function parseProjectRecord(
     version: WORKBENCH_PROJECT_VERSION,
     activeBaseId,
     bases: bases as PersistedWorkbenchBase[],
+    coordinatedRouteProposal:
+      coordinatedRouteProposal &&
+      baseIds.has(coordinatedRouteProposal.planBaseId)
+        ? coordinatedRouteProposal
+        : null,
     nextSectionNumber: Math.max(1, Math.trunc(value.nextSectionNumber)),
-    routeProposal: value.routeProposal as AutomaticRouteProposal | null,
+    routeProposal: coordinatedRouteProposal
+      ? null
+      : (value.routeProposal as AutomaticRouteProposal | null),
     routeProposalMarginInput: value.routeProposalMarginInput,
     routeProposalMode: value.routeProposalMode,
     sectionPlanLinks: sectionPlanLinks as PersistedSectionPlanLink[],
+  };
+}
+
+function parseCoordinatedRouteProposal(
+  value: unknown,
+): PersistedCoordinatedRouteProposal | null {
+  if (
+    !isRecord(value) ||
+    !isString(value.planBaseId) ||
+    !isOptionalProfessionalDistributionHeight(
+      value.professionalDistributionHeight,
+    ) ||
+    !isCoordinatedInstallationDraftSnapshot(value.draft)
+  ) {
+    return null;
+  }
+
+  return {
+    draft: value.draft,
+    planBaseId: value.planBaseId,
+    professionalDistributionHeight:
+      value.professionalDistributionHeight ?? null,
   };
 }
 
@@ -1061,6 +1112,51 @@ function isRouteNetwork(value: unknown): value is ManualRouteNetwork {
         (segment.accessories === undefined ||
           isRouteAccessoryArray(segment.accessories)),
     )
+  );
+}
+
+function isCoordinatedInstallationDraftSnapshot(
+  value: unknown,
+): value is CoordinatedInstallationDraftSnapshot {
+  return (
+    isRecord(value) &&
+    isString(value.baseFingerprint) &&
+    isString(value.draftFingerprint) &&
+    isCoordinatedInstallationWarningArray(value.inheritedWarnings) &&
+    isEquipmentArray(value.proposalDraftEquipment) &&
+    isRouteNetwork(value.proposalDraftNetwork) &&
+    isFiniteNumber(value.revision) &&
+    value.revision >= 0 &&
+    isString(value.sourceProposalId)
+  );
+}
+
+function isCoordinatedInstallationWarningArray(value: unknown) {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (warning) =>
+        isRecord(warning) &&
+        (warning.code === "architectural_reference_unverified" ||
+          warning.code === "bounded_internal_alternatives" ||
+          warning.code === "unverified_3d_clearance") &&
+        isString(warning.message) &&
+        Array.isArray(warning.referenceIds) &&
+        warning.referenceIds.every(isString),
+    )
+  );
+}
+
+function isOptionalProfessionalDistributionHeight(
+  value: unknown,
+): value is ProfessionalDistributionHeight | null | undefined {
+  return (
+    value === undefined ||
+    value === null ||
+    (isRecord(value) &&
+      isFiniteNumber(value.heightMeters) &&
+      value.reference === "project_datum" &&
+      value.source === "professional")
   );
 }
 

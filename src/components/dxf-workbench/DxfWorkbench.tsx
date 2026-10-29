@@ -168,9 +168,11 @@ import {
 } from "@/lib/routing/coordinatedInstallationProposal";
 import {
   acceptCoordinatedInstallationDraft,
+  createCoordinatedInstallationDraftSnapshot,
   discardCoordinatedInstallationDraft,
   editCoordinatedInstallationDraft,
   regenerateCoordinatedInstallationDraft,
+  restoreCoordinatedInstallationDraft,
   type CoordinatedInstallationDraft,
   type CoordinatedInstallationDraftEdit,
 } from "@/lib/routing/coordinatedInstallationDraft";
@@ -237,6 +239,7 @@ import {
   applySectionRouteHeightEdit,
   type SectionRouteHeightTarget,
 } from "@/lib/sections/routeHeightEditing";
+import type { ProfessionalDistributionHeight } from "@/lib/sections/routeHeightProposals";
 import {
   collectStandardTechnicalReviewGeometryPendingItems,
   createStandardTechnicalAxonometricView,
@@ -273,6 +276,7 @@ import {
   createPersistedWorkbenchProject,
   loadPersistedWorkbenchProject,
   savePersistedWorkbenchProject,
+  type PersistedCoordinatedRouteProposal,
   type PersistedSourceCalibrationState,
   type PersistedWorkbenchBase,
   type PersistedWorkbenchProject,
@@ -388,6 +392,7 @@ type SectionRouteHeightEditorState = {
 type CoordinatedRouteProposalSession = {
   draft: CoordinatedInstallationDraft;
   planBaseId: string;
+  professionalDistributionHeight: ProfessionalDistributionHeight | null;
   proposal: CoordinatedInstallationProposal;
 };
 
@@ -525,6 +530,7 @@ export function DxfWorkbench() {
   const basesRef = useRef(bases);
   const highlightTimerRef = useRef<number | null>(null);
   const registrationHighlightTimerRef = useRef<number | null>(null);
+  const persistedProjectSignatureRef = useRef<string | null>(null);
 
   useEffect(() => {
     basesRef.current = bases;
@@ -551,18 +557,34 @@ export function DxfWorkbench() {
 
     if (result.status === "loaded") {
       const restoredProject = restorePersistedWorkbenchProject(result.project);
+      const restoredCoordinatedProposal =
+        restorePersistedCoordinatedRouteProposal(
+          result.project.coordinatedRouteProposal,
+          restoredProject.bases,
+          result.project.routeProposalMarginInput,
+        );
 
       setBases(restoredProject.bases);
       setActiveBaseId(restoredProject.activeBaseId);
       setNextSectionNumber(result.project.nextSectionNumber);
       setSectionPlanLinks(result.project.sectionPlanLinks);
       setRouteProposal(restoredProject.routeProposal);
+      setCoordinatedRouteProposal(restoredCoordinatedProposal.session);
       setRouteProposalMode(
-        restoredProject.routeProposal ? result.project.routeProposalMode : null,
+        restoredProject.routeProposal
+          ? result.project.routeProposalMode
+          : restoredCoordinatedProposal.session
+            ? "automatic"
+            : null,
       );
       setRouteProposalMarginInput(result.project.routeProposalMarginInput);
 
-      if (restoredProject.hasPdfPlaceholders) {
+      if (restoredCoordinatedProposal.message) {
+        setPersistenceNotice({
+          message: restoredCoordinatedProposal.message,
+          tone: "warning",
+        });
+      } else if (restoredProject.hasPdfPlaceholders) {
         setPersistenceNotice({
           message:
             "Los PDF locales quedan como referencia y deben volver a cargarse para ver la pagina original.",
@@ -592,23 +614,35 @@ export function DxfWorkbench() {
     }
 
     const timer = window.setTimeout(() => {
-      const result = savePersistedWorkbenchProject(
-        createPersistedWorkbenchProject({
-          activeBaseId,
-          bases,
-          nextSectionNumber,
-          routeProposal,
-          routeProposalMarginInput,
-          routeProposalMode,
-          sectionPlanLinks,
-        }),
-      );
+      const project = createPersistedWorkbenchProject({
+        activeBaseId,
+        bases,
+        coordinatedRouteProposal: coordinatedRouteProposal
+          ? createPersistedCoordinatedRouteProposal(
+              coordinatedRouteProposal,
+            )
+          : null,
+        nextSectionNumber,
+        routeProposal,
+        routeProposalMarginInput,
+        routeProposalMode,
+        sectionPlanLinks,
+      });
+      const signature = JSON.stringify(project);
+
+      if (signature === persistedProjectSignatureRef.current) {
+        return;
+      }
+
+      const result = savePersistedWorkbenchProject(project);
 
       if (!result.ok) {
         setPersistenceNotice({
           message: `No se pudo guardar el proyecto local. ${result.error}`,
           tone: "error",
         });
+      } else {
+        persistedProjectSignatureRef.current = signature;
       }
     }, 400);
 
@@ -616,6 +650,7 @@ export function DxfWorkbench() {
   }, [
     activeBaseId,
     bases,
+    coordinatedRouteProposal,
     isPersistenceReady,
     nextSectionNumber,
     routeProposal,
@@ -1040,6 +1075,7 @@ export function DxfWorkbench() {
             planBase,
             planClassificationIndex,
             routeProposalMarginMeters,
+            coordinatedRouteProposal?.professionalDistributionHeight ?? null,
           )
         : null,
     [
@@ -1057,6 +1093,7 @@ export function DxfWorkbench() {
       planBase?.visual.activePdfPageNumber,
       planClassificationIndex,
       routeProposalMarginMeters,
+      coordinatedRouteProposal?.professionalDistributionHeight,
     ],
   );
   const coordinatedProposalFingerprint = useMemo(
@@ -1092,6 +1129,7 @@ export function DxfWorkbench() {
             pdfPageNumber: coordinatedProposalSnapshot?.pdfPageNumber,
             planBaseId: activeCoordinatedRouteProposal.planBaseId,
             proposal: activeCoordinatedRouteProposal.proposal,
+            scaleMetersPerSourceUnit: planScaleMetersPerSourceUnit,
             visualization: coordinatedVisualization,
           })
         : null,
@@ -1099,6 +1137,7 @@ export function DxfWorkbench() {
       activeCoordinatedRouteProposal,
       coordinatedProposalSnapshot?.pdfPageNumber,
       coordinatedVisualization,
+      planScaleMetersPerSourceUnit,
     ],
   );
   const routePanelProposalMetrics = useMemo(() => {
@@ -5453,6 +5492,7 @@ export function DxfWorkbench() {
         plan,
         planClassificationIndex,
         routeProposalMarginMeters,
+        activeCoordinatedRouteProposal?.professionalDistributionHeight ?? null,
       );
       const draftResult = regenerateCoordinatedInstallationDraft(snapshot);
 
@@ -5474,6 +5514,8 @@ export function DxfWorkbench() {
       setCoordinatedRouteProposal({
         draft: draftResult.draft,
         planBaseId: plan.id,
+        professionalDistributionHeight:
+          snapshot.professionalDistributionHeight ?? null,
         proposal,
       });
       setRouteProposalMode("automatic");
@@ -8399,6 +8441,75 @@ function restorePersistedWorkbenchProject(project: PersistedWorkbenchProject): {
   };
 }
 
+function createPersistedCoordinatedRouteProposal(
+  session: CoordinatedRouteProposalSession,
+): PersistedCoordinatedRouteProposal {
+  return {
+    draft: createCoordinatedInstallationDraftSnapshot(session.draft),
+    planBaseId: session.planBaseId,
+    professionalDistributionHeight:
+      session.professionalDistributionHeight,
+  };
+}
+
+function restorePersistedCoordinatedRouteProposal(
+  persisted: PersistedCoordinatedRouteProposal | null,
+  bases: WorkbenchBase[],
+  routeProposalMarginInput: string,
+): {
+  message: string | null;
+  session: CoordinatedRouteProposalSession | null;
+} {
+  if (!persisted) {
+    return { message: null, session: null };
+  }
+
+  const plan = bases.find(
+    (base) => base.id === persisted.planBaseId && base.type === "plan",
+  );
+  const marginMeters = parseRouteProposalMargin(routeProposalMarginInput);
+
+  if (!plan || marginMeters === null) {
+    return {
+      message:
+        "La propuesta coordinada guardada no pudo recuperarse y fue descartada.",
+      session: null,
+    };
+  }
+
+  const snapshot = createCoordinatedProposalSnapshot(
+    plan,
+    buildClassificationIndex(plan.semanticAssignments),
+    marginMeters,
+    persisted.professionalDistributionHeight,
+  );
+  const restored = restoreCoordinatedInstallationDraft({
+    persisted: persisted.draft,
+    snapshot,
+  });
+
+  if (!restored.ok) {
+    return {
+      message:
+        "La propuesta coordinada guardada era invalida y fue descartada sin modificar la instalacion confirmada.",
+      session: null,
+    };
+  }
+
+  return {
+    message: restored.outdated
+      ? "La propuesta coordinada recuperada esta desactualizada. Regenerala antes de editar o aceptar."
+      : null,
+    session: {
+      draft: restored.draft,
+      planBaseId: persisted.planBaseId,
+      professionalDistributionHeight:
+        persisted.professionalDistributionHeight,
+      proposal: restored.proposal,
+    },
+  };
+}
+
 function restorePersistedWorkbenchBase(
   base: PersistedWorkbenchBase,
 ): WorkbenchBase {
@@ -10646,6 +10757,7 @@ function createCoordinatedProposalSnapshot(
   plan: WorkbenchBase,
   classificationIndex: ClassificationIndex,
   marginMeters: number,
+  professionalDistributionHeight: ProfessionalDistributionHeight | null = null,
 ): CoordinatedInstallationSnapshot {
   const pdfPageNumber = routeProposalPdfPageNumber(plan);
   const architecture = architecturalRouteContextForPlan(plan, pdfPageNumber);
@@ -10662,7 +10774,7 @@ function createCoordinatedProposalSnapshot(
     pdfPageNumber,
     pipeSystem: SIGAS_PIPE_SYSTEM,
     planBaseId: plan.id,
-    professionalDistributionHeight: null,
+    professionalDistributionHeight,
     projectGas: DEFAULT_PROJECT_GAS_CONFIG,
     restrictions: architecture.restrictions,
     routeAccessoryProposalDecisions:

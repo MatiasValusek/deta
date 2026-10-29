@@ -10,10 +10,12 @@ import {
 import type { ManualRouteNetwork } from "@/lib/routing/types";
 import {
   acceptCoordinatedInstallationDraft,
+  createCoordinatedInstallationDraftSnapshot,
   createCoordinatedInstallationDraft,
   discardCoordinatedInstallationDraft,
   editCoordinatedInstallationDraft,
   regenerateCoordinatedInstallationDraft,
+  restoreCoordinatedInstallationDraft,
   type CoordinatedInstallationDraft,
 } from "./coordinatedInstallationDraft";
 import {
@@ -421,6 +423,129 @@ export function runCoordinatedInstallationDraftVerifications() {
       });
       assert(accepted.ok, accepted.ok ? "" : accepted.message);
       assertEqual(accepted.update.warnings.length, 1);
+    },
+  );
+
+  verify(
+    results,
+    "02D-A recupera un borrador editado y recalcula estado y pendientes",
+    () => {
+      const snapshot = snapshotWithAccessoryDecision();
+      const confirmed = JSON.stringify(snapshot.network);
+      const proposal = createCoordinatedInstallationProposal(snapshot);
+      const initial = requiredDraft(
+        createCoordinatedInstallationDraft({ proposal, snapshot }),
+      );
+      const edited = requiredEditedDraft(initial, snapshot, {
+        kind: "move_node",
+        nodeId: "B",
+        point: { x: 5, y: 0 },
+        tolerance: EPSILON,
+      });
+      const persisted = createCoordinatedInstallationDraftSnapshot(edited);
+      const recovered = restoreCoordinatedInstallationDraft({
+        persisted,
+        snapshot,
+      });
+
+      assert(recovered.ok, recovered.ok ? "" : recovered.message);
+      assertEqual(recovered.outdated, false);
+      assertEqual(recovered.draft.revision, edited.revision);
+      assertEqual(recovered.draft.evaluation.status, "incomplete");
+      assert(
+        recovered.draft.evaluation.pendingDecisions.some(
+          (pending) =>
+            pending.code === "accessory_decision_reference_invalid",
+        ),
+        "No se reconstruyo el pendiente tecnico.",
+      );
+      assertEqual(
+        JSON.stringify(recovered.draft.proposalDraftNetwork),
+        JSON.stringify(edited.proposalDraftNetwork),
+      );
+      assertEqual(JSON.stringify(snapshot.network), confirmed);
+    },
+  );
+
+  verify(
+    results,
+    "02D-A conserva visible un borrador externo desactualizado y bloquea aceptacion",
+    () => {
+      const snapshot = editableSnapshot();
+      const confirmed = JSON.stringify(snapshot.network);
+      const proposal = createCoordinatedInstallationProposal(snapshot);
+      const draft = requiredDraft(
+        createCoordinatedInstallationDraft({ proposal, snapshot }),
+      );
+      const changedSnapshot = {
+        ...snapshot,
+        marginMeters: snapshot.marginMeters + 0.25,
+      };
+      const recovered = restoreCoordinatedInstallationDraft({
+        persisted: createCoordinatedInstallationDraftSnapshot(draft),
+        snapshot: changedSnapshot,
+      });
+
+      assert(recovered.ok, recovered.ok ? "" : recovered.message);
+      assertEqual(recovered.outdated, true);
+      const acceptance = acceptCoordinatedInstallationDraft({
+        draft: recovered.draft,
+        snapshot: changedSnapshot,
+      });
+      assertEqual(acceptance.ok, false);
+      if (!acceptance.ok) {
+        assertEqual(acceptance.code, "proposal_outdated");
+      }
+      assertEqual(JSON.stringify(snapshot.network), confirmed);
+    },
+  );
+
+  verify(
+    results,
+    "02D-A rechaza datos guardados alterados y no restaura aprobacion 3D",
+    () => {
+      const snapshot = editableSnapshot();
+      const baseProposal = createCoordinatedInstallationProposal(snapshot);
+      const proposal: CoordinatedInstallationProposal = {
+        ...baseProposal,
+        warnings: [
+          ...baseProposal.warnings,
+          {
+            code: "unverified_3d_clearance",
+            message: "Despeje constructivo sin verificar.",
+            referenceIds: ["riser:persisted"],
+          },
+        ],
+      };
+      const draft = requiredDraft(
+        createCoordinatedInstallationDraft({ proposal, snapshot }),
+      );
+      const persisted = createCoordinatedInstallationDraftSnapshot(draft);
+      const recovered = restoreCoordinatedInstallationDraft({
+        persisted,
+        snapshot,
+      });
+
+      assert(recovered.ok, recovered.ok ? "" : recovered.message);
+      const withoutApproval = acceptCoordinatedInstallationDraft({
+        draft: recovered.draft,
+        snapshot,
+      });
+      assertEqual(withoutApproval.ok, false);
+      if (!withoutApproval.ok) {
+        assertEqual(withoutApproval.code, "technical_approval_required");
+      }
+
+      const altered = clone(persisted);
+      altered.draftFingerprint = "installation-candidate:altered";
+      const rejected = restoreCoordinatedInstallationDraft({
+        persisted: altered,
+        snapshot,
+      });
+      assertEqual(rejected.ok, false);
+      if (!rejected.ok) {
+        assertEqual(rejected.code, "draft_modified_outside_session");
+      }
     },
   );
 

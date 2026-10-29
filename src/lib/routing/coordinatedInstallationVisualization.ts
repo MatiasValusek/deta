@@ -7,6 +7,7 @@ import type { WorkbenchEquipment } from "@/lib/equipment/types";
 import {
   getConnectedApplianceEquipmentIds,
   getDerivationNodeIds,
+  totalRouteLengthSource,
 } from "@/lib/routing/network";
 import type { AccessoryProposal } from "@/lib/routing/routeAccessoryProposals";
 import type {
@@ -176,21 +177,27 @@ export function createCoordinatedInstallationPlanProposal(params: {
   pdfPageNumber?: number;
   planBaseId: string;
   proposal: CoordinatedInstallationProposal;
+  scaleMetersPerSourceUnit?: number | null;
   visualization: CoordinatedInstallationVisualization;
 }): AutomaticRouteProposal {
+  const fallbackLengthSource = totalRouteLengthSource(
+    params.visualization.network,
+    params.visualization.equipment,
+  );
+  const fallbackScale = params.scaleMetersPerSourceUnit ?? 0;
   const xyProposal: AutomaticRouteProposal = params.proposal.xyProposal ?? {
     architecturalWarnings: [],
     baseId: params.planBaseId,
     derivationCount: 0,
     diagnostics: [],
     id: `${params.proposal.id}:xy-unavailable`,
-    lengthMeters: 0,
-    lengthSource: 0,
+    lengthMeters: fallbackLengthSource * fallbackScale,
+    lengthSource: fallbackLengthSource,
     nodes: params.visualization.network.nodes,
     params: {
       fingerprint: params.proposal.fingerprint,
       marginMeters: 0,
-      scaleMetersPerSourceUnit: 0,
+      scaleMetersPerSourceUnit: fallbackScale,
     },
     pdfPageNumber: params.pdfPageNumber,
     reachedEquipmentIds: [],

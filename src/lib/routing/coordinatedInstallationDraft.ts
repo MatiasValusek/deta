@@ -96,6 +96,16 @@ export type CoordinatedInstallationDraft = {
   technicalState: CoordinatedInstallationDraftTechnicalState;
 };
 
+export type CoordinatedInstallationDraftSnapshot = {
+  baseFingerprint: string;
+  draftFingerprint: string;
+  inheritedWarnings: CoordinatedInstallationWarning[];
+  proposalDraftEquipment: WorkbenchEquipment[];
+  proposalDraftNetwork: ManualRouteNetwork;
+  revision: number;
+  sourceProposalId: string;
+};
+
 export type CoordinatedInstallationDraftFailureCode =
   | "draft_modified_outside_session"
   | "edit_rejected"
@@ -285,6 +295,92 @@ export function regenerateCoordinatedInstallationDraft(
   const result = createCoordinatedInstallationDraft({ proposal, snapshot });
 
   return result.ok ? { ...result, proposal } : result;
+}
+
+export function createCoordinatedInstallationDraftSnapshot(
+  draft: CoordinatedInstallationDraft,
+): CoordinatedInstallationDraftSnapshot {
+  return clone({
+    baseFingerprint: draft.baseFingerprint,
+    draftFingerprint: draft.draftFingerprint,
+    inheritedWarnings: draft.inheritedWarnings,
+    proposalDraftEquipment: draft.proposalDraftEquipment,
+    proposalDraftNetwork: draft.proposalDraftNetwork,
+    revision: draft.revision,
+    sourceProposalId: draft.sourceProposalId,
+  });
+}
+
+/**
+ * Restores only persisted source data and rebuilds every derived evaluation.
+ * A stale snapshot remains visible but cannot be edited or accepted until it
+ * is regenerated against the current confirmed installation.
+ */
+export function restoreCoordinatedInstallationDraft(params: {
+  persisted: CoordinatedInstallationDraftSnapshot;
+  snapshot: CoordinatedInstallationSnapshot;
+}):
+  | {
+      draft: CoordinatedInstallationDraft;
+      ok: true;
+      outdated: boolean;
+      proposal: CoordinatedInstallationProposal;
+    }
+  | CoordinatedInstallationDraftFailure {
+  const currentBaseFingerprint = createCoordinatedInstallationFingerprint(
+    params.snapshot,
+  );
+  const outdated =
+    currentBaseFingerprint !== params.persisted.baseFingerprint;
+  const evaluation = evaluateCoordinatedInstallationCandidate({
+    candidateEquipment: params.persisted.proposalDraftEquipment,
+    candidateNetwork: params.persisted.proposalDraftNetwork,
+    inheritedWarnings: params.persisted.inheritedWarnings,
+    snapshot: params.snapshot,
+  });
+
+  if (
+    !outdated &&
+    evaluation.fingerprint !== params.persisted.draftFingerprint
+  ) {
+    return {
+      code: "draft_modified_outside_session",
+      message:
+        "Los datos guardados del borrador no coinciden con su fingerprint.",
+      ok: false,
+    };
+  }
+
+  const draft = createDraftState({
+    baseFingerprint: params.persisted.baseFingerprint,
+    evaluation,
+    id: `${params.persisted.sourceProposalId}:draft`,
+    inheritedWarnings: params.persisted.inheritedWarnings,
+    lastEdit: null,
+    revision: Math.max(0, Math.trunc(params.persisted.revision)),
+    sourceProposalId: params.persisted.sourceProposalId,
+    technicalState: technicalStateFromSnapshot(params.snapshot),
+  });
+  const proposal: CoordinatedInstallationProposal = {
+    candidateEquipment: clone(evaluation.candidateEquipment),
+    candidateNetwork: clone(evaluation.candidateNetwork),
+    fingerprint: params.persisted.baseFingerprint,
+    heightResult: null,
+    id: params.persisted.sourceProposalId,
+    invalidities: clone(evaluation.invalidities),
+    justification: [
+      "Borrador coordinado recuperado y revalidado contra el proyecto actual.",
+    ],
+    materialTakeoff: clone(evaluation.materialTakeoff),
+    pendingDecisions: clone(evaluation.pendingDecisions),
+    simulation: null,
+    status: evaluation.status,
+    technicalResult: clone(evaluation.technicalResult),
+    warnings: clone(evaluation.warnings),
+    xyProposal: null,
+  };
+
+  return { draft, ok: true, outdated, proposal };
 }
 
 export function discardCoordinatedInstallationDraft(params: {
