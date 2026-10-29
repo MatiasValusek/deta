@@ -3,6 +3,11 @@ import type { Point2D } from "@/lib/geometry/types";
 import { pointZMeters } from "@/lib/geometry/height";
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
 import {
+  movePhysicalRouteNode,
+  movePhysicalRouteVertex,
+} from "@/lib/routing/physicalRouteEditing";
+import type { PhysicalRouteEditSelection } from "@/lib/routing/physicalRouteEditing";
+import {
   buildEquipmentIndex,
   findTerminalStartNodeByEquipment,
   getRouteNodeDegree,
@@ -10,7 +15,6 @@ import {
   resolveRouteSegments,
   routeSegmentPlanLegs,
 } from "@/lib/routing/network";
-import type { PhysicalRouteEditSelection } from "@/lib/routing/physicalRouteEditing";
 import type {
   AutomaticRouteProposal,
   ManualRouteNetwork,
@@ -50,6 +54,7 @@ type RouteOverlayProps = {
 };
 
 type RouteDragState = {
+  point: Point2D | null;
   pointerId: number;
   selection: Extract<
     PhysicalRouteEditSelection,
@@ -85,13 +90,36 @@ export function RouteOverlay({
     () => buildEquipmentIndex(equipment),
     [equipment],
   );
+  const previewNetwork = useMemo(() => {
+    if (!dragState?.point) {
+      return network;
+    }
+
+    const result =
+      dragState.selection.kind === "node"
+        ? movePhysicalRouteNode({
+            equipment,
+            network,
+            nodeId: dragState.selection.nodeId,
+            point: dragState.point,
+            tolerance: routeEditTolerance,
+          })
+        : movePhysicalRouteVertex({
+            network,
+            point: dragState.point,
+            segmentId: dragState.selection.segmentId,
+            vertexIndex: dragState.selection.vertexIndex,
+          });
+
+    return result.ok ? result.network : network;
+  }, [dragState, equipment, network, routeEditTolerance]);
   const resolvedSegments = useMemo(
-    () => resolveRouteSegments(network, equipment),
-    [equipment, network],
+    () => resolveRouteSegments(previewNetwork, equipment),
+    [equipment, previewNetwork],
   );
   const nodeById = useMemo(
-    () => new Map(network.nodes.map((node) => [node.id, node])),
-    [network],
+    () => new Map(previewNetwork.nodes.map((node) => [node.id, node])),
+    [previewNetwork],
   );
   const hasProposal = Boolean(proposal);
   const canEdit =
@@ -109,6 +137,7 @@ export function RouteOverlay({
     event.stopPropagation();
     onElementSelect(selection);
     setDragState({
+      point: null,
       pointerId: event.pointerId,
       selection,
     });
@@ -123,21 +152,12 @@ export function RouteOverlay({
     event.preventDefault();
     event.stopPropagation();
     const point = screenToSource(svgEventPoint(event));
-
-    if (dragState.selection.kind === "node") {
-      onNodeMove(dragState.selection.nodeId, point, routeEditTolerance);
-      return;
-    }
-
-    onVertexMove(
-      dragState.selection.segmentId,
-      dragState.selection.vertexIndex,
-      point,
-      routeEditTolerance,
+    setDragState((current) =>
+      current?.pointerId === event.pointerId ? { ...current, point } : current,
     );
   }
 
-  function handleDragEnd(event: React.PointerEvent<SVGGElement>) {
+  function handleDragCancel(event: React.PointerEvent<SVGGElement>) {
     if (!dragState || dragState.pointerId !== event.pointerId) {
       return;
     }
@@ -148,11 +168,47 @@ export function RouteOverlay({
     event.currentTarget.releasePointerCapture(event.pointerId);
   }
 
+  function handleDragEnd(event: React.PointerEvent<SVGGElement>) {
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    const completed = dragState;
+    setDragState(null);
+    event.currentTarget.releasePointerCapture(event.pointerId);
+
+    if (!completed.point) {
+      return;
+    }
+
+    if (completed.selection.kind === "node") {
+      onNodeMove(
+        completed.selection.nodeId,
+        completed.point,
+        routeEditTolerance,
+      );
+      return;
+    }
+
+    onVertexMove(
+      completed.selection.segmentId,
+      completed.selection.vertexIndex,
+      completed.point,
+      routeEditTolerance,
+    );
+  }
+
   return (
     <g className="route-overlay">
       {showRoute
         ? resolvedSegments.map((segment) => {
-            const role = routeSegmentVisualRole(segment, nodeById, network);
+            const role = routeSegmentVisualRole(
+              segment,
+              nodeById,
+              previewNetwork,
+            );
 
             return (
               <RouteSegmentLine
@@ -202,7 +258,7 @@ export function RouteOverlay({
                     segment.id,
                     vertexIndex,
                   )}
-                  onPointerCancel={handleDragEnd}
+                  onPointerCancel={handleDragCancel}
                   onPointerDown={(event) =>
                     handleStartDrag(event, {
                       kind: "vertex",
@@ -218,19 +274,19 @@ export function RouteOverlay({
           )
         : null}
       {showRoute
-        ? network.nodes.map((node) => {
+        ? previewNetwork.nodes.map((node) => {
             const position = resolveRouteNodePosition(node, equipmentById);
 
             return position ? (
               <RouteNodeMarker
                 canEdit={canEdit}
                 dimmed={hasProposal}
-                degree={getRouteNodeDegree(network, node.id)}
+                degree={getRouteNodeDegree(previewNetwork, node.id)}
                 key={node.id}
                 node={node}
                 point={sourceToScreen(position)}
                 selected={routeSelectionMatchesNode(selectedEdit, node)}
-                onPointerCancel={handleDragEnd}
+                onPointerCancel={handleDragCancel}
                 onPointerDown={(event) => {
                   if (node.kind === "route") {
                     handleStartDrag(event, {

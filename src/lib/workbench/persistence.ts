@@ -140,6 +140,17 @@ export type WorkbenchPersistenceWriteResult =
       error: string;
     };
 
+export type WorkbenchPersistenceDeduplicatedWriteResult =
+  | {
+      ok: true;
+      signature: string;
+      written: boolean;
+    }
+  | {
+      ok: false;
+      error: string;
+    };
+
 type StorageLike = Pick<Storage, "getItem" | "removeItem" | "setItem">;
 
 const EMPTY_CALIBRATION_DRAFT: PendingCalibration = {
@@ -233,6 +244,41 @@ export function savePersistedWorkbenchProject(
 
     storage.setItem(WORKBENCH_PROJECT_STORAGE_KEY, JSON.stringify(project));
     return { ok: true };
+  } catch (error) {
+    return {
+      ok: false,
+      error:
+        error instanceof Error
+          ? error.message
+          : "No se pudo guardar el proyecto local.",
+    };
+  }
+}
+
+/** Serializes once and skips an identical browser write. */
+export function savePersistedWorkbenchProjectIfChanged(
+  project: PersistedWorkbenchProject,
+  previousSignature: string | null,
+  storage: StorageLike | null = browserStorage(),
+): WorkbenchPersistenceDeduplicatedWriteResult {
+  if (!storage) {
+    return { ok: false, error: "El almacenamiento local no esta disponible." };
+  }
+
+  try {
+    const signature = JSON.stringify(project);
+
+    if (signature === previousSignature) {
+      return { ok: true, signature, written: false };
+    }
+
+    if (!hasPersistedWorkbenchContent(project)) {
+      storage.removeItem(WORKBENCH_PROJECT_STORAGE_KEY);
+    } else {
+      storage.setItem(WORKBENCH_PROJECT_STORAGE_KEY, signature);
+    }
+
+    return { ok: true, signature, written: true };
   } catch (error) {
     return {
       ok: false,

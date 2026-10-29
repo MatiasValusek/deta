@@ -275,7 +275,7 @@ import {
   clearPersistedWorkbenchProject,
   createPersistedWorkbenchProject,
   loadPersistedWorkbenchProject,
-  savePersistedWorkbenchProject,
+  savePersistedWorkbenchProjectIfChanged,
   type PersistedCoordinatedRouteProposal,
   type PersistedSourceCalibrationState,
   type PersistedWorkbenchBase,
@@ -556,6 +556,7 @@ export function DxfWorkbench() {
     const result = loadPersistedWorkbenchProject();
 
     if (result.status === "loaded") {
+      persistedProjectSignatureRef.current = JSON.stringify(result.project);
       const restoredProject = restorePersistedWorkbenchProject(result.project);
       const restoredCoordinatedProposal =
         restorePersistedCoordinatedRouteProposal(
@@ -628,13 +629,10 @@ export function DxfWorkbench() {
         routeProposalMode,
         sectionPlanLinks,
       });
-      const signature = JSON.stringify(project);
-
-      if (signature === persistedProjectSignatureRef.current) {
-        return;
-      }
-
-      const result = savePersistedWorkbenchProject(project);
+      const result = savePersistedWorkbenchProjectIfChanged(
+        project,
+        persistedProjectSignatureRef.current,
+      );
 
       if (!result.ok) {
         setPersistenceNotice({
@@ -642,7 +640,7 @@ export function DxfWorkbench() {
           tone: "error",
         });
       } else {
-        persistedProjectSignatureRef.current = signature;
+        persistedProjectSignatureRef.current = result.signature;
       }
     }, 400);
 
@@ -1806,8 +1804,16 @@ export function DxfWorkbench() {
     technicalCalculationResult,
     technicalPhysicalAccessoryInventory,
   ]);
-  const standardTechnicalSectionViews = useMemo(
-    () => ({
+  const visualizedTechnicalViews = useMemo(() => {
+    if (coordinatedVisualization) {
+      return createCoordinatedInstallationTechnicalViews({
+        pipeSystem: SIGAS_PIPE_SYSTEM,
+        scaleMetersPerSourceUnit: planScaleMetersPerSourceUnit,
+        visualization: coordinatedVisualization,
+      });
+    }
+
+    const sectionViews = {
       "section-aa": createStandardTechnicalSectionView({
         adoptedDiameterValidation: technicalAdoptedDiameterValidation,
         axis: "x",
@@ -1830,66 +1836,43 @@ export function DxfWorkbench() {
         scaleMetersPerSourceUnit: planScaleMetersPerSourceUnit,
         title: "Corte B-B",
       }),
-    }),
-    [
-      planEquipment,
-      planScaleMetersPerSourceUnit,
-      routeNetwork,
-      technicalAdoptedDiameterValidation,
-      technicalCalculationResult,
-      technicalPhysicalAccessoryInventory,
-    ],
-  );
-  const standardTechnicalAxonometricView = useMemo(
-    () =>
-      createStandardTechnicalAxonometricView({
-        adoptedDiameterValidation: technicalAdoptedDiameterValidation,
-        equipment: planEquipment,
-        inventory: technicalPhysicalAccessoryInventory,
-        network: routeNetwork,
-        result: technicalCalculationResult,
-        scaleMetersPerSourceUnit: planScaleMetersPerSourceUnit,
+    };
+    const axonometricView = createStandardTechnicalAxonometricView({
+      adoptedDiameterValidation: technicalAdoptedDiameterValidation,
+      equipment: planEquipment,
+      inventory: technicalPhysicalAccessoryInventory,
+      network: routeNetwork,
+      result: technicalCalculationResult,
+      scaleMetersPerSourceUnit: planScaleMetersPerSourceUnit,
+    });
+
+    return {
+      axonometricView,
+      geometryPendingItems: collectStandardTechnicalReviewGeometryPendingItems({
+        axonometricView,
+        sectionViews: Object.values(sectionViews),
       }),
-    [
-      planEquipment,
-      planScaleMetersPerSourceUnit,
-      routeNetwork,
-      technicalAdoptedDiameterValidation,
-      technicalCalculationResult,
-      technicalPhysicalAccessoryInventory,
-    ],
-  );
-  const coordinatedTechnicalViews = useMemo(
-    () =>
-      coordinatedVisualization
-        ? createCoordinatedInstallationTechnicalViews({
-            pipeSystem: SIGAS_PIPE_SYSTEM,
-            scaleMetersPerSourceUnit: planScaleMetersPerSourceUnit,
-            visualization: coordinatedVisualization,
-          })
-        : null,
-    [
-      coordinatedVisualization,
-      planScaleMetersPerSourceUnit,
-    ],
-  );
+      sectionViews,
+    };
+  }, [
+    coordinatedVisualization,
+    planEquipment,
+    planScaleMetersPerSourceUnit,
+    routeNetwork,
+    technicalAdoptedDiameterValidation,
+    technicalCalculationResult,
+    technicalPhysicalAccessoryInventory,
+  ]);
   const visualizedTechnicalSectionViews =
-    coordinatedTechnicalViews?.sectionViews ?? standardTechnicalSectionViews;
+    visualizedTechnicalViews.sectionViews;
   const visualizedTechnicalAxonometricView =
-    coordinatedTechnicalViews?.axonometricView ??
-    standardTechnicalAxonometricView;
+    visualizedTechnicalViews.axonometricView;
   const visualizedTechnicalEquipment =
     coordinatedVisualization?.equipment ?? planEquipment;
   const visualizedTechnicalNetwork =
     coordinatedVisualization?.network ?? routeNetwork;
-  const technicalReviewGeometryPendingItems = useMemo(
-    () =>
-      collectStandardTechnicalReviewGeometryPendingItems({
-        axonometricView: standardTechnicalAxonometricView,
-        sectionViews: Object.values(standardTechnicalSectionViews),
-      }),
-    [standardTechnicalAxonometricView, standardTechnicalSectionViews],
-  );
+  const technicalReviewGeometryPendingItems =
+    visualizedTechnicalViews.geometryPendingItems;
   const technicalReviewGeometryPendingCount =
     technicalReviewGeometryPendingItems.length;
   const primaryTechnicalReviewPendingItem =

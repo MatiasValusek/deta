@@ -4,6 +4,7 @@ import type { ManualRouteNetwork } from "@/lib/routing/types";
 import {
   createPersistedWorkbenchProject,
   parsePersistedWorkbenchProject,
+  savePersistedWorkbenchProjectIfChanged,
   type PersistableWorkbenchBase,
   type PersistedCoordinatedRouteProposal,
 } from "./persistence";
@@ -89,6 +90,46 @@ export function runPersistenceVerifications() {
     if (parsed.status === "loaded") {
       assertEqual(parsed.project.coordinatedRouteProposal, null);
     }
+  });
+
+  verify(results, "02D-B evita escrituras identicas y serializa una sola vez", () => {
+    const project = createProject(coordinatedFixture());
+    const storage = countingStorage();
+    const first = savePersistedWorkbenchProjectIfChanged(
+      project,
+      null,
+      storage,
+    );
+    assert(first.ok, first.ok ? "" : first.error);
+    const repeated = savePersistedWorkbenchProjectIfChanged(
+      project,
+      first.signature,
+      storage,
+    );
+
+    assert(repeated.ok, repeated.ok ? "" : repeated.error);
+    assertEqual(first.written, true);
+    assertEqual(repeated.written, false);
+    assertEqual(storage.setCount, 1);
+  });
+
+  verify(results, "02D-B informa el limite de localStorage sin perder confirmada", () => {
+    const project = createProject(coordinatedFixture());
+    const confirmed = JSON.stringify(project.bases[0]?.routeNetwork);
+    const result = savePersistedWorkbenchProjectIfChanged(
+      project,
+      null,
+      quotaLimitedStorage(64),
+    );
+
+    assertEqual(result.ok, false);
+    if (!result.ok) {
+      assert(
+        result.error.includes("QuotaExceededError"),
+        "No se informo el agotamiento de cuota.",
+      );
+    }
+    assertEqual(JSON.stringify(project.bases[0]?.routeNetwork), confirmed);
   });
 
   return results;
@@ -216,6 +257,41 @@ function networkFixture(): ManualRouteNetwork {
     segments: [
       { fromNodeId: "S", id: "S-A", origin: "manual", toNodeId: "A" },
     ],
+  };
+}
+
+function countingStorage() {
+  let value: string | null = null;
+
+  return {
+    get setCount() {
+      return this.count;
+    },
+    count: 0,
+    getItem() {
+      return value;
+    },
+    removeItem() {
+      value = null;
+    },
+    setItem(_key: string, nextValue: string) {
+      this.count += 1;
+      value = nextValue;
+    },
+  };
+}
+
+function quotaLimitedStorage(maxBytes: number) {
+  return {
+    getItem() {
+      return null;
+    },
+    removeItem() {},
+    setItem(_key: string, value: string) {
+      if (value.length > maxBytes) {
+        throw new Error("QuotaExceededError: localStorage quota exceeded");
+      }
+    },
   };
 }
 
