@@ -835,9 +835,9 @@ export function splitRouteSegmentAtPoint(params: {
   }
 
   const splitPoint = routeSegmentSplitPointWithZ({
+    legIndex: projection.legIndex,
     point: projection.point,
     resolvedSegment: resolvedOriginal,
-    sourceDistanceFromStart: projection.distanceFromStartSource,
   });
   const node = params.createNode(splitPoint);
 
@@ -1256,32 +1256,32 @@ function nearestPathPointInsertionIndex(path: Point2D[], point: Point2D) {
 }
 
 function routeSegmentSplitPointWithZ(params: {
+  legIndex: number;
   point: Point2D;
   resolvedSegment: ResolvedRouteSegment;
-  sourceDistanceFromStart: number;
 }): Point2D {
-  if (
-    !pointHasExplicitZ(params.resolvedSegment.from) &&
-    !pointHasExplicitZ(params.resolvedSegment.to)
-  ) {
+  const path =
+    params.resolvedSegment.path.length >= 2
+      ? params.resolvedSegment.path
+      : resolveRouteSegmentPath(
+          params.resolvedSegment,
+          params.resolvedSegment.from,
+          params.resolvedSegment.to,
+        );
+  const from = path[params.legIndex] ?? params.resolvedSegment.from;
+  const to = path[params.legIndex + 1] ?? params.resolvedSegment.to;
+
+  if (!pointHasExplicitZ(from) && !pointHasExplicitZ(to)) {
     return params.point;
   }
 
-  const horizontalLength = routeSegmentHorizontalLengthSource(
-    params.resolvedSegment,
-  );
-  const ratio =
-    horizontalLength <= Number.EPSILON
-      ? 0
-      : Math.max(0, Math.min(1, params.sourceDistanceFromStart / horizontalLength));
-
   return {
     ...params.point,
-    z:
-      pointZMeters(params.resolvedSegment.from) +
-      (pointZMeters(params.resolvedSegment.to) -
-        pointZMeters(params.resolvedSegment.from)) *
-        ratio,
+    // A plan split belongs to one physical leg. Carry that leg's incoming
+    // elevation instead of interpolating between the segment endpoints: an
+    // interpolation would manufacture a new level on an already invalid
+    // diagonal and could spread it through later derivations.
+    z: pointZMeters(from),
   };
 }
 

@@ -5,6 +5,7 @@ import {
   type ArchitecturalRouteGuide,
 } from "@/lib/architecture/routeContext";
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
+import { pointZMeters } from "@/lib/geometry/height";
 import type { Bounds, Point2D } from "@/lib/geometry/types";
 import {
   pointAlmostEqual,
@@ -869,7 +870,14 @@ function appendAutomaticPathToNetwork(
       )
     ) {
       segments.push(
-        createAutomaticSegment(input.planBaseId, fromNodeId, toNodeId, idContext),
+        createAutomaticSegmentBetweenNodes({
+          equipment: input.equipment,
+          fromNodeId,
+          idContext,
+          nodes,
+          planBaseId: input.planBaseId,
+          toNodeId,
+        }),
       );
     }
   }
@@ -1165,8 +1173,9 @@ function routeTargetPointForEquipment(
         new Map(equipment.map((item) => [item.id, item])),
       )
     : null;
+  const target = terminalStartPoint ?? appliance.connectionPoint;
 
-  return terminalStartPoint ?? appliance.connectionPoint;
+  return { x: target.x, y: target.y };
 }
 
 function routeTargetNodeIdForEquipment(
@@ -2089,13 +2098,102 @@ function createAutomaticSegment(
     toNodeId,
     ...(vertices.length > 0
       ? {
-          vertices: vertices.map((point) => ({
-            x: point.x,
-            y: point.y,
-          })),
+          vertexElevations: vertices.map((point) =>
+            pointHasExplicitZ(point)
+              ? {
+                  source: "derived_calculation" as const,
+                  status: "unverified" as const,
+                }
+              : null,
+          ),
+          vertices: vertices.map((point) => ({ ...point })),
         }
       : {}),
   };
+}
+
+function createAutomaticSegmentBetweenNodes(params: {
+  equipment: WorkbenchEquipment[];
+  fromNodeId: string;
+  idContext: IdContext;
+  nodes: RouteNode[];
+  planBaseId: string;
+  toNodeId: string;
+}) {
+  const nodeById = new Map(params.nodes.map((node) => [node.id, node]));
+  const equipmentById = new Map(
+    params.equipment.map((equipment) => [equipment.id, equipment]),
+  );
+  const fromNode = nodeById.get(params.fromNodeId) ?? null;
+  const toNode = nodeById.get(params.toNodeId) ?? null;
+  const from = fromNode
+    ? resolveRouteNodePosition(fromNode, equipmentById)
+    : null;
+  const to = toNode ? resolveRouteNodePosition(toNode, equipmentById) : null;
+  const vertices =
+    fromNode && toNode && from && to
+      ? automaticHeightTransitionVertices({ from, fromNode, to, toNode })
+      : [];
+
+  return createAutomaticSegment(
+    params.planBaseId,
+    params.fromNodeId,
+    params.toNodeId,
+    params.idContext,
+    vertices,
+  );
+}
+
+function automaticHeightTransitionVertices(params: {
+  from: Point2D;
+  fromNode: RouteNode;
+  to: Point2D;
+  toNode: RouteNode;
+}) {
+  const movesInPlan =
+    !sameCoordinate(params.from.x, params.to.x) ||
+    !sameCoordinate(params.from.y, params.to.y);
+  const fromHeight = pointZMeters(params.from);
+  const toHeight = pointZMeters(params.to);
+
+  if (!movesInPlan || sameCoordinate(fromHeight, toHeight)) {
+    return [];
+  }
+
+  if (params.fromNode.kind !== "route" && params.toNode.kind === "route") {
+    return [
+      heightReferencePoint({
+        heightMeters: toHeight,
+        reference: params.to,
+        x: params.from.x,
+        y: params.from.y,
+      }),
+    ];
+  }
+
+  return [
+    heightReferencePoint({
+      heightMeters: fromHeight,
+      reference: params.from,
+      x: params.to.x,
+      y: params.to.y,
+    }),
+  ];
+}
+
+function heightReferencePoint(params: {
+  heightMeters: number;
+  reference: Point2D;
+  x: number;
+  y: number;
+}): Point2D {
+  return pointHasExplicitZ(params.reference)
+    ? { x: params.x, y: params.y, z: params.heightMeters }
+    : { x: params.x, y: params.y };
+}
+
+function pointHasExplicitZ(point: Point2D) {
+  return typeof point.z === "number" && Number.isFinite(point.z);
 }
 
 function compareEquipmentById(

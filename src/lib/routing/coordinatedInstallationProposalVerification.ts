@@ -1,6 +1,11 @@
 import { SIGAS_PIPE_SYSTEM } from "@/lib/calculation/pipeSystems/sigas";
+import {
+  createSuggestedEquipmentTerminalConfig,
+  terminalEndHeightMeters,
+} from "@/lib/equipment/terminalConfig";
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
 import { pointZMeters } from "@/lib/geometry/height";
+import type { Point2D } from "@/lib/geometry/types";
 import {
   getConnectedApplianceEquipmentIds,
   resolveRouteSegments,
@@ -92,6 +97,69 @@ export function runCoordinatedInstallationProposalVerifications() {
         ),
         "No se informo la referencia tecnica obsoleta.",
       );
+    },
+  );
+
+  verify(
+    results,
+    "02E-A separa XY de alturas terminales sugeridas en red 4/10/2",
+    () => {
+      const snapshot = suggestedTerminalXySnapshot();
+      const original = JSON.stringify(snapshot);
+      const result = createCoordinatedInstallationProposal(snapshot);
+      const resolved = resolveRouteSegments(
+        result.candidateNetwork,
+        result.candidateEquipment,
+      );
+      const verticalLegPoints = resolved.flatMap((segment) =>
+        segment.path.slice(0, -1).flatMap((from, index) => {
+          const to = segment.path[index + 1];
+
+          return to &&
+            sameNumber(from.x, to.x) &&
+            sameNumber(from.y, to.y) &&
+            !sameNumber(pointZMeters(from), pointZMeters(to))
+            ? [`${from.x.toFixed(6)}:${from.y.toFixed(6)}`]
+            : [];
+        }),
+      );
+
+      assertEqual(result.xyProposal?.status, "ready");
+      assertEqual(result.xyProposal?.segmentCount, 10);
+      assertEqual(result.xyProposal?.derivationCount, 2);
+      assertEqual(result.status, "incomplete");
+      assertEqual(result.invalidities.length, 0);
+      assert(
+        result.pendingDecisions.some(
+          (decision) => decision.code === "height_definition_required",
+        ),
+        "La altura sugerida debe conservar una definicion profesional pendiente.",
+      );
+      assert(
+        resolved.every((segment) =>
+          segment.path.slice(0, -1).every((from, index) => {
+            const to = segment.path[index + 1];
+            return !to || !legMovesInPlanAndHeight(from, to);
+          }),
+        ),
+        "La red 4/10/2 conserva una pata que cambia XY y Z.",
+      );
+      assertEqual(verticalLegPoints.length, 4);
+      assertEqual(new Set(verticalLegPoints).size, 4);
+      assert(
+        result.candidateNetwork.segments
+          .flatMap((segment) => segment.vertexElevations ?? [])
+          .filter((elevation) => elevation !== null)
+          .every((elevation) => elevation?.status === "unverified"),
+        "La transicion XY/Z sugerida no debe quedar confirmada.",
+      );
+      assert(
+        result.candidateNetwork.nodes
+          .filter((node) => node.kind === "route" && node.position?.z !== undefined)
+          .every((node) => sameNumber(pointZMeters(node.position), 0)),
+        "Una derivacion recibio una cota Z interpolada artificialmente.",
+      );
+      assertEqual(JSON.stringify(snapshot), original);
     },
   );
 
@@ -381,6 +449,70 @@ function partialXySnapshot(): CoordinatedInstallationSnapshot {
   };
 }
 
+function suggestedTerminalXySnapshot(): CoordinatedInstallationSnapshot {
+  const terminalSpecs: Array<{
+    id: string;
+    type: WorkbenchEquipment["type"];
+    x: number;
+    y: number;
+  }> = [
+    { id: "suggested-stove", type: "stove", x: 2, y: 1 },
+    { id: "suggested-oven", type: "oven", x: 2, y: 3 },
+    {
+      id: "suggested-water-heater",
+      type: "instant_water_heater",
+      x: 10,
+      y: 3,
+    },
+    { id: "suggested-boiler", type: "boiler", x: 10, y: 5 },
+  ];
+  const equipment: WorkbenchEquipment[] = [
+    {
+      connectionPoint: { x: 0, y: 0, z: 0 },
+      elevation: { source: "professional_edit", status: "confirmed" },
+      id: "suggested-meter",
+      name: "Medidor",
+      planBaseId: PLAN_BASE_ID,
+      role: "supply",
+      source: "manual",
+      type: "meter_regulator",
+    },
+    ...terminalSpecs.map((spec): WorkbenchEquipment => {
+      const terminalConfig = createSuggestedEquipmentTerminalConfig(spec.type);
+
+      return {
+        connectionPoint: {
+          x: spec.x,
+          y: spec.y,
+          z: terminalEndHeightMeters(terminalConfig) ?? 0,
+        },
+        demandUnit: "m3_h",
+        demandValue: 0.2,
+        id: spec.id,
+        name: spec.id,
+        planBaseId: PLAN_BASE_ID,
+        role: "appliance",
+        source: "manual",
+        terminalConfig,
+        type: spec.type,
+      };
+    }),
+  ];
+
+  return {
+    bounds: { maxX: 11, maxY: 8, minX: -1, minY: -1 },
+    equipment,
+    marginMeters: 0.2,
+    minSegmentLengthSource: EPSILON,
+    network: { nodes: [], segments: [] },
+    pipeSystem: SIGAS_PIPE_SYSTEM,
+    planBaseId: PLAN_BASE_ID,
+    preferredApplianceOrder: terminalSpecs.map((spec) => spec.id),
+    restrictions: [],
+    scaleMetersPerSourceUnit: 1,
+  };
+}
+
 function appliance(id: string, x: number): WorkbenchEquipment {
   return {
     connectionPoint: { x, y: 0, z: 0 },
@@ -429,6 +561,13 @@ function networkHasVerticalLeg(
           !sameNumber(pointZMeters(point), pointZMeters(next)),
       );
     }),
+  );
+}
+
+function legMovesInPlanAndHeight(first: Point2D, second: Point2D) {
+  return (
+    (!sameNumber(first.x, second.x) || !sameNumber(first.y, second.y)) &&
+    !sameNumber(pointZMeters(first), pointZMeters(second))
   );
 }
 
