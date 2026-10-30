@@ -1,6 +1,19 @@
-import type { AdoptedDiameterDecision } from "@/lib/calculation/professionalDiameterAdoption";
-import type { PipeSegmentPipeContext } from "@/lib/calculation/pipeSystem";
-import type { DiameterTransitionDecision } from "@/lib/calculation/diameterTransitionProposals";
+import {
+  accessoryCatalogSelectionFromCandidate,
+  type AccessoryProposalTechnicalReview,
+} from "@/lib/calculation/accessoryCatalogCandidates";
+import type { PipeDiameterReference } from "@/lib/calculation/pipeSystem";
+import {
+  getSigasAccessoryCatalogCandidates,
+  matchSigasAccessoryProposal,
+} from "@/lib/calculation/pipeSystems/sigas/sigasAccessoryProposal";
+import {
+  createSigasAccessoryExactSelectionDecisions,
+  createSigasAccessorySelectionDiameterIndex,
+  reconcileSigasAccessoryExactCatalogRows,
+  selectSigasAccessoryExactCatalogRow,
+  type SigasAccessoryExactSelectionDecision,
+} from "@/lib/calculation/pipeSystems/sigas/sigasAccessoryExactSelection";
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
 import type { Point2D } from "@/lib/geometry/types";
 import {
@@ -9,7 +22,16 @@ import {
   movePhysicalRouteVertex,
   removePhysicalRouteVertex,
 } from "@/lib/routing/physicalRouteEditing";
-import type { AccessoryProposalDecision } from "@/lib/routing/routeAccessoryProposals";
+import {
+  confirmRouteAccessoryProposal,
+  detectRouteAccessoryProposals,
+  rejectRouteAccessoryProposal,
+  resolveAccessoryProposalTechnicalOwner,
+  routeAccessoryProposalHasManualAccessory,
+  upsertAccessoryProposalDecision,
+  withAccessoryProposalSystemMatch,
+  type AccessoryProposal,
+} from "@/lib/routing/routeAccessoryProposals";
 import type { ManualRouteNetwork } from "@/lib/routing/types";
 import {
   applySectionRouteHeightEdit,
@@ -20,6 +42,7 @@ import {
   createCoordinatedInstallationFingerprint,
   createCoordinatedInstallationProposal,
   evaluateCoordinatedInstallationCandidate,
+  type CoordinatedInstallationCandidateTechnicalState,
   type CoordinatedInstallationCandidateEvaluation,
   type CoordinatedInstallationProposal,
   type CoordinatedInstallationSnapshot,
@@ -56,15 +79,8 @@ export type CoordinatedInstallationDraftEdit =
       target: SectionRouteHeightTarget;
     };
 
-export type CoordinatedInstallationDraftTechnicalState = {
-  adoptedDiameterDecisions: AdoptedDiameterDecision[];
-  diameterTransitionDecisions: DiameterTransitionDecision[];
-  pipeContextBySegmentId: Record<
-    string,
-    PipeSegmentPipeContext | undefined
-  >;
-  routeAccessoryProposalDecisions: AccessoryProposalDecision[];
-};
+export type CoordinatedInstallationDraftTechnicalState =
+  CoordinatedInstallationCandidateTechnicalState;
 
 export type CoordinatedInstallationDraftReadiness = {
   geometricAcceptance: "blocked" | "ready";
@@ -76,7 +92,10 @@ export type CoordinatedInstallationDraftEditImpact = {
   affectedEquipmentIds: string[];
   affectedNodeIds: string[];
   affectedSegmentIds: string[];
-  editKind: CoordinatedInstallationDraftEdit["kind"];
+  editKind:
+    | CoordinatedInstallationDraftEdit["kind"]
+    | "accessory_catalog_selection"
+    | "accessory_decision";
   invalidatedDecisionReferenceIds: string[];
 };
 
@@ -104,6 +123,7 @@ export type CoordinatedInstallationDraftSnapshot = {
   proposalDraftNetwork: ManualRouteNetwork;
   revision: number;
   sourceProposalId: string;
+  technicalState?: CoordinatedInstallationDraftTechnicalState;
 };
 
 export type CoordinatedInstallationDraftFailureCode =
@@ -140,6 +160,13 @@ export type CoordinatedInstallationDraftAtomicUpdate = {
   warnings: CoordinatedInstallationWarning[];
 };
 
+export type CoordinatedInstallationDraftAccessoryReview = {
+  diameterBySegmentId: Map<string, PipeDiameterReference>;
+  exactSelectionDecisions: SigasAccessoryExactSelectionDecision[];
+  proposals: AccessoryProposal[];
+  reviews: AccessoryProposalTechnicalReview[];
+};
+
 export function createCoordinatedInstallationDraft(params: {
   proposal: CoordinatedInstallationProposal;
   snapshot: CoordinatedInstallationSnapshot;
@@ -153,13 +180,14 @@ export function createCoordinatedInstallationDraft(params: {
   }
 
   const inheritedWarnings = clone(params.proposal.warnings);
+  const technicalState = technicalStateFromSnapshot(params.snapshot);
   const evaluation = evaluateCoordinatedInstallationCandidate({
     candidateEquipment: params.proposal.candidateEquipment,
     candidateNetwork: params.proposal.candidateNetwork,
     inheritedWarnings,
     snapshot: params.snapshot,
+    technicalState,
   });
-  const technicalState = technicalStateFromSnapshot(params.snapshot);
   const draft = createDraftState({
     baseFingerprint,
     evaluation,
@@ -263,6 +291,7 @@ export function editCoordinatedInstallationDraft(params: {
     candidateNetwork: network,
     inheritedWarnings: params.draft.inheritedWarnings,
     snapshot: params.snapshot,
+    technicalState: params.draft.technicalState,
   });
   const lastEdit = createEditImpact({
     afterEquipment: evaluation.candidateEquipment,
@@ -308,6 +337,7 @@ export function createCoordinatedInstallationDraftSnapshot(
     proposalDraftNetwork: draft.proposalDraftNetwork,
     revision: draft.revision,
     sourceProposalId: draft.sourceProposalId,
+    technicalState: draft.technicalState,
   });
 }
 
@@ -332,11 +362,15 @@ export function restoreCoordinatedInstallationDraft(params: {
   );
   const outdated =
     currentBaseFingerprint !== params.persisted.baseFingerprint;
+  const technicalState = params.persisted.technicalState
+    ? clone(params.persisted.technicalState)
+    : technicalStateFromSnapshot(params.snapshot);
   const evaluation = evaluateCoordinatedInstallationCandidate({
     candidateEquipment: params.persisted.proposalDraftEquipment,
     candidateNetwork: params.persisted.proposalDraftNetwork,
     inheritedWarnings: params.persisted.inheritedWarnings,
     snapshot: params.snapshot,
+    technicalState,
   });
 
   if (
@@ -359,7 +393,7 @@ export function restoreCoordinatedInstallationDraft(params: {
     lastEdit: null,
     revision: Math.max(0, Math.trunc(params.persisted.revision)),
     sourceProposalId: params.persisted.sourceProposalId,
-    technicalState: technicalStateFromSnapshot(params.snapshot),
+    technicalState,
   });
   const proposal: CoordinatedInstallationProposal = {
     candidateEquipment: clone(evaluation.candidateEquipment),
@@ -397,6 +431,258 @@ export function discardCoordinatedInstallationDraft(params: {
   };
 }
 
+export function reviewCoordinatedInstallationDraftAccessories(params: {
+  draft: CoordinatedInstallationDraft;
+  snapshot: CoordinatedInstallationSnapshot;
+}): CoordinatedInstallationDraftAccessoryReview {
+  const diameterBySegmentId = draftAccessoryDiameterIndex(params.draft);
+  const proposals = detectRouteAccessoryProposals({
+    decisions: params.draft.technicalState.routeAccessoryProposalDecisions,
+    diameterBySegmentId,
+    equipment: params.draft.proposalDraftEquipment,
+    network: params.draft.proposalDraftNetwork,
+    scaleMetersPerSourceUnit: params.snapshot.scaleMetersPerSourceUnit,
+  }).map((proposal) =>
+    withAccessoryProposalSystemMatch(
+      proposal,
+      matchSigasAccessoryProposal(proposal),
+    ),
+  );
+  const reviews = proposals.map((proposal) =>
+    draftAccessoryTechnicalReview({
+      diameterBySegmentId,
+      network: params.draft.proposalDraftNetwork,
+      proposal,
+    }),
+  );
+  const groupedReviews = withEquivalentDraftAccessoryGroups({
+    proposals,
+    reviews,
+  });
+  const selectionDiameterBySegmentId =
+    createSigasAccessorySelectionDiameterIndex({
+      diameterBySegmentId,
+      result: params.draft.evaluation.technicalResult,
+    });
+
+  return {
+    diameterBySegmentId,
+    exactSelectionDecisions: createSigasAccessoryExactSelectionDecisions({
+      diameterBySegmentId: selectionDiameterBySegmentId,
+      network: params.draft.proposalDraftNetwork,
+    }),
+    proposals,
+    reviews: groupedReviews,
+  };
+}
+
+export function confirmCoordinatedInstallationDraftAccessory(params: {
+  candidateId: string;
+  decidedAt: number;
+  draft: CoordinatedInstallationDraft;
+  proposalId: string;
+  snapshot: CoordinatedInstallationSnapshot;
+}): CoordinatedInstallationDraftResult {
+  const contextFailure = validateDraftContext(params.draft, params.snapshot);
+
+  if (contextFailure) {
+    return contextFailure;
+  }
+
+  const reviewState = reviewCoordinatedInstallationDraftAccessories(params);
+  const selectedReview = reviewState.reviews.find(
+    (review) => review.proposalId === params.proposalId,
+  );
+  const selectedCandidate = selectedReview?.candidates.find(
+    (candidate) => candidate.id === params.candidateId,
+  );
+
+  if (!selectedReview || !selectedCandidate) {
+    return editFailure("Selecciona una familia tecnica compatible.");
+  }
+  if (selectedCandidate.status !== "compatible") {
+    return editFailure(selectedCandidate.reason);
+  }
+
+  const proposalIds =
+    selectedReview.equivalentProposalIds ?? [params.proposalId];
+  let network = clone(params.draft.proposalDraftNetwork);
+  let decisions = clone(
+    params.draft.technicalState.routeAccessoryProposalDecisions,
+  );
+  const affectedNodeIds: string[] = [];
+  const affectedSegmentIds = new Set<string>();
+
+  for (const proposalId of proposalIds) {
+    const proposal = reviewState.proposals.find(
+      (item) => item.id === proposalId,
+    );
+    const review = reviewState.reviews.find(
+      (item) => item.proposalId === proposalId,
+    );
+    const candidate = review?.candidates.find(
+      (item) =>
+        item.familyId === selectedCandidate.familyId &&
+        item.pipeSystem.id === selectedCandidate.pipeSystem.id &&
+        item.type === selectedCandidate.type,
+    );
+
+    if (!proposal || !review || candidate?.status !== "compatible") {
+      return editFailure(
+        "La decision agrupada ya no es compatible con todos sus nodos.",
+      );
+    }
+
+    const result = confirmRouteAccessoryProposal({
+      decidedAt: params.decidedAt,
+      network,
+      origin: "user_confirmed",
+      ownerResolution: review.ownerResolution,
+      proposal,
+      selection: accessoryCatalogSelectionFromCandidate(candidate),
+    });
+
+    if (!result.ok) {
+      return editFailure(result.message);
+    }
+
+    network = result.network;
+    decisions = upsertAccessoryProposalDecision(decisions, result.decision);
+    affectedNodeIds.push(proposal.nodeId);
+    proposal.incidentSegmentIds.forEach((segmentId) =>
+      affectedSegmentIds.add(segmentId),
+    );
+  }
+
+  network = reconcileSigasAccessoryExactCatalogRows({
+    diameterBySegmentId: reviewState.diameterBySegmentId,
+    network,
+  });
+
+  return rebuildDraftAfterAccessoryChange({
+    affectedNodeIds,
+    affectedSegmentIds: [...affectedSegmentIds],
+    draft: params.draft,
+    editKind: "accessory_decision",
+    network,
+    snapshot: params.snapshot,
+    technicalState: {
+      ...params.draft.technicalState,
+      routeAccessoryProposalDecisions: decisions,
+    },
+  });
+}
+
+export function rejectCoordinatedInstallationDraftAccessory(params: {
+  decidedAt: number;
+  draft: CoordinatedInstallationDraft;
+  proposalId: string;
+  snapshot: CoordinatedInstallationSnapshot;
+}): CoordinatedInstallationDraftResult {
+  const contextFailure = validateDraftContext(params.draft, params.snapshot);
+
+  if (contextFailure) {
+    return contextFailure;
+  }
+
+  const reviewState = reviewCoordinatedInstallationDraftAccessories(params);
+  const selectedReview = reviewState.reviews.find(
+    (review) => review.proposalId === params.proposalId,
+  );
+
+  if (!selectedReview) {
+    return editFailure("La propuesta de accesorio ya no existe en el borrador.");
+  }
+
+  const proposalIds =
+    selectedReview.equivalentProposalIds ?? [params.proposalId];
+  let network = clone(params.draft.proposalDraftNetwork);
+  let decisions = clone(
+    params.draft.technicalState.routeAccessoryProposalDecisions,
+  );
+  const affectedNodeIds: string[] = [];
+  const affectedSegmentIds = new Set<string>();
+
+  for (const proposalId of proposalIds) {
+    const proposal = reviewState.proposals.find(
+      (item) => item.id === proposalId,
+    );
+
+    if (!proposal) {
+      return editFailure("La propuesta agrupada ya no existe en el borrador.");
+    }
+
+    const result = rejectRouteAccessoryProposal({
+      decidedAt: params.decidedAt,
+      network,
+      proposal,
+    });
+    network = result.network;
+    decisions = upsertAccessoryProposalDecision(decisions, result.decision);
+    affectedNodeIds.push(proposal.nodeId);
+    proposal.incidentSegmentIds.forEach((segmentId) =>
+      affectedSegmentIds.add(segmentId),
+    );
+  }
+
+  return rebuildDraftAfterAccessoryChange({
+    affectedNodeIds,
+    affectedSegmentIds: [...affectedSegmentIds],
+    draft: params.draft,
+    editKind: "accessory_decision",
+    network,
+    snapshot: params.snapshot,
+    technicalState: {
+      ...params.draft.technicalState,
+      routeAccessoryProposalDecisions: decisions,
+    },
+  });
+}
+
+export function selectCoordinatedInstallationDraftAccessoryCatalogRow(params: {
+  catalogCode: string;
+  decisionId: string;
+  draft: CoordinatedInstallationDraft;
+  snapshot: CoordinatedInstallationSnapshot;
+}): CoordinatedInstallationDraftResult {
+  const contextFailure = validateDraftContext(params.draft, params.snapshot);
+
+  if (contextFailure) {
+    return contextFailure;
+  }
+
+  const reviewState = reviewCoordinatedInstallationDraftAccessories(params);
+  const decision = reviewState.exactSelectionDecisions.find(
+    (item) => item.id === params.decisionId,
+  );
+
+  if (!decision) {
+    return editFailure("La decision del accesorio SIGAS ya no esta pendiente.");
+  }
+
+  const result = selectSigasAccessoryExactCatalogRow({
+    accessoryId: decision.accessoryId,
+    catalogCode: params.catalogCode,
+    diameter: decision.diameter,
+    network: params.draft.proposalDraftNetwork,
+    segmentId: decision.segmentId,
+  });
+
+  if (!result.ok) {
+    return editFailure(result.message);
+  }
+
+  return rebuildDraftAfterAccessoryChange({
+    affectedNodeIds: [],
+    affectedSegmentIds: [decision.segmentId],
+    draft: params.draft,
+    editKind: "accessory_catalog_selection",
+    network: result.network,
+    snapshot: params.snapshot,
+    technicalState: params.draft.technicalState,
+  });
+}
+
 export function acceptCoordinatedInstallationDraft(params: {
   draft: CoordinatedInstallationDraft;
   snapshot: CoordinatedInstallationSnapshot;
@@ -415,6 +701,7 @@ export function acceptCoordinatedInstallationDraft(params: {
     candidateNetwork: params.draft.proposalDraftNetwork,
     inheritedWarnings: params.draft.inheritedWarnings,
     snapshot: params.snapshot,
+    technicalState: params.draft.technicalState,
   });
   const readiness = createReadiness(evaluation);
 
@@ -473,7 +760,7 @@ export function acceptCoordinatedInstallationDraft(params: {
       acceptedCandidateFingerprint: evaluation.fingerprint,
       equipment: clone(evaluation.candidateEquipment),
       network: clone(evaluation.candidateNetwork),
-      technicalState: technicalStateFromSnapshot(params.snapshot),
+      technicalState: clone(params.draft.technicalState),
       warnings: clone(evaluation.warnings),
     },
   };
@@ -552,6 +839,7 @@ function validateDraftContext(
       candidateEquipment: draft.proposalDraftEquipment,
       candidateNetwork: draft.proposalDraftNetwork,
       snapshot,
+      technicalState: draft.technicalState,
     });
 
   if (candidateFingerprint !== draft.draftFingerprint) {
@@ -663,6 +951,183 @@ function createEditImpact(params: {
     editKind: params.editKind,
     invalidatedDecisionReferenceIds,
   };
+}
+
+function draftAccessoryDiameterIndex(
+  draft: CoordinatedInstallationDraft,
+) {
+  const finalDiameters =
+    draft.evaluation.technicalResult.transitionAwareNetworkSizing?.status ===
+    "resolved"
+      ? draft.evaluation.technicalResult.transitionAwareNetworkSizing
+          .finalDiameterBySegmentId
+      : draft.evaluation.technicalResult.networkSizing?.finalDiameterBySegmentId ??
+        {};
+
+  return new Map<string, PipeDiameterReference>(
+    Object.entries(finalDiameters),
+  );
+}
+
+function draftAccessoryTechnicalReview(params: {
+  diameterBySegmentId: Map<string, PipeDiameterReference>;
+  network: ManualRouteNetwork;
+  proposal: AccessoryProposal;
+}): AccessoryProposalTechnicalReview {
+  const ownerResolution = resolveAccessoryProposalTechnicalOwner({
+    diameterBySegmentId: params.diameterBySegmentId,
+    network: params.network,
+    proposal: params.proposal,
+  });
+  const hasManualAccessory = routeAccessoryProposalHasManualAccessory({
+    network: params.network,
+    proposal: params.proposal,
+    type: params.proposal.domainAccessory?.type,
+  });
+  const candidates = getSigasAccessoryCatalogCandidates({
+    diameterBySegmentId: params.diameterBySegmentId,
+    hasManualAccessory,
+    ownerResolution,
+    proposal: params.proposal,
+  });
+  const compatibleCandidates = candidates.filter(
+    (candidate) => candidate.status === "compatible",
+  );
+  const selectedDiameter =
+    ownerResolution.status === "unambiguous"
+      ? params.diameterBySegmentId.get(ownerResolution.ownerSegmentId) ?? null
+      : null;
+  const reason = hasManualAccessory
+    ? "Ya existe un accesorio manual compatible en un tramo incidente."
+    : ownerResolution.status !== "unambiguous"
+      ? ownerResolution.reason
+      : candidates.length === 0
+        ? "No hay candidatos tecnicos compatibles con esta propuesta."
+        : compatibleCandidates.length === 0
+          ? candidates[0]?.reason ?? null
+          : null;
+
+  return {
+    candidates,
+    incidentSegments: params.proposal.incidentSegmentIds.map((segmentId) => ({
+      diameter: params.diameterBySegmentId.get(segmentId) ?? null,
+      segmentId,
+    })),
+    ownerResolution,
+    proposalId: params.proposal.id,
+    reason,
+    selectedDiameter,
+    status:
+      compatibleCandidates.length > 0 && !hasManualAccessory
+        ? "compatible"
+        : candidates.some((candidate) => candidate.status === "incompatible")
+          ? "incompatible"
+          : "requires_more_information",
+  };
+}
+
+function withEquivalentDraftAccessoryGroups(params: {
+  proposals: AccessoryProposal[];
+  reviews: AccessoryProposalTechnicalReview[];
+}) {
+  const proposalById = new Map(
+    params.proposals.map((proposal) => [proposal.id, proposal]),
+  );
+  const groups = new Map<string, AccessoryProposalTechnicalReview[]>();
+
+  for (const review of params.reviews) {
+    const proposal = proposalById.get(review.proposalId);
+    if (!proposal) {
+      continue;
+    }
+
+    const candidateKey = review.candidates
+      .map(
+        (candidate) =>
+          `${candidate.familyId}:${candidate.pipeSystem.id}:${candidate.type}:${candidate.status}`,
+      )
+      .sort()
+      .join("|");
+    const diameterKey = review.incidentSegments
+      .map((item) => item.diameter?.id ?? "pending")
+      .sort()
+      .join("|");
+    const key = [
+      proposal.kind,
+      proposal.state,
+      proposal.evidence.angleClassification,
+      proposal.evidence.degree,
+      diameterKey,
+      candidateKey,
+      review.status,
+    ].join("::");
+    const group = groups.get(key) ?? [];
+    group.push(review);
+    groups.set(key, group);
+  }
+
+  const groupByProposalId = new Map<
+    string,
+    { nodeIds: string[]; proposalIds: string[] }
+  >();
+  for (const group of groups.values()) {
+    const proposalIds = group
+      .map((review) => review.proposalId)
+      .sort();
+    const nodeIds = proposalIds
+      .map((proposalId) => proposalById.get(proposalId)?.nodeId)
+      .filter((nodeId): nodeId is string => Boolean(nodeId));
+    for (const proposalId of proposalIds) {
+      groupByProposalId.set(proposalId, { nodeIds, proposalIds });
+    }
+  }
+
+  return params.reviews.map((review) => {
+    const group = groupByProposalId.get(review.proposalId);
+    return group && group.proposalIds.length > 1
+      ? {
+          ...review,
+          equivalentNodeIds: group.nodeIds,
+          equivalentProposalIds: group.proposalIds,
+        }
+      : review;
+  });
+}
+
+function rebuildDraftAfterAccessoryChange(params: {
+  affectedNodeIds: string[];
+  affectedSegmentIds: string[];
+  draft: CoordinatedInstallationDraft;
+  editKind: "accessory_catalog_selection" | "accessory_decision";
+  network: ManualRouteNetwork;
+  snapshot: CoordinatedInstallationSnapshot;
+  technicalState: CoordinatedInstallationDraftTechnicalState;
+}): CoordinatedInstallationDraftResult {
+  const evaluation = evaluateCoordinatedInstallationCandidate({
+    candidateEquipment: params.draft.proposalDraftEquipment,
+    candidateNetwork: params.network,
+    inheritedWarnings: params.draft.inheritedWarnings,
+    snapshot: params.snapshot,
+    technicalState: params.technicalState,
+  });
+  const draft = createDraftState({
+    baseFingerprint: params.draft.baseFingerprint,
+    evaluation,
+    id: params.draft.id,
+    inheritedWarnings: params.draft.inheritedWarnings,
+    lastEdit: {
+      affectedEquipmentIds: [],
+      affectedNodeIds: [...new Set(params.affectedNodeIds)].sort(),
+      affectedSegmentIds: [...new Set(params.affectedSegmentIds)].sort(),
+      editKind: params.editKind,
+      invalidatedDecisionReferenceIds: [],
+    },
+    revision: params.draft.revision + 1,
+    sourceProposalId: params.draft.sourceProposalId,
+    technicalState: params.technicalState,
+  });
+
+  return { draft, ok: true };
 }
 
 function technicalStateFromSnapshot(

@@ -36,6 +36,8 @@ export type AccessoryProposalIncidentSegmentContext = {
 
 export type AccessoryProposalTechnicalReview = {
   candidates: AccessoryCatalogCandidate[];
+  equivalentNodeIds?: string[];
+  equivalentProposalIds?: string[];
   incidentSegments: AccessoryProposalIncidentSegmentContext[];
   ownerResolution: AccessoryProposalOwnerResolution;
   proposalId: string;

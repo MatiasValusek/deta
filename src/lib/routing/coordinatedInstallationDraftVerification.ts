@@ -10,12 +10,15 @@ import {
 import type { ManualRouteNetwork } from "@/lib/routing/types";
 import {
   acceptCoordinatedInstallationDraft,
+  confirmCoordinatedInstallationDraftAccessory,
   createCoordinatedInstallationDraftSnapshot,
   createCoordinatedInstallationDraft,
   discardCoordinatedInstallationDraft,
   editCoordinatedInstallationDraft,
   regenerateCoordinatedInstallationDraft,
+  reviewCoordinatedInstallationDraftAccessories,
   restoreCoordinatedInstallationDraft,
+  selectCoordinatedInstallationDraftAccessoryCatalogRow,
   type CoordinatedInstallationDraft,
 } from "./coordinatedInstallationDraft";
 import {
@@ -174,6 +177,166 @@ export function runCoordinatedInstallationDraftVerifications() {
         JSON.stringify(discarded.equipment),
         JSON.stringify(snapshot.equipment),
       );
+      assertEqual(JSON.stringify(snapshot), original);
+    },
+  );
+
+  verify(
+    results,
+    "02E-B resuelve codo y tres tees sobre el borrador 4/8/3",
+    () => {
+      const snapshot = accessoryBlockedSnapshot();
+      const original = JSON.stringify(snapshot);
+      const proposal = createCoordinatedInstallationProposal(snapshot);
+      let draft = requiredDraft(
+        createCoordinatedInstallationDraft({ proposal, snapshot }),
+      );
+      const initialReview = reviewCoordinatedInstallationDraftAccessories({
+        draft,
+        snapshot,
+      });
+      const elbows = initialReview.proposals.filter(
+        (item) => item.kind === "elbow",
+      );
+      const tees = initialReview.proposals.filter(
+        (item) => item.kind === "tee",
+      );
+
+      assertEqual(draft.proposalDraftNetwork.segments.length, 8);
+      assertEqual(tees.length, 3);
+      assertEqual(elbows.length, 1);
+      assertEqual(
+        draft.technicalState.routeAccessoryProposalDecisions.length,
+        0,
+      );
+      assertEqual(routeAccessoryCount(draft.proposalDraftNetwork), 0);
+      const blockedAcceptance = acceptCoordinatedInstallationDraft({
+        draft,
+        snapshot,
+      });
+      assertEqual(blockedAcceptance.ok, false);
+      if (!blockedAcceptance.ok) {
+        assertEqual(blockedAcceptance.code, "proposal_incomplete");
+      }
+
+      const groupedTeeReview = initialReview.reviews.find(
+        (review) =>
+          review.proposalId === tees[0]?.id &&
+          review.equivalentProposalIds?.length === 3,
+      );
+      const teeCandidate = groupedTeeReview?.candidates.find(
+        (candidate) => candidate.status === "compatible",
+      );
+      assert(groupedTeeReview, "Las tres tees equivalentes no se agruparon.");
+      assert(teeCandidate, "Falta opcion SIGAS compatible para las tees.");
+      const confirmedTees = confirmCoordinatedInstallationDraftAccessory({
+        candidateId: teeCandidate.id,
+        decidedAt: 10,
+        draft,
+        proposalId: groupedTeeReview.proposalId,
+        snapshot,
+      });
+      assert(
+        confirmedTees.ok,
+        confirmedTees.ok ? "" : confirmedTees.message,
+      );
+      draft = confirmedTees.draft;
+      assertEqual(
+        draft.technicalState.routeAccessoryProposalDecisions.length,
+        3,
+      );
+      assertEqual(routeAccessoryCount(draft.proposalDraftNetwork), 3);
+      assertEqual(routeAccessoryCount(snapshot.network), 0);
+
+      const elbowReviewState = reviewCoordinatedInstallationDraftAccessories({
+        draft,
+        snapshot,
+      });
+      assertEqual(
+        elbowReviewState.proposals.filter(
+          (item) => item.state !== "confirmed" && item.state !== "rejected",
+        ).length,
+        1,
+      );
+      assertEqual(draft.evaluation.status, "incomplete");
+      const elbow = elbowReviewState.proposals.find(
+        (item) => item.kind === "elbow" && item.state !== "confirmed",
+      );
+      const elbowReview = elbowReviewState.reviews.find(
+        (review) => review.proposalId === elbow?.id,
+      );
+      const elbowCandidate = elbowReview?.candidates.find(
+        (candidate) => candidate.status === "compatible",
+      );
+      assert(elbow, "Falta el codo pendiente.");
+      assert(elbowCandidate, "Falta opcion SIGAS compatible para el codo.");
+      const confirmedElbow = confirmCoordinatedInstallationDraftAccessory({
+        candidateId: elbowCandidate.id,
+        decidedAt: 11,
+        draft,
+        proposalId: elbow.id,
+        snapshot,
+      });
+      assert(
+        confirmedElbow.ok,
+        confirmedElbow.ok ? "" : confirmedElbow.message,
+      );
+      draft = confirmedElbow.draft;
+
+      assertEqual(
+        draft.technicalState.routeAccessoryProposalDecisions.length,
+        4,
+      );
+      assertEqual(routeAccessoryCount(draft.proposalDraftNetwork), 4);
+      const exactReview = reviewCoordinatedInstallationDraftAccessories({
+        draft,
+        snapshot,
+      });
+      assertEqual(exactReview.exactSelectionDecisions.length, 1);
+      assertEqual(draft.evaluation.status, "incomplete");
+      const exactDecision = exactReview.exactSelectionDecisions[0];
+      const exactCandidate = exactDecision?.candidates.find(
+        (candidate) =>
+          candidate.catalogCode === "codo-90-con-rosca-hembra-20-x-1-2",
+      );
+      assert(
+        exactDecision && exactCandidate,
+        "La alternativa roscada no quedo pendiente para seleccion explicita.",
+      );
+      const selectedExact =
+        selectCoordinatedInstallationDraftAccessoryCatalogRow({
+          catalogCode: exactCandidate.catalogCode,
+          decisionId: exactDecision.id,
+          draft,
+          snapshot,
+        });
+      assert(
+        selectedExact.ok,
+        selectedExact.ok ? "" : selectedExact.message,
+      );
+      draft = selectedExact.draft;
+      assert(
+        draft.evaluation.status === "complete",
+        `El borrador conserva pendientes: ${JSON.stringify(draft.evaluation.pendingDecisions)}; exactos: ${JSON.stringify(reviewCoordinatedInstallationDraftAccessories({ draft, snapshot }).exactSelectionDecisions)}`,
+      );
+      const restored = restoreCoordinatedInstallationDraft({
+        persisted: createCoordinatedInstallationDraftSnapshot(draft),
+        snapshot,
+      });
+      assert(restored.ok, restored.ok ? "" : restored.message);
+      draft = restored.draft;
+      assertEqual(
+        draft.technicalState.routeAccessoryProposalDecisions.length,
+        4,
+      );
+      assertEqual(routeAccessoryCount(draft.proposalDraftNetwork), 4);
+      const accepted = acceptCoordinatedInstallationDraft({ draft, snapshot });
+      assert(accepted.ok, accepted.ok ? "" : accepted.message);
+      assertEqual(
+        accepted.update.technicalState.routeAccessoryProposalDecisions.length,
+        4,
+      );
+      assertEqual(routeAccessoryCount(accepted.update.network), 4);
       assertEqual(JSON.stringify(snapshot), original);
     },
   );
@@ -585,6 +748,107 @@ function editableSnapshot(): CoordinatedInstallationSnapshot {
   };
 
   return baseSnapshot(equipment, network);
+}
+
+function accessoryBlockedSnapshot(): CoordinatedInstallationSnapshot {
+  const equipment: WorkbenchEquipment[] = [
+    {
+      connectionPoint: { x: 0, y: 0, z: 0 },
+      elevation: { source: "professional_edit", status: "confirmed" },
+      id: "meter-4-8-3",
+      name: "Medidor",
+      planBaseId: PLAN_BASE_ID,
+      role: "supply",
+      source: "manual",
+      type: "meter_regulator",
+    },
+    ...[
+      { id: "appliance-1", x: 2, y: 1 },
+      { id: "appliance-2", x: 2, y: 2 },
+      { id: "appliance-3", x: 0, y: 3 },
+      { id: "appliance-4", x: 2, y: 3 },
+    ].map(
+      (item): WorkbenchEquipment => ({
+        connectionPoint: { x: item.x, y: item.y, z: 0 },
+        demandUnit: "m3_h",
+        demandValue: 0.2,
+        elevation: { source: "professional_edit", status: "confirmed" },
+        id: item.id,
+        name: item.id,
+        planBaseId: PLAN_BASE_ID,
+        role: "appliance",
+        source: "manual",
+        type: "other",
+      }),
+    ),
+  ];
+  const node = (
+    id: string,
+    position: { x: number; y: number; z: number },
+  ): ManualRouteNetwork["nodes"][number] => ({
+    elevation: { source: "professional_edit", status: "confirmed" },
+    id,
+    kind: "route",
+    origin: "manual",
+    position,
+  });
+  const equipmentNodes = equipment.map(
+    (item): ManualRouteNetwork["nodes"][number] => ({
+      elevation: { source: "professional_edit", status: "confirmed" },
+      equipmentId: item.id,
+      id: routeEquipmentNodeId(PLAN_BASE_ID, item.id),
+      kind: item.role,
+      origin: "manual",
+    }),
+  );
+  const network: ManualRouteNetwork = {
+    nodes: [
+      ...equipmentNodes,
+      node("turn-4-8-3", { x: 1, y: 0, z: 0 }),
+      node("tee-1-4-8-3", { x: 1, y: 1, z: 0 }),
+      node("tee-2-4-8-3", { x: 1, y: 2, z: 0 }),
+      node("tee-3-4-8-3", { x: 1, y: 3, z: 0 }),
+    ],
+    segments: [
+      segment("meter-turn", "meter-4-8-3", "turn-4-8-3"),
+      routeSegmentFixture("turn-tee-1", "turn-4-8-3", "tee-1-4-8-3"),
+      segment("tee-1-appliance-1", "appliance-1", "tee-1-4-8-3"),
+      routeSegmentFixture("tee-1-tee-2", "tee-1-4-8-3", "tee-2-4-8-3"),
+      segment("tee-2-appliance-2", "appliance-2", "tee-2-4-8-3"),
+      routeSegmentFixture("tee-2-tee-3", "tee-2-4-8-3", "tee-3-4-8-3"),
+      segment("tee-3-appliance-3", "appliance-3", "tee-3-4-8-3"),
+      segment("tee-3-appliance-4", "appliance-4", "tee-3-4-8-3"),
+    ],
+  };
+
+  return baseSnapshot(equipment, network);
+}
+
+function segment(
+  id: string,
+  equipmentId: string,
+  routeNodeId: string,
+): ManualRouteNetwork["segments"][number] {
+  return routeSegmentFixture(
+    id,
+    routeEquipmentNodeId(PLAN_BASE_ID, equipmentId),
+    routeNodeId,
+  );
+}
+
+function routeSegmentFixture(
+  id: string,
+  fromNodeId: string,
+  toNodeId: string,
+): ManualRouteNetwork["segments"][number] {
+  return { fromNodeId, id, origin: "manual", toNodeId };
+}
+
+function routeAccessoryCount(network: ManualRouteNetwork) {
+  return network.segments.reduce(
+    (total, segment) => total + (segment.accessories?.length ?? 0),
+    0,
+  );
 }
 
 function snapshotWithAccessoryDecision(): CoordinatedInstallationSnapshot {

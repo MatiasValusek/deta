@@ -145,6 +145,16 @@ export type CoordinatedInstallationSnapshot = {
   scaleMetersPerSourceUnit: number | null;
 };
 
+export type CoordinatedInstallationCandidateTechnicalState = {
+  adoptedDiameterDecisions: AdoptedDiameterDecision[];
+  diameterTransitionDecisions: DiameterTransitionDecision[];
+  pipeContextBySegmentId: Record<
+    string,
+    PipeSegmentPipeContext | undefined
+  >;
+  routeAccessoryProposalDecisions: AccessoryProposalDecision[];
+};
+
 export type CoordinatedInstallationProposal = {
   candidateEquipment: WorkbenchEquipment[];
   candidateNetwork: ManualRouteNetwork;
@@ -438,8 +448,11 @@ export function evaluateCoordinatedInstallationCandidate(params: {
   candidateNetwork: ManualRouteNetwork;
   inheritedWarnings?: CoordinatedInstallationWarning[];
   snapshot: CoordinatedInstallationSnapshot;
+  technicalState?: CoordinatedInstallationCandidateTechnicalState;
 }): CoordinatedInstallationCandidateEvaluation {
   const snapshot = params.snapshot;
+  const technicalState =
+    params.technicalState ?? candidateTechnicalStateFromSnapshot(snapshot);
   const candidateEquipment = cloneEquipment(params.candidateEquipment);
   const candidateNetwork = cloneRouteNetwork(params.candidateNetwork);
   const copied = cloneSnapshotState(snapshot);
@@ -449,18 +462,18 @@ export function evaluateCoordinatedInstallationCandidate(params: {
     snapshot.restrictions ?? snapshot.architecture?.restrictions ?? [],
   );
   const technicalResult = calculateTechnicalTree({
-    adoptedDiameterDecisions: snapshot.adoptedDiameterDecisions,
-    diameterTransitionDecisions: snapshot.diameterTransitionDecisions,
+    adoptedDiameterDecisions: technicalState.adoptedDiameterDecisions,
+    diameterTransitionDecisions: technicalState.diameterTransitionDecisions,
     equipment: candidateEquipment,
     minSegmentLengthSource: snapshot.minSegmentLengthSource,
     network: candidateNetwork,
-    pipeContextBySegmentId: copied.pipeContextBySegmentId,
+    pipeContextBySegmentId: technicalState.pipeContextBySegmentId,
     pipeSystem: snapshot.pipeSystem,
     projectGas: copied.projectGas,
     scaleMetersPerSourceUnit: snapshot.scaleMetersPerSourceUnit,
   });
   const accessoryProposals = detectRouteAccessoryProposals({
-    decisions: snapshot.routeAccessoryProposalDecisions,
+    decisions: technicalState.routeAccessoryProposalDecisions,
     equipment: candidateEquipment,
     network: candidateNetwork,
     scaleMetersPerSourceUnit: snapshot.scaleMetersPerSourceUnit,
@@ -494,13 +507,12 @@ export function evaluateCoordinatedInstallationCandidate(params: {
   );
   pendingDecisions.push(
     ...invalidTechnicalReferences({
-      accessoryDecisions: snapshot.routeAccessoryProposalDecisions ?? [],
+      accessoryDecisions: technicalState.routeAccessoryProposalDecisions,
       accessoryProposals,
-      adoptedDiameterDecisions: snapshot.adoptedDiameterDecisions ?? [],
+      adoptedDiameterDecisions: technicalState.adoptedDiameterDecisions,
       candidateNetwork,
-      diameterTransitionDecisions:
-        snapshot.diameterTransitionDecisions ?? [],
-      pipeContextBySegmentId: copied.pipeContextBySegmentId,
+      diameterTransitionDecisions: technicalState.diameterTransitionDecisions,
+      pipeContextBySegmentId: technicalState.pipeContextBySegmentId,
       transitionProposals,
     }),
   );
@@ -542,6 +554,7 @@ export function evaluateCoordinatedInstallationCandidate(params: {
       candidateEquipment,
       candidateNetwork,
       snapshot,
+      technicalState,
     }),
     invalidities: dedupedInvalidities,
     materialTakeoff: clonePlainRecord(materialTakeoff),
@@ -556,7 +569,17 @@ export function createCoordinatedInstallationCandidateFingerprint(params: {
   candidateEquipment: WorkbenchEquipment[];
   candidateNetwork: ManualRouteNetwork;
   snapshot: CoordinatedInstallationSnapshot;
+  technicalState?: CoordinatedInstallationCandidateTechnicalState;
 }) {
+  const technicalState =
+    params.technicalState ?? candidateTechnicalStateFromSnapshot(params.snapshot);
+  const canonicalTechnicalState = canonicalCandidateTechnicalState(technicalState);
+  const canonicalSnapshotTechnicalState = canonicalCandidateTechnicalState(
+    candidateTechnicalStateFromSnapshot(params.snapshot),
+  );
+  const hasDraftTechnicalChanges =
+    stableSerialize(canonicalTechnicalState) !==
+    stableSerialize(canonicalSnapshotTechnicalState);
   const signature = stableSerialize({
     candidateEquipment: [...params.candidateEquipment].sort((a, b) =>
       a.id.localeCompare(b.id),
@@ -565,9 +588,41 @@ export function createCoordinatedInstallationCandidateFingerprint(params: {
     confirmedFingerprint: createCoordinatedInstallationFingerprint(
       params.snapshot,
     ),
+    ...(hasDraftTechnicalChanges
+      ? { technicalState: canonicalTechnicalState }
+      : {}),
   });
 
   return `installation-candidate:${stableHash(signature)}:${signature.length}`;
+}
+
+function candidateTechnicalStateFromSnapshot(
+  snapshot: CoordinatedInstallationSnapshot,
+): CoordinatedInstallationCandidateTechnicalState {
+  return {
+    adoptedDiameterDecisions: snapshot.adoptedDiameterDecisions ?? [],
+    diameterTransitionDecisions: snapshot.diameterTransitionDecisions ?? [],
+    pipeContextBySegmentId: snapshot.pipeContextBySegmentId ?? {},
+    routeAccessoryProposalDecisions:
+      snapshot.routeAccessoryProposalDecisions ?? [],
+  };
+}
+
+function canonicalCandidateTechnicalState(
+  state: CoordinatedInstallationCandidateTechnicalState,
+) {
+  return {
+    adoptedDiameterDecisions: sortedByStableKey(
+      state.adoptedDiameterDecisions,
+    ),
+    diameterTransitionDecisions: sortedByStableKey(
+      state.diameterTransitionDecisions,
+    ),
+    pipeContextBySegmentId: state.pipeContextBySegmentId,
+    routeAccessoryProposalDecisions: sortedByStableKey(
+      state.routeAccessoryProposalDecisions,
+    ),
+  };
 }
 
 export function createCoordinatedInstallationFingerprint(

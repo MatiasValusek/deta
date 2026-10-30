@@ -102,6 +102,7 @@ type CalculationPanelProps = {
   equipment: WorkbenchEquipment[];
   hasPendingProposal: boolean;
   isPlanActive: boolean;
+  isResolvingProposalDraftAccessories?: boolean;
   mode?: CalculationPanelMode;
   pipeSystem: PipeSystem;
   planReady: boolean;
@@ -203,6 +204,7 @@ export function CalculationPanel({
   equipment,
   hasPendingProposal,
   isPlanActive,
+  isResolvingProposalDraftAccessories = false,
   mode = "calculate",
   pipeSystem,
   planReady,
@@ -334,6 +336,7 @@ export function CalculationPanel({
   const pendingDecisions = useMemo(
     () =>
       createPendingCalculationDecisions({
+        accessoryOnly: isResolvingProposalDraftAccessories,
         accessoryExactSelectionDecisions,
         accessoryProposalReviews,
         accessoryProposals,
@@ -350,6 +353,7 @@ export function CalculationPanel({
       diameterTransitionProposals,
       diameterTransitionReviews,
       result,
+      isResolvingProposalDraftAccessories,
     ],
   );
   const pendingSummary = useMemo(
@@ -475,7 +479,9 @@ export function CalculationPanel({
 
       {hasPendingProposal ? (
         <div className="mt-3 rounded border border-[#dbeafe] bg-[#eff6ff] px-3 py-2 text-xs text-[#1d4ed8]">
-          Hay una propuesta pendiente. El cálculo usa solo la red confirmada.
+          {isResolvingProposalDraftAccessories
+            ? "Revisión técnica del borrador. Las decisiones se aplican a la propuesta y la instalación confirmada no cambia hasta aceptarla."
+            : "Hay una propuesta pendiente. El cálculo usa solo la red confirmada."}
         </div>
       ) : null}
 
@@ -770,7 +776,10 @@ function AccessoryDecisionCard({
           type="button"
           onClick={() => onConfirm(proposal.id, selectedCandidateId)}
         >
-          Confirmar accesorio
+          {review?.equivalentProposalIds &&
+          review.equivalentProposalIds.length > 1
+            ? `Confirmar ${review.equivalentProposalIds.length} accesorios`
+            : "Confirmar accesorio"}
         </button>
       }
       secondaryAction={
@@ -790,6 +799,14 @@ function AccessoryDecisionCard({
         result={result}
         segmentIds={proposal.incidentSegmentIds}
       />
+      {review?.equivalentNodeIds && review.equivalentNodeIds.length > 1 ? (
+        <div className="mt-1 text-[10px] text-[var(--muted)]">
+          Decision equivalente para {review.equivalentNodeIds.length} nodos: {" "}
+          {review.equivalentNodeIds
+            .map((nodeId) => formatNodeReference(nodeId, result))
+            .join(", ")}
+        </div>
+      ) : null}
       {!review ? (
         <div className="mt-1 text-[10px] text-[var(--warning)]">
           {formatAccessoryProposalProblem(proposal, review)}
@@ -3646,6 +3663,7 @@ function AccessorySummaryRow({
 }
 
 function createPendingCalculationDecisions({
+  accessoryOnly,
   accessoryExactSelectionDecisions,
   accessoryProposalReviews,
   accessoryProposals,
@@ -3654,6 +3672,7 @@ function createPendingCalculationDecisions({
   diameterTransitionReviews,
   result,
 }: {
+  accessoryOnly: boolean;
   accessoryExactSelectionDecisions: SigasAccessoryExactSelectionDecision[];
   accessoryProposalReviews: AccessoryProposalTechnicalReview[];
   accessoryProposals: AccessoryProposal[];
@@ -3670,6 +3689,13 @@ function createPendingCalculationDecisions({
   );
   const accessoryDecisions = accessoryProposals
     .filter(isActionableAccessoryProposal)
+    .filter((proposal) => {
+      const equivalentProposalIds =
+        accessoryReviewById.get(proposal.id)?.equivalentProposalIds;
+      return (
+        !equivalentProposalIds || equivalentProposalIds[0] === proposal.id
+      );
+    })
     .map((proposal): PendingAccessoryDecision => ({
       proposal,
       review: accessoryReviewById.get(proposal.id) ?? null,
@@ -3728,6 +3754,10 @@ function createPendingCalculationDecisions({
       id: `accessory:${accessory.proposal.id}`,
       kind: "accessory",
     });
+  }
+
+  if (accessoryOnly) {
+    return decisions;
   }
 
   for (const transition of transitionDecisions) {

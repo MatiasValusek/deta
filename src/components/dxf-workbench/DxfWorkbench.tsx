@@ -168,11 +168,15 @@ import {
 } from "@/lib/routing/coordinatedInstallationProposal";
 import {
   acceptCoordinatedInstallationDraft,
+  confirmCoordinatedInstallationDraftAccessory,
   createCoordinatedInstallationDraftSnapshot,
   discardCoordinatedInstallationDraft,
   editCoordinatedInstallationDraft,
+  rejectCoordinatedInstallationDraftAccessory,
   regenerateCoordinatedInstallationDraft,
+  reviewCoordinatedInstallationDraftAccessories,
   restoreCoordinatedInstallationDraft,
+  selectCoordinatedInstallationDraftAccessoryCatalogRow,
   type CoordinatedInstallationDraft,
   type CoordinatedInstallationDraftEdit,
 } from "@/lib/routing/coordinatedInstallationDraft";
@@ -1296,6 +1300,16 @@ export function DxfWorkbench() {
   }, [technicalCalculationResult]);
   const accessoryProposalDiameterBySegmentId =
     finalDiameterBySegmentId as Map<string, AccessoryProposalDiameterReference>;
+  const coordinatedDraftAccessoryReview = useMemo(
+    () =>
+      activeCoordinatedRouteProposal && coordinatedProposalSnapshot
+        ? reviewCoordinatedInstallationDraftAccessories({
+            draft: activeCoordinatedRouteProposal.draft,
+            snapshot: coordinatedProposalSnapshot,
+          })
+        : null,
+    [activeCoordinatedRouteProposal, coordinatedProposalSnapshot],
+  );
   const sigasAccessorySelectionDiameterBySegmentId = useMemo(
     () =>
       createSigasAccessorySelectionDiameterIndex({
@@ -1403,6 +1417,13 @@ export function DxfWorkbench() {
     routeAccessoryProposals,
     routeNetwork,
   ]);
+  const displayedRouteAccessoryProposals =
+    coordinatedDraftAccessoryReview?.proposals ?? routeAccessoryProposals;
+  const displayedRouteAccessoryProposalReviews =
+    coordinatedDraftAccessoryReview?.reviews ?? routeAccessoryProposalReviews;
+  const displayedSigasAccessoryExactSelectionDecisions =
+    coordinatedDraftAccessoryReview?.exactSelectionDecisions ??
+    sigasAccessoryExactSelectionDecisions;
   const rawDiameterTransitionProposals = useMemo(() => {
     if (!planBase) {
       return [];
@@ -4249,6 +4270,16 @@ export function DxfWorkbench() {
 
     const network = session.draft.proposalDraftNetwork;
     const equipment = session.draft.proposalDraftEquipment;
+    const opensAccessoryResolution =
+      coordinatedDraftAccessoryReview?.proposals.some(
+        (proposal) =>
+          referenceIds.includes(proposal.id) ||
+          referenceIds.includes(proposal.nodeId) ||
+          referenceIds.includes(`node:${proposal.nodeId}`) ||
+          proposal.incidentSegmentIds.some((segmentId) =>
+            referenceIds.includes(segmentId),
+          ),
+      ) ?? false;
     let selection: PhysicalRouteEditSelection | null = null;
 
     for (const referenceId of referenceIds) {
@@ -4312,6 +4343,9 @@ export function DxfWorkbench() {
     setActiveReviewViewId("plan");
     setIsRouteEditing(true);
     handleSelectPhysicalRouteElement(selection);
+    if (opensAccessoryResolution) {
+      setActiveRightPanelSection("calculation");
+    }
   }
 
   function handleRouteSnapOptionChange(
@@ -5718,7 +5752,7 @@ export function DxfWorkbench() {
       return;
     }
 
-    const proposal = routeAccessoryProposals.find(
+    const proposal = displayedRouteAccessoryProposals.find(
       (item) => item.id === proposalId,
     );
 
@@ -5727,7 +5761,7 @@ export function DxfWorkbench() {
       return;
     }
 
-    const review = routeAccessoryProposalReviews.find(
+    const review = displayedRouteAccessoryProposalReviews.find(
       (item) => item.proposalId === proposalId,
     );
     const candidate = review?.candidates.find((item) => item.id === candidateId);
@@ -5739,6 +5773,35 @@ export function DxfWorkbench() {
 
     if (candidate.status !== "compatible") {
       setRouteError(candidate.reason);
+      return;
+    }
+
+    if (activeCoordinatedRouteProposal) {
+      if (!coordinatedProposalSnapshot) {
+        setRouteError(
+          "La propuesta esta desactualizada. Regenerala antes de continuar.",
+        );
+        return;
+      }
+
+      const result = confirmCoordinatedInstallationDraftAccessory({
+        candidateId,
+        decidedAt: Date.now(),
+        draft: activeCoordinatedRouteProposal.draft,
+        proposalId,
+        snapshot: coordinatedProposalSnapshot,
+      });
+
+      if (!result.ok) {
+        setRouteError(result.message);
+        return;
+      }
+
+      setCoordinatedRouteProposal({
+        ...activeCoordinatedRouteProposal,
+        draft: result.draft,
+      });
+      setRouteError(null);
       return;
     }
 
@@ -5778,12 +5841,40 @@ export function DxfWorkbench() {
       return;
     }
 
-    const decision = sigasAccessoryExactSelectionDecisions.find(
+    const decision = displayedSigasAccessoryExactSelectionDecisions.find(
       (item) => item.id === decisionId,
     );
 
     if (!decision) {
       setRouteError("La decisión del accesorio SIGAS ya no está pendiente.");
+      return;
+    }
+
+    if (activeCoordinatedRouteProposal) {
+      if (!coordinatedProposalSnapshot) {
+        setRouteError(
+          "La propuesta esta desactualizada. Regenerala antes de continuar.",
+        );
+        return;
+      }
+
+      const result = selectCoordinatedInstallationDraftAccessoryCatalogRow({
+        catalogCode,
+        decisionId,
+        draft: activeCoordinatedRouteProposal.draft,
+        snapshot: coordinatedProposalSnapshot,
+      });
+
+      if (!result.ok) {
+        setRouteError(result.message);
+        return;
+      }
+
+      setCoordinatedRouteProposal({
+        ...activeCoordinatedRouteProposal,
+        draft: result.draft,
+      });
+      setRouteError(null);
       return;
     }
 
@@ -5815,12 +5906,40 @@ export function DxfWorkbench() {
       return;
     }
 
-    const proposal = routeAccessoryProposals.find(
+    const proposal = displayedRouteAccessoryProposals.find(
       (item) => item.id === proposalId,
     );
 
     if (!proposal) {
       setRouteError("La propuesta de accesorio ya no existe en la red.");
+      return;
+    }
+
+    if (activeCoordinatedRouteProposal) {
+      if (!coordinatedProposalSnapshot) {
+        setRouteError(
+          "La propuesta esta desactualizada. Regenerala antes de continuar.",
+        );
+        return;
+      }
+
+      const result = rejectCoordinatedInstallationDraftAccessory({
+        decidedAt: Date.now(),
+        draft: activeCoordinatedRouteProposal.draft,
+        proposalId,
+        snapshot: coordinatedProposalSnapshot,
+      });
+
+      if (!result.ok) {
+        setRouteError(result.message);
+        return;
+      }
+
+      setCoordinatedRouteProposal({
+        ...activeCoordinatedRouteProposal,
+        draft: result.draft,
+      });
+      setRouteError(null);
       return;
     }
 
@@ -7103,22 +7222,50 @@ export function DxfWorkbench() {
       disabledReason: planOnlyDisabledReason,
       content: (
         <CalculationPanel
-          adoptedDiameterDecisions={planBase?.adoptedDiameterDecisions ?? []}
-          accessoryProposals={routeAccessoryProposals}
-          accessoryProposalReviews={routeAccessoryProposalReviews}
-          accessoryExactSelectionDecisions={sigasAccessoryExactSelectionDecisions}
-          diameterTransitionProposals={diameterTransitionProposals}
-          diameterTransitionReviews={diameterTransitionProposalReviews}
-          equipment={planEquipment}
+          adoptedDiameterDecisions={
+            activeCoordinatedRouteProposal?.draft.technicalState
+              .adoptedDiameterDecisions ??
+            planBase?.adoptedDiameterDecisions ??
+            []
+          }
+          accessoryProposals={displayedRouteAccessoryProposals}
+          accessoryProposalReviews={displayedRouteAccessoryProposalReviews}
+          accessoryExactSelectionDecisions={
+            displayedSigasAccessoryExactSelectionDecisions
+          }
+          diameterTransitionProposals={
+            activeCoordinatedRouteProposal ? [] : diameterTransitionProposals
+          }
+          diameterTransitionReviews={
+            activeCoordinatedRouteProposal
+              ? []
+              : diameterTransitionProposalReviews
+          }
+          equipment={
+            activeCoordinatedRouteProposal?.draft.proposalDraftEquipment ??
+            planEquipment
+          }
           hasPendingProposal={hasActiveRouteProposal}
+          isResolvingProposalDraftAccessories={Boolean(
+            activeCoordinatedRouteProposal,
+          )}
           isPlanActive={activeBase?.type === "plan"}
           mode={activeWorkflowStage === "deliver" ? "deliver" : "calculate"}
           pipeSystem={SIGAS_PIPE_SYSTEM}
           planReady={Boolean(planBase)}
-          result={technicalCalculationResult}
-          routeNetwork={planBase?.routeNetwork ?? createEmptyRouteNetwork()}
+          result={
+            activeCoordinatedRouteProposal?.draft.evaluation.technicalResult ??
+            technicalCalculationResult
+          }
+          routeNetwork={
+            activeCoordinatedRouteProposal?.draft.proposalDraftNetwork ??
+            planBase?.routeNetwork ??
+            createEmptyRouteNetwork()
+          }
           scaleMetersPerSourceUnit={calibrationScaleMetersPerSourceUnit(planBase)}
-          routeTransitionResolutions={routeTransitionResolutions}
+          routeTransitionResolutions={
+            activeCoordinatedRouteProposal ? {} : routeTransitionResolutions
+          }
           onAdoptSegmentDiameter={handleAdoptSegmentDiameter}
           onConfirmAccessoryProposal={handleConfirmAccessoryProposal}
           onSelectAccessoryExactCatalogRow={

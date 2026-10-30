@@ -39,6 +39,11 @@ export function runPersistenceVerifications() {
       ),
       JSON.stringify(coordinatedRouteProposal.draft.proposalDraftNetwork),
     );
+    assertEqual(
+      parsed.project.coordinatedRouteProposal?.draft.technicalState
+        ?.routeAccessoryProposalDecisions.length,
+      1,
+    );
     assert(
       !("evaluation" in coordinatedRouteProposal.draft),
       "Se persistio una evaluacion tecnica derivada.",
@@ -165,6 +170,24 @@ function coordinatedFixture(): PersistedCoordinatedRouteProposal {
     proposalDraftNetwork: networkFixture(),
     revision: 3,
     sourceProposalId: "proposal:persistence",
+    technicalState: {
+      adoptedDiameterDecisions: [],
+      diameterTransitionDecisions: [],
+      pipeContextBySegmentId: {},
+      routeAccessoryProposalDecisions: [
+        {
+          accessoryId: "accessory:draft",
+          catalogFamilyId: "tee-normal",
+          decidedAt: 3,
+          geometryKey: "geometry:draft",
+          origin: "user_confirmed",
+          ownerSegmentId: "S-A",
+          pipeSystemId: "sigas",
+          proposalId: "proposal:accessory:draft",
+          status: "confirmed",
+        },
+      ],
+    },
   };
 
   return {

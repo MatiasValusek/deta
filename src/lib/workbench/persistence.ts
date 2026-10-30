@@ -1173,7 +1173,32 @@ function isCoordinatedInstallationDraftSnapshot(
     isRouteNetwork(value.proposalDraftNetwork) &&
     isFiniteNumber(value.revision) &&
     value.revision >= 0 &&
-    isString(value.sourceProposalId)
+    isString(value.sourceProposalId) &&
+    isOptionalCoordinatedInstallationDraftTechnicalState(
+      value.technicalState,
+    )
+  );
+}
+
+function isOptionalCoordinatedInstallationDraftTechnicalState(
+  value: unknown,
+) {
+  return (
+    value === undefined ||
+    (isRecord(value) &&
+      isOptionalAdoptedDiameterDecisionArray(
+        value.adoptedDiameterDecisions,
+      ) &&
+      Array.isArray(value.adoptedDiameterDecisions) &&
+      isOptionalDiameterTransitionDecisionArray(
+        value.diameterTransitionDecisions,
+      ) &&
+      Array.isArray(value.diameterTransitionDecisions) &&
+      isRecord(value.pipeContextBySegmentId) &&
+      isOptionalAccessoryProposalDecisionArray(
+        value.routeAccessoryProposalDecisions,
+      ) &&
+      Array.isArray(value.routeAccessoryProposalDecisions))
   );
 }
 
