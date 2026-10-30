@@ -120,6 +120,11 @@ import { importPdfDocument, type ImportedPdfDocument } from "@/lib/pdf/importPdf
 import type { PdfDocumentModel } from "@/lib/pdf/types";
 import { pdfSourceToScreen, type PdfViewTransform } from "@/lib/pdf/pdfViewport";
 import {
+  mainWorkflowDefaultPanel,
+  mainWorkflowPanelSections,
+  type MainWorkflowStageId,
+} from "@/lib/workbench/mainWorkflowNavigation";
+import {
   pointAlmostEqual,
   pointOnSegment,
   projectPointToSegment,
@@ -336,13 +341,6 @@ export type LayerVisibility = Record<string, boolean>;
 type WorkbenchSource = "dxf" | "pdf";
 type WorkbenchBaseType = "plan" | "section";
 type BaseFilePurpose = WorkbenchBaseType | "replace-active";
-type MainWorkflowStageId =
-  | "plan"
-  | "equipment"
-  | "route"
-  | "calculate"
-  | "deliver";
-
 type SectionLinkDraft = {
   editingLinkId: string | null;
   pdfPageNumber?: number;
@@ -452,27 +450,6 @@ const MAIN_WORKFLOW_STAGES: Array<{
   { id: "calculate", label: "Calcular" },
   { id: "deliver", label: "Entregar" },
 ];
-const MAIN_WORKFLOW_PANEL_SECTIONS: Record<
-  MainWorkflowStageId,
-  RightPanelSectionId[]
-> = {
-  calculate: ["calculation"],
-  deliver: ["calculation"],
-  equipment: ["equipment"],
-  plan: ["scale"],
-  route: ["route"],
-};
-const MAIN_WORKFLOW_DEFAULT_PANEL: Record<
-  MainWorkflowStageId,
-  RightPanelSectionId
-> = {
-  calculate: "calculation",
-  deliver: "calculation",
-  equipment: "equipment",
-  plan: "geometry",
-  route: "route",
-};
-
 export function DxfWorkbench() {
   const [bases, setBases] = useState<WorkbenchBase[]>([]);
   const [activeBaseId, setActiveBaseId] = useState<string | null>(null);
@@ -2353,7 +2330,7 @@ export function DxfWorkbench() {
       const fallbackStage = fallbackWorkflowStage();
 
       setActiveMainStage(fallbackStage);
-      setActiveRightPanelSection(MAIN_WORKFLOW_DEFAULT_PANEL[fallbackStage]);
+      setActiveRightPanelSection(mainWorkflowDefaultPanel(fallbackStage));
       return;
     }
 
@@ -2364,7 +2341,7 @@ export function DxfWorkbench() {
     }
 
     setActiveMainStage(stage);
-    setActiveRightPanelSection(MAIN_WORKFLOW_DEFAULT_PANEL[stage]);
+    setActiveRightPanelSection(mainWorkflowDefaultPanel(stage));
 
     if (stage !== "plan" && planBase) {
       handleActivateBase(planBase.id);
@@ -7216,7 +7193,9 @@ export function DxfWorkbench() {
     },
     {
       id: "calculation",
-      title: "Calcular",
+      title: activeCoordinatedRouteProposal
+        ? "Revisar accesorios"
+        : "Calcular",
       summary: calculationSummaryText,
       disabled: !isPlanSectionAvailable,
       disabledReason: planOnlyDisabledReason,
@@ -7274,6 +7253,7 @@ export function DxfWorkbench() {
           onConfirmDiameterTransition={handleConfirmDiameterTransition}
           onGoToEquipment={handleGoToEquipmentFromCalculation}
           onGoToPlan={handleGoToPlanForRoute}
+          onBackToRouteSummary={() => setActiveRightPanelSection("route")}
           onRejectAccessoryProposal={handleRejectAccessoryProposal}
           onRejectDiameterTransition={handleRejectDiameterTransition}
         />
@@ -7335,7 +7315,7 @@ export function DxfWorkbench() {
     },
   ];
   const activeStagePanelSections = rightPanelSections.filter((section) =>
-    MAIN_WORKFLOW_PANEL_SECTIONS[activeWorkflowStage].includes(section.id),
+    mainWorkflowPanelSections(activeWorkflowStage).includes(section.id),
   );
 
   return (

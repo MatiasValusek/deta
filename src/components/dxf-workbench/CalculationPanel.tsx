@@ -111,6 +111,7 @@ type CalculationPanelProps = {
   scaleMetersPerSourceUnit: number | null;
   routeTransitionResolutions: Record<string, TechnicalRouteTransitionResolution>;
   onAdoptSegmentDiameter: (segmentId: string, diameterId: string | null) => void;
+  onBackToRouteSummary?: () => void;
   onConfirmAccessoryProposal: (proposalId: string, candidateId: string) => void;
   onConfirmDiameterTransition: (transitionId: string, candidateId: string) => void;
   onGoToEquipment: () => void;
@@ -213,6 +214,7 @@ export function CalculationPanel({
   scaleMetersPerSourceUnit,
   routeTransitionResolutions,
   onAdoptSegmentDiameter,
+  onBackToRouteSummary,
   onConfirmAccessoryProposal,
   onConfirmDiameterTransition,
   onGoToEquipment,
@@ -435,10 +437,23 @@ export function CalculationPanel({
       <div className="flex items-start justify-between gap-2">
         <div>
           <h2 className="text-sm font-semibold">
-            {isDeliverMode ? "Entregar" : "Calcular"}
+            {isResolvingProposalDraftAccessories
+              ? "Revisión de accesorios"
+              : isDeliverMode
+                ? "Entregar"
+                : "Calcular"}
           </h2>
         </div>
         <div className="flex items-center gap-2">
+          {isResolvingProposalDraftAccessories && onBackToRouteSummary ? (
+            <button
+              className="rounded border border-[var(--line)] bg-white px-2 py-1 text-xs hover:border-[var(--accent)]"
+              type="button"
+              onClick={onBackToRouteSummary}
+            >
+              Volver al resumen de Recorrido
+            </button>
+          ) : null}
           {isDeliverMode && result ? (
             <button
               className="rounded border border-[var(--line)] bg-white px-2 py-1 text-xs hover:border-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"

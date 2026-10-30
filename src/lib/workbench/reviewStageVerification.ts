@@ -25,6 +25,10 @@ import {
 import { createSectionRouteProjection } from "@/lib/sections/routeProjection";
 import type { SectionRouteProjectionLink } from "@/lib/sections/routeProjection";
 import { createRouteReviewState } from "@/lib/workbench/reviewStage";
+import {
+  mainWorkflowDefaultPanel,
+  mainWorkflowPanelSections,
+} from "@/lib/workbench/mainWorkflowNavigation";
 
 export type ReviewStageVerificationResult = {
   name: string;
@@ -41,6 +45,24 @@ const UPDATED_Z_METERS = 1.35;
 
 export function runReviewStageVerifications() {
   const results: ReviewStageVerificationResult[] = [];
+
+  verify(
+    results,
+    "Recorrido permite abrir la revisión técnica sin cambiar de etapa",
+    () => {
+      assertEqual(mainWorkflowDefaultPanel("route"), "route");
+      assert(
+        mainWorkflowPanelSections("route").includes("route"),
+        "Recorrido debe conservar su panel de resumen.",
+      );
+      assert(
+        mainWorkflowPanelSections("route").includes("calculation"),
+        "Recorrido debe permitir mostrar la revisión técnica de accesorios.",
+      );
+      assertEqual(mainWorkflowPanelSections("calculate").length, 1);
+      assertEqual(mainWorkflowPanelSections("calculate")[0], "calculation");
+    },
+  );
 
   verify(
     results,
