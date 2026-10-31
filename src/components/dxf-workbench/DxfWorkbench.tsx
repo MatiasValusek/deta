@@ -124,6 +124,7 @@ import {
   mainWorkflowPanelSections,
   type MainWorkflowStageId,
 } from "@/lib/workbench/mainWorkflowNavigation";
+import { resolveAccessoryReviewFocus } from "@/lib/workbench/accessoryReviewNavigation";
 import {
   pointAlmostEqual,
   pointOnSegment,
@@ -479,6 +480,8 @@ export function DxfWorkbench() {
     useState(DEFAULT_ROUTE_PROPOSAL_MARGIN_INPUT);
   const [selectedRouteEdit, setSelectedRouteEdit] =
     useState<PhysicalRouteEditSelection | null>(null);
+  const [focusedDraftAccessoryProposalId, setFocusedDraftAccessoryProposalId] =
+    useState<string | null>(null);
   const [focusedTechnicalReviewItem, setFocusedTechnicalReviewItem] =
     useState<StandardTechnicalReviewGeometryPendingItem | null>(null);
   const [routeSnapOptions, setRouteSnapOptions] =
@@ -4247,16 +4250,13 @@ export function DxfWorkbench() {
 
     const network = session.draft.proposalDraftNetwork;
     const equipment = session.draft.proposalDraftEquipment;
-    const opensAccessoryResolution =
-      coordinatedDraftAccessoryReview?.proposals.some(
-        (proposal) =>
-          referenceIds.includes(proposal.id) ||
-          referenceIds.includes(proposal.nodeId) ||
-          referenceIds.includes(`node:${proposal.nodeId}`) ||
-          proposal.incidentSegmentIds.some((segmentId) =>
-            referenceIds.includes(segmentId),
-          ),
-      ) ?? false;
+    const accessoryFocus = coordinatedDraftAccessoryReview
+      ? resolveAccessoryReviewFocus({
+          proposals: coordinatedDraftAccessoryReview.proposals,
+          referenceIds,
+          reviews: coordinatedDraftAccessoryReview.reviews,
+        })
+      : null;
     let selection: PhysicalRouteEditSelection | null = null;
 
     for (const referenceId of referenceIds) {
@@ -4312,16 +4312,43 @@ export function DxfWorkbench() {
       }
     }
 
-    if (!selection) {
+    if (!selection && accessoryFocus) {
+      const node = network.nodes.find(
+        (candidate) => candidate.id === accessoryFocus.nodeId,
+      );
+      const segment = accessoryFocus.segmentId
+        ? network.segments.find(
+            (candidate) => candidate.id === accessoryFocus.segmentId,
+          )
+        : null;
+
+      if (node) {
+        selection = node.equipmentId
+          ? {
+              equipmentId: node.equipmentId,
+              kind: "terminal",
+              nodeId: node.id,
+            }
+          : { kind: "node", nodeId: node.id };
+      } else if (segment) {
+        selection = { kind: "segment", segmentId: segment.id };
+      }
+    }
+
+    if (!selection && !accessoryFocus) {
       setRouteError("El pendiente no tiene un elemento editable directo.");
       return;
     }
 
     setActiveReviewViewId("plan");
     setIsRouteEditing(true);
-    handleSelectPhysicalRouteElement(selection);
-    if (opensAccessoryResolution) {
+    if (selection) {
+      handleSelectPhysicalRouteElement(selection);
+    }
+    if (accessoryFocus) {
+      setFocusedDraftAccessoryProposalId(accessoryFocus.proposalId);
       setActiveRightPanelSection("calculation");
+      setRouteError(null);
     }
   }
 
@@ -5778,6 +5805,7 @@ export function DxfWorkbench() {
         ...activeCoordinatedRouteProposal,
         draft: result.draft,
       });
+      setFocusedDraftAccessoryProposalId(null);
       setRouteError(null);
       return;
     }
@@ -5851,6 +5879,7 @@ export function DxfWorkbench() {
         ...activeCoordinatedRouteProposal,
         draft: result.draft,
       });
+      setFocusedDraftAccessoryProposalId(null);
       setRouteError(null);
       return;
     }
@@ -5916,6 +5945,7 @@ export function DxfWorkbench() {
         ...activeCoordinatedRouteProposal,
         draft: result.draft,
       });
+      setFocusedDraftAccessoryProposalId(null);
       setRouteError(null);
       return;
     }
@@ -7224,6 +7254,7 @@ export function DxfWorkbench() {
             activeCoordinatedRouteProposal?.draft.proposalDraftEquipment ??
             planEquipment
           }
+          focusedAccessoryProposalId={focusedDraftAccessoryProposalId}
           hasPendingProposal={hasActiveRouteProposal}
           isResolvingProposalDraftAccessories={Boolean(
             activeCoordinatedRouteProposal,
@@ -7253,7 +7284,10 @@ export function DxfWorkbench() {
           onConfirmDiameterTransition={handleConfirmDiameterTransition}
           onGoToEquipment={handleGoToEquipmentFromCalculation}
           onGoToPlan={handleGoToPlanForRoute}
-          onBackToRouteSummary={() => setActiveRightPanelSection("route")}
+          onBackToRouteSummary={() => {
+            setFocusedDraftAccessoryProposalId(null);
+            setActiveRightPanelSection("route");
+          }}
           onRejectAccessoryProposal={handleRejectAccessoryProposal}
           onRejectDiameterTransition={handleRejectDiameterTransition}
         />
@@ -7315,7 +7349,9 @@ export function DxfWorkbench() {
     },
   ];
   const activeStagePanelSections = rightPanelSections.filter((section) =>
-    mainWorkflowPanelSections(activeWorkflowStage).includes(section.id),
+    mainWorkflowPanelSections(activeWorkflowStage, {
+      routeAccessoryReviewAvailable: Boolean(activeCoordinatedRouteProposal),
+    }).includes(section.id),
   );
 
   return (

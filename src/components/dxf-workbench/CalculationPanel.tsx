@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { type WorkbenchEquipment } from "@/lib/equipment/types";
 import type {
   PipeDiameterReference,
@@ -89,6 +89,10 @@ import {
 import type {
   SigasAccessoryExactSelectionDecision,
 } from "@/lib/calculation/pipeSystems/sigas/sigasAccessoryExactSelection";
+import {
+  calculationLengthState,
+  technicalCalculationNeedsRoute,
+} from "@/lib/workbench/calculationPresentation";
 
 type CalculationPanelMode = "calculate" | "deliver";
 
@@ -100,6 +104,7 @@ type CalculationPanelProps = {
   diameterTransitionProposals: DiameterTransitionProposal[];
   diameterTransitionReviews: DiameterTransitionTechnicalReview[];
   equipment: WorkbenchEquipment[];
+  focusedAccessoryProposalId?: string | null;
   hasPendingProposal: boolean;
   isPlanActive: boolean;
   isResolvingProposalDraftAccessories?: boolean;
@@ -203,6 +208,7 @@ export function CalculationPanel({
   diameterTransitionProposals,
   diameterTransitionReviews,
   equipment,
+  focusedAccessoryProposalId = null,
   hasPendingProposal,
   isPlanActive,
   isResolvingProposalDraftAccessories = false,
@@ -376,6 +382,10 @@ export function CalculationPanel({
     result !== null &&
     calculationSheet.rows.length > 0 &&
     pendingSummary.deliveryBlockingCount === 0;
+  const needsConfirmedRoute =
+    result !== null &&
+    !isResolvingProposalDraftAccessories &&
+    technicalCalculationNeedsRoute(result);
 
   const handleExportExcel = async () => {
     if (!canExportDocuments || isExportingExcel) {
@@ -512,7 +522,12 @@ export function CalculationPanel({
         </div>
       ) : null}
 
-      {result ? (
+      {needsConfirmedRoute ? (
+        <div className="mt-3 rounded border border-[#dbeafe] bg-[#eff6ff] px-3 py-2 text-xs text-[#1d4ed8]">
+          Generá una propuesta o dibujá y confirmá el recorrido para calcular.
+          La escala y los artefactos cargados se conservan.
+        </div>
+      ) : result ? (
         <>
           <CalculationSummary
             pendingSummary={pendingSummary}
@@ -527,6 +542,7 @@ export function CalculationPanel({
           <PendingDecisionList
             decisions={pendingDecisions}
             equipment={equipment}
+            focusedAccessoryProposalId={focusedAccessoryProposalId}
             result={result}
             onAdoptSegmentDiameter={onAdoptSegmentDiameter}
             onConfirmAccessoryProposal={onConfirmAccessoryProposal}
@@ -579,6 +595,7 @@ export function CalculationPanel({
 function PendingDecisionList({
   decisions,
   equipment,
+  focusedAccessoryProposalId,
   result,
   onAdoptSegmentDiameter,
   onConfirmAccessoryProposal,
@@ -591,6 +608,7 @@ function PendingDecisionList({
 }: {
   decisions: PendingCalculationDecision[];
   equipment: WorkbenchEquipment[];
+  focusedAccessoryProposalId: string | null;
   result: TechnicalCalculationResult;
   onAdoptSegmentDiameter: (segmentId: string, diameterId: string | null) => void;
   onConfirmAccessoryProposal: (proposalId: string, candidateId: string) => void;
@@ -612,7 +630,20 @@ function PendingDecisionList({
     useState<Record<string, string>>({});
   const [selectedSharedCandidateById, setSelectedSharedCandidateById] =
     useState<Record<string, string>>({});
+  const focusedAccessoryRef = useRef<HTMLDivElement | null>(null);
   const equipmentById = new Map(equipment.map((item) => [item.id, item]));
+
+  useEffect(() => {
+    if (!focusedAccessoryProposalId || !focusedAccessoryRef.current) {
+      return;
+    }
+
+    focusedAccessoryRef.current.focus({ preventScroll: true });
+    focusedAccessoryRef.current.scrollIntoView({
+      behavior: "smooth",
+      block: "nearest",
+    });
+  }, [decisions, focusedAccessoryProposalId]);
 
   if (decisions.length === 0) {
     return null;
@@ -683,25 +714,36 @@ function PendingDecisionList({
 
           if (item.kind === "accessory") {
             const proposal = item.decision.proposal;
+            const isFocused = proposal.id === focusedAccessoryProposalId;
 
             return (
-              <AccessoryDecisionCard
-                decision={item.decision}
-                equipmentById={equipmentById}
+              <div
+                className={
+                  isFocused
+                    ? "rounded outline outline-2 outline-offset-2 outline-[var(--accent)]"
+                    : undefined
+                }
                 key={item.id}
-                result={result}
-                selectedCandidateId={
-                  selectedAccessoryCandidateById[proposal.id] ?? ""
-                }
-                onConfirm={onConfirmAccessoryProposal}
-                onReject={onRejectAccessoryProposal}
-                onSelect={(candidateId) =>
-                  setSelectedAccessoryCandidateById((current) => ({
-                    ...current,
-                    [proposal.id]: candidateId,
-                  }))
-                }
-              />
+                ref={isFocused ? focusedAccessoryRef : undefined}
+                tabIndex={isFocused ? -1 : undefined}
+              >
+                <AccessoryDecisionCard
+                  decision={item.decision}
+                  equipmentById={equipmentById}
+                  result={result}
+                  selectedCandidateId={
+                    selectedAccessoryCandidateById[proposal.id] ?? ""
+                  }
+                  onConfirm={onConfirmAccessoryProposal}
+                  onReject={onRejectAccessoryProposal}
+                  onSelect={(candidateId) =>
+                    setSelectedAccessoryCandidateById((current) => ({
+                      ...current,
+                      [proposal.id]: candidateId,
+                    }))
+                  }
+                />
+              </div>
             );
           }
 
@@ -4446,15 +4488,25 @@ function formatSignedMeters(value: number) {
 }
 
 function formatTotalCalculationLength(result: TechnicalCalculationResult) {
-  if (result.totals.calculationLengthMeters !== null) {
-    return formatCalculationMeters(result.totals.calculationLengthMeters);
+  const state = calculationLengthState(result);
+
+  if (state.kind === "resolved") {
+    return formatCalculationMeters(state.meters);
   }
 
-  if (result.totals.physicalLengthMeters === null) {
+  if (state.kind === "missing_route") {
+    return "Sin recorrido confirmado";
+  }
+
+  if (state.kind === "missing_scale") {
     return "Escala pendiente";
   }
 
-  if (result.totals.accessoryEquivalentLengthMeters === null) {
+  if (state.kind === "pending_physical_length") {
+    return "Longitud física pendiente";
+  }
+
+  if (state.kind === "pending_accessory_equivalent") {
     return "Equiv. pendiente";
   }
 

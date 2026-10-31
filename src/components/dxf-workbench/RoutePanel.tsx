@@ -755,6 +755,10 @@ function RouteMainFlow({
         </div>
       )}
 
+      <p className="mt-2 text-[var(--muted)]">
+        Generá una propuesta o dibujá el recorrido para habilitar la revisión
+        técnica.
+      </p>
       <button
         className="mt-2 w-full rounded border border-[var(--accent)] bg-[var(--accent)] px-2 py-1 font-medium text-white hover:bg-[var(--accent-strong)] disabled:border-[var(--line)] disabled:bg-white disabled:text-[var(--muted)]"
         disabled={!canGenerateProposal}

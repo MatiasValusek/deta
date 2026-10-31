@@ -1,7 +1,10 @@
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
 import type { Point2D } from "@/lib/geometry/types";
+import { calculateTechnicalTree } from "@/lib/calculation/technicalTree";
+import type { AccessoryProposalTechnicalReview } from "@/lib/calculation/accessoryCatalogCandidates";
 import { generateAutomaticRouteProposal } from "@/lib/routing/autoProposal";
 import {
+  createEmptyRouteNetwork,
   findRouteNodeByEquipment,
   findTerminalStartNodeByEquipment,
   getConnectedApplianceEquipmentIds,
@@ -12,6 +15,7 @@ import {
   routeEquipmentTerminalSegmentId,
   routeEquipmentTerminalStartNodeId,
 } from "@/lib/routing/network";
+import type { AccessoryProposal } from "@/lib/routing/routeAccessoryProposals";
 import {
   movePhysicalRouteNode,
   type PhysicalRouteEditResult,
@@ -29,6 +33,11 @@ import {
   mainWorkflowDefaultPanel,
   mainWorkflowPanelSections,
 } from "@/lib/workbench/mainWorkflowNavigation";
+import { resolveAccessoryReviewFocus } from "@/lib/workbench/accessoryReviewNavigation";
+import {
+  calculationLengthState,
+  technicalCalculationNeedsRoute,
+} from "@/lib/workbench/calculationPresentation";
 
 export type ReviewStageVerificationResult = {
   name: string;
@@ -56,11 +65,105 @@ export function runReviewStageVerifications() {
         "Recorrido debe conservar su panel de resumen.",
       );
       assert(
-        mainWorkflowPanelSections("route").includes("calculation"),
+        !mainWorkflowPanelSections("route").includes("calculation"),
+        "Recorrido no debe mostrar el cálculo de una red confirmada vacía.",
+      );
+      assert(
+        mainWorkflowPanelSections("route", {
+          routeAccessoryReviewAvailable: true,
+        }).includes("calculation"),
         "Recorrido debe permitir mostrar la revisión técnica de accesorios.",
       );
       assertEqual(mainWorkflowPanelSections("calculate").length, 1);
       assertEqual(mainWorkflowPanelSections("calculate")[0], "calculation");
+    },
+  );
+
+  verify(
+    results,
+    "Ver resuelve proposal.id y conserva el foco del grupo sin geometría seleccionable",
+    () => {
+      const elbow = accessoryProposalFixture(
+        "proposal:elbow",
+        "missing-node:elbow",
+        "elbow",
+        ["missing-segment:elbow"],
+      );
+      const tees = [1, 2, 3].map((index) =>
+        accessoryProposalFixture(
+          `proposal:tee:${index}`,
+          `missing-node:tee:${index}`,
+          "tee",
+          [`missing-segment:tee:${index}`],
+        ),
+      );
+      const proposals = [elbow, ...tees];
+      const reviews = [
+        accessoryReviewFixture(elbow),
+        ...tees.map((tee) =>
+          accessoryReviewFixture(tee, tees.map((item) => item.id)),
+        ),
+      ];
+      const elbowFocus = resolveAccessoryReviewFocus({
+        proposals,
+        referenceIds: [elbow.id],
+        reviews,
+      });
+      const groupedTeeFocus = resolveAccessoryReviewFocus({
+        proposals,
+        referenceIds: [tees[2]!.id],
+        reviews,
+      });
+
+      assert(elbowFocus, "El ID del codo debe abrir su revisión.");
+      assertEqual(elbowFocus.proposalId, elbow.id);
+      assertEqual(elbowFocus.nodeId, "missing-node:elbow");
+      assert(groupedTeeFocus, "El ID de una tee debe abrir el grupo equivalente.");
+      assertEqual(groupedTeeFocus.proposalId, tees[0]!.id);
+      assertEqual(groupedTeeFocus.nodeId, "missing-node:tee:3");
+      assertEqual(createEmptyRouteNetwork().nodes.length, 0);
+    },
+  );
+
+  verify(
+    results,
+    "red vacía distingue recorrido ausente de escala pendiente",
+    () => {
+      const equipment = fixtureEquipment();
+      const emptyResult = calculateTechnicalTree({
+        equipment,
+        minSegmentLengthSource: EPSILON,
+        network: createEmptyRouteNetwork(),
+        scaleMetersPerSourceUnit: 1,
+      });
+      const unscaledConfirmedResult = calculateTechnicalTree({
+        equipment,
+        minSegmentLengthSource: EPSILON,
+        network: fixtureNetwork(),
+        scaleMetersPerSourceUnit: null,
+      });
+      const scaledConfirmedResult = calculateTechnicalTree({
+        equipment,
+        minSegmentLengthSource: EPSILON,
+        network: fixtureNetwork(),
+        scaleMetersPerSourceUnit: 0.1,
+      });
+
+      assertEqual(technicalCalculationNeedsRoute(emptyResult), true);
+      assertEqual(calculationLengthState(emptyResult).kind, "missing_route");
+      assertEqual(
+        emptyResult.issues.some((issue) => issue.code === "missing_scale"),
+        false,
+      );
+      assertEqual(
+        calculationLengthState(unscaledConfirmedResult).kind,
+        "missing_scale",
+      );
+      assertEqual(technicalCalculationNeedsRoute(scaledConfirmedResult), false);
+      assert(
+        calculationLengthState(scaledConfirmedResult).kind !== "missing_route",
+        "Una red manual confirmada no debe presentarse como recorrido ausente.",
+      );
     },
   );
 
@@ -199,6 +302,54 @@ type ReviewStageFixture = {
 };
 
 type ReviewTransitionFixture = ReturnType<typeof reviewTransitionFixture>;
+
+function accessoryProposalFixture(
+  id: string,
+  nodeId: string,
+  kind: "elbow" | "tee",
+  incidentSegmentIds: string[],
+): AccessoryProposal {
+  return {
+    confidence: "high",
+    evidence: {
+      angleClassification: kind === "tee" ? "branch" : "turn",
+      degree: kind === "tee" ? 3 : 2,
+      incidentNodeIds: [],
+    },
+    geometryKey: `geometry:${id}`,
+    id,
+    incidentSegmentIds,
+    kind,
+    nodeId,
+    ownerResolution: {
+      candidateSegmentIds: incidentSegmentIds,
+      ownerSegmentId: incidentSegmentIds[0]!,
+      status: "unambiguous",
+    },
+    position: point(1, 1),
+    reason: "Revisión profesional pendiente.",
+    state: "needs_review",
+  };
+}
+
+function accessoryReviewFixture(
+  proposal: AccessoryProposal,
+  equivalentProposalIds?: string[],
+): AccessoryProposalTechnicalReview {
+  return {
+    candidates: [],
+    equivalentProposalIds,
+    incidentSegments: proposal.incidentSegmentIds.map((segmentId) => ({
+      diameter: null,
+      segmentId,
+    })),
+    ownerResolution: proposal.ownerResolution,
+    proposalId: proposal.id,
+    reason: "Faltan datos para resolver el catálogo.",
+    selectedDiameter: null,
+    status: "requires_more_information",
+  };
+}
 
 function reviewStageFixture(): ReviewStageFixture {
   return {

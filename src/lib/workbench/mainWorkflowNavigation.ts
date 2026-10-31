@@ -21,7 +21,7 @@ const PANEL_SECTIONS: Record<
   deliver: ["calculation"],
   equipment: ["equipment"],
   plan: ["scale"],
-  route: ["route", "calculation"],
+  route: ["route"],
 };
 
 const DEFAULT_PANEL: Record<
@@ -35,7 +35,14 @@ const DEFAULT_PANEL: Record<
   route: "route",
 };
 
-export function mainWorkflowPanelSections(stage: MainWorkflowStageId) {
+export function mainWorkflowPanelSections(
+  stage: MainWorkflowStageId,
+  options?: { routeAccessoryReviewAvailable?: boolean },
+) {
+  if (stage === "route" && options?.routeAccessoryReviewAvailable) {
+    return ["route", "calculation"] satisfies MainWorkflowPanelSectionId[];
+  }
+
   return PANEL_SECTIONS[stage];
 }
 
