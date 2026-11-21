@@ -4,8 +4,8 @@ import { ROTULO_RECUADRO } from "@/lib/obra/rotuloFormato";
 import {
   A3_MM,
   MARCO_LAMINA,
-  RECUADROS_PLANO_INSTALACION,
-  type RecuadroLamina,
+  armarPlanoInstalacion,
+  type OpcionesLamina,
 } from "./planoInstalacionArmado";
 import { crearPlanoInstalacionPdf } from "./planoInstalacionPdf";
 
@@ -14,15 +14,22 @@ export type PlanoInstalacionVerificationResult = {
   status: "passed";
 };
 
+const VARIANTES: OpcionesLamina[] = [
+  {},
+  { conCorte: true },
+  { conCroquis: true },
+  { conCorte: true, conCroquis: true },
+];
+
 export async function runPlanoInstalacionVerifications() {
   const results: PlanoInstalacionVerificationResult[] = [];
-  const zonas = [
-    ...RECUADROS_PLANO_INSTALACION,
-    { ...ROTULO_RECUADRO, id: "rotulo" } as unknown as RecuadroLamina,
+  const zonasDe = (opciones: OpcionesLamina) => [
+    ...armarPlanoInstalacion(opciones),
+    ROTULO_RECUADRO,
   ];
 
   results.push(check("los recuadros quedan dentro del marco", () =>
-    zonas.every(
+    VARIANTES.flatMap(zonasDe).every(
       (r) =>
         r.x1 >= MARCO_LAMINA.x1 &&
         r.x2 <= MARCO_LAMINA.x2 &&
@@ -31,17 +38,36 @@ export async function runPlanoInstalacionVerifications() {
     ),
   ));
   results.push(check("los recuadros y el rótulo no se pisan", () =>
-    zonas.every((a, i) =>
-      zonas.slice(i + 1).every(
-        (b) => a.x2 <= b.x1 || b.x2 <= a.x1 || a.y2 <= b.y1 || b.y2 <= a.y1,
-      ),
-    ),
+    VARIANTES.every((opciones) => {
+      const zonas = zonasDe(opciones);
+
+      return zonas.every((a, i) =>
+        zonas.slice(i + 1).every(
+          (b) => a.x2 <= b.x1 || b.x2 <= a.x1 || a.y2 <= b.y1 || b.y2 <= a.y1,
+        ),
+      );
+    }),
   ));
-  results.push(check("cubren toda la superficie del marco", () => {
-    const area = (r: { x1: number; y1: number; x2: number; y2: number }) =>
-      (r.x2 - r.x1) * (r.y2 - r.y1);
-    const suma = zonas.reduce((total, zona) => total + area(zona), 0);
-    return Math.abs(suma - area(MARCO_LAMINA)) < 0.01;
+  results.push(check("el rótulo comparte la esquina con el marco", () =>
+    ROTULO_RECUADRO.x2 === MARCO_LAMINA.x2 &&
+    ROTULO_RECUADRO.y2 === MARCO_LAMINA.y2,
+  ));
+  results.push(check("por defecto no hay corte ni croquis y la planta usa toda la altura", () => {
+    const zonas = armarPlanoInstalacion();
+    const planta = zonas.find((zona) => zona.id === "planta");
+
+    return (
+      !zonas.some((zona) => zona.id === "corte" || zona.id === "croquis") &&
+      planta?.y2 === MARCO_LAMINA.y2
+    );
+  }));
+  results.push(check("con corte, la planta deja la franja inferior", () => {
+    const zonas = armarPlanoInstalacion({ conCorte: true });
+
+    return (
+      zonas.find((zona) => zona.id === "planta")?.y2 === 210 &&
+      zonas.find((zona) => zona.id === "corte")?.y2 === MARCO_LAMINA.y2
+    );
   }));
 
   const bytes = await crearPlanoInstalacionPdf(

@@ -5,7 +5,8 @@ import { dibujarRotuloPdf } from "@/lib/obra/rotuloPdf";
 import {
   A3_MM,
   MARCO_LAMINA,
-  RECUADROS_PLANO_INSTALACION,
+  armarPlanoInstalacion,
+  type OpcionesLamina,
 } from "./planoInstalacionArmado";
 
 const NEGRO = rgb(0, 0, 0);
@@ -15,7 +16,10 @@ const MARGEN_TITULO_MM = 3;
 const mmAPt = (mm: number) => mm / MM_POR_PT;
 
 /** Lámina A3 con el armado vacío: marco, rótulo y recuadros de cada parte. */
-export async function crearPlanoInstalacionPdf(rotulo: RotuloContenido) {
+export async function crearPlanoInstalacionPdf(
+  rotulo: RotuloContenido,
+  opciones: OpcionesLamina = {},
+) {
   const doc = await PDFDocument.create();
   const page = doc.addPage([mmAPt(A3_MM.ancho), mmAPt(A3_MM.alto)]);
   // Reemplazo en negrita de Arial Black: la fuente original no se puede distribuir.
@@ -34,7 +38,7 @@ export async function crearPlanoInstalacionPdf(rotulo: RotuloContenido) {
   doc.setTitle("Plano de instalación");
   rectangulo(MARCO_LAMINA);
 
-  for (const recuadro of RECUADROS_PLANO_INSTALACION) {
+  for (const recuadro of armarPlanoInstalacion(opciones)) {
     rectangulo(recuadro);
     page.drawText(recuadro.titulo, {
       x: mmAPt(recuadro.x1 + MARGEN_TITULO_MM),
