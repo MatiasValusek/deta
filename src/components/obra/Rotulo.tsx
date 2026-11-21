@@ -1,3 +1,4 @@
+import { useSyncExternalStore } from "react";
 import type { RotuloContenido } from "@/lib/obra/obraData";
 import {
   MM_POR_PT,
@@ -12,15 +13,17 @@ const GROSOR_MM = ROTULO_LINEA_PT * MM_POR_PT;
 
 let lienzo: CanvasRenderingContext2D | null = null;
 
-function medirTexto(texto: string, altoMm: number) {
-  if (typeof document === "undefined") {
-    return texto.length * altoMm * 0.7;
-  }
+const suscribirNada = () => () => {};
 
+function estimarTexto(texto: string, altoMm: number) {
+  return texto.length * altoMm * 0.7;
+}
+
+function medirTexto(texto: string, altoMm: number) {
   lienzo ??= document.createElement("canvas").getContext("2d");
 
   if (!lienzo) {
-    return texto.length * altoMm * 0.7;
+    return estimarTexto(texto, altoMm);
   }
 
   lienzo.font = `${PESO} 100px ${FUENTE}`;
@@ -29,7 +32,16 @@ function medirTexto(texto: string, altoMm: number) {
 
 export function Rotulo({ contenido }: { contenido: RotuloContenido }) {
   const { x1, x2, y1, y2 } = ROTULO_RECUADRO;
-  const { textos, lineasFirma } = armarRotulo(contenido, medirTexto);
+  // El servidor no puede medir fuentes: la primera pintada usa la misma estimación en ambos.
+  const puedeMedir = useSyncExternalStore(
+    suscribirNada,
+    () => true,
+    () => false,
+  );
+  const { textos, lineasFirma } = armarRotulo(
+    contenido,
+    puedeMedir ? medirTexto : estimarTexto,
+  );
 
   return (
     <svg
