@@ -60,6 +60,7 @@ Lo más valioso. Usa lo que el motor ya calcula.
 - `sections/routeHeightProposals.ts` queda sin conectar.
 - `CLAUDE.md` y `PLAN.md` se versionan en git.
 - Antes de la Fase 1 se agrega `npm run verify` para correr las verificaciones del motor.
+  Resultado inicial: 41 grupos, 317 verificaciones, 0 fallas.
 
 ### Fase 0 — Resultado (2026-11-20, sobre el commit `3bcf275`)
 
