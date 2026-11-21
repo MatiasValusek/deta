@@ -8,6 +8,7 @@ import {
   type OpcionesLamina,
 } from "./planoInstalacionArmado";
 import { crearPlanoInstalacionPdf } from "./planoInstalacionPdf";
+import { ajustarAZona } from "./plantaPdf";
 
 export type PlanoInstalacionVerificationResult = {
   name: string;
@@ -67,6 +68,23 @@ export async function runPlanoInstalacionVerifications() {
     return (
       zonas.find((zona) => zona.id === "planta")?.y2 === 210 &&
       zonas.find((zona) => zona.id === "corte")?.y2 === MARCO_LAMINA.y2
+    );
+  }));
+
+  results.push(check("la planta entra en su zona, sin deformar y con el norte arriba", () => {
+    const zona = { x1: 5, y1: 5, x2: 230, y2: 292 };
+    const aHoja = ajustarAZona({ minX: 0, minY: 0, maxX: 20, maxY: 10 }, zona);
+    const abajoIzquierda = aHoja({ x: 0, y: 0 });
+    const arribaDerecha = aHoja({ x: 20, y: 10 });
+    const ancho = arribaDerecha.x - abajoIzquierda.x;
+    const alto = abajoIzquierda.y - arribaDerecha.y;
+
+    return (
+      abajoIzquierda.x >= zona.x1 &&
+      arribaDerecha.x <= zona.x2 &&
+      arribaDerecha.y >= zona.y1 &&
+      abajoIzquierda.y <= zona.y2 &&
+      Math.abs(ancho / alto - 2) < 0.000001
     );
   }));
 

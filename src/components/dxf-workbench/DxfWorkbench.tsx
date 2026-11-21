@@ -6545,7 +6545,9 @@ export function DxfWorkbench() {
           isPlanActive={activeBase?.type === "plan"}
           mode={activeWorkflowStage === "deliver" ? "deliver" : "calculate"}
           pipeSystem={SIGAS_PIPE_SYSTEM}
+          planDrawing={planBase?.sourceType === "dxf" ? planBase.drawing : null}
           planReady={Boolean(planBase)}
+          planVisibleLayers={planBase?.visibleLayers ?? {}}
           result={technicalCalculationResult}
           routeNetwork={planBase?.routeNetwork ?? createEmptyRouteNetwork()}
           scaleMetersPerSourceUnit={calibrationScaleMetersPerSourceUnit(planBase)}

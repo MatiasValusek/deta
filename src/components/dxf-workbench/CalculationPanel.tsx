@@ -86,9 +86,12 @@ import {
 import {
   downloadTechnicalPdf,
 } from "@/lib/calculation/technicalPdfDownload";
+import { DEFAULT_PROJECT_GAS_CONFIG } from "@/lib/calculation/projectGas";
+import type { NormalizedDrawing } from "@/lib/geometry/types";
 import type {
   SigasAccessoryExactSelectionDecision,
 } from "@/lib/calculation/pipeSystems/sigas/sigasAccessoryExactSelection";
+import { PlanoInstalacionPreview } from "./PlanoInstalacionPreview";
 
 type CalculationPanelMode = "calculate" | "deliver";
 
@@ -104,7 +107,9 @@ type CalculationPanelProps = {
   isPlanActive: boolean;
   mode?: CalculationPanelMode;
   pipeSystem: PipeSystem;
+  planDrawing: NormalizedDrawing | null;
   planReady: boolean;
+  planVisibleLayers: Record<string, boolean>;
   result: TechnicalCalculationResult | null;
   routeNetwork: ManualRouteNetwork;
   scaleMetersPerSourceUnit: number | null;
@@ -205,7 +210,9 @@ export function CalculationPanel({
   isPlanActive,
   mode = "calculate",
   pipeSystem,
+  planDrawing,
   planReady,
+  planVisibleLayers,
   result,
   routeNetwork,
   scaleMetersPerSourceUnit,
@@ -489,6 +496,20 @@ export function CalculationPanel({
         <div className="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
           {pdfExportError}
         </div>
+      ) : null}
+
+      {isDeliverMode ? (
+        <PlanoInstalacionPreview
+          calculationSheet={calculationSheet}
+          drawing={planDrawing}
+          equipment={equipment}
+          materialTakeoff={materialTakeoff}
+          network={routeNetwork}
+          projectGas={DEFAULT_PROJECT_GAS_CONFIG}
+          result={result}
+          revisionLista={canExportDocuments}
+          visibleLayers={planVisibleLayers}
+        />
       ) : null}
 
       {result ? (

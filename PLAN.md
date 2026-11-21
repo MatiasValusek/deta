@@ -24,6 +24,9 @@ Lo más valioso. Usa lo que el motor ya calcula.
 - [ ] **Lámina "Plano de instalación" A3** con el mismo armado que los planos reales de
       `cata/`: planta + traza roja + tramos numerados, isométrica, croquis de ubicación,
       gabinete 50×40×30, tablas Referencias / Materiales / Cálculo SIGAS, rótulo.
+  - [x] Vista previa temporal desde Entregar, conectada al DXF, cañería, artefactos,
+        resultados del cálculo y datos de obra actuales. No reemplaza la descarga existente.
+  - [ ] Completar isométrica, gabinete y corte opcional antes de cerrar la lámina.
 - [ ] **Planilla de accesorios por tramo** igual a la hoja "Cal. Artefactos" del Excel.
 - [ ] **Lámina "Factibilidad" A3:** planta + croquis + rótulo.
 - [ ] Croquis de ubicación simple: manzana, calles (4 nombres), distancias a esquina, norte.
@@ -54,6 +57,19 @@ Lo más valioso. Usa lo que el motor ya calcula.
 ---
 
 ## Notas
+
+### Integración temporal del Plano de instalación A3 (2026-11-21)
+- La vista A3 se genera en el navegador con los datos actuales del área de trabajo. No usa
+  datos ficticios, no guarda el PDF en el proyecto y mantiene la exportación anterior.
+- Si faltan datos de obra, DXF, medidor, artefactos, cañería o cálculo resuelto, la interfaz
+  explica qué falta y dónde completarlo antes de habilitar la vista.
+- **Duda pendiente:** `plantaPdf.ts` recibe geometría normalizada de DXF; falta decidir cómo
+  representar una Planta cargada desde PDF sin rasterizarla ni perder escala.
+- **Duda pendiente:** el estado actual no guarda qué artefactos son bocas taponadas. La tabla
+  no puede marcarlas hasta definir ese dato en la Fase 2, sin cambiar el cálculo.
+- **Duda pendiente:** el importador normalizado no entrega textos ni cotas del DXF a la lámina.
+  Falta decidir si se amplía la importación o si esas anotaciones se reconstruyen al exportar.
+- Isométrica, gabinete y corte siguen sin implementar, por decisión de alcance de esta tarea.
 
 ### Decisiones tras la Fase 0 (2026-11-20)
 - Los paneles ocultos (diagnóstico, preparación del plano, obstáculos) quedan para

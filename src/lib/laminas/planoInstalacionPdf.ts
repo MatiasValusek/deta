@@ -9,6 +9,7 @@ import {
   type OpcionesLamina,
   type RecuadroId,
 } from "./planoInstalacionArmado";
+import { dibujarPlantaPdf, type DatosPlanta } from "./plantaPdf";
 import { dibujarTablasPdf } from "./tablasPdf";
 import type { TablasPlano } from "./tablasPlano";
 
@@ -24,6 +25,7 @@ export async function crearPlanoInstalacionPdf(
   rotulo: RotuloContenido,
   opciones: OpcionesLamina = {},
   tablas?: TablasPlano,
+  planta?: DatosPlanta,
 ) {
   const doc = await PDFDocument.create();
   const page = doc.addPage([mmAPt(A3_MM.ancho), mmAPt(A3_MM.alto)]);
@@ -50,7 +52,16 @@ export async function crearPlanoInstalacionPdf(
       continue;
     }
 
-    rectangulo(recuadro);
+    // Como en los planos reales, la planta va sin recuadro propio.
+    if (recuadro.id === "planta") {
+      if (planta) {
+        dibujarPlantaPdf({ datos: planta, fuente, page, zona: recuadro });
+        continue;
+      }
+    } else {
+      rectangulo(recuadro);
+    }
+
     page.drawText(recuadro.titulo, {
       x: mmAPt(recuadro.x1 + MARGEN_TITULO_MM),
       y: yPdf(recuadro.tituloY + ALTO_TITULO_MM * ASCENSO),
