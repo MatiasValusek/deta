@@ -25,6 +25,8 @@ export type DrawingLayer = {
   colorIndex: number | null;
   trueColor: string | null;
   trueColorValue: number | null;
+  lineType?: string | null;
+  lineweight?: number | null;
 };
 
 export type DrawingColorSource =
@@ -53,7 +55,11 @@ export type DrawingVisualMetadata = {
   resolvedColor: string | null;
   colorSource: DrawingColorSource;
   lineType: string | null;
+  lineTypePattern?: number[] | null;
+  lineTypeScale?: number | null;
+  resolvedLineType?: string | null;
   lineweight: number | null;
+  resolvedLineweight?: number | null;
   blockName: string | null;
   sourceEntityType: string;
 };
@@ -107,11 +113,28 @@ export type HatchPrimitive = BasePrimitive & {
   boundaries: HatchBoundary[];
 };
 
+export type TextPrimitive = BasePrimitive & {
+  kind: "text";
+  position: Point2D;
+  alignmentPoint: Point2D | null;
+  text: string;
+  rawText: string;
+  height: number;
+  width: number | null;
+  widthFactor: number;
+  rotation: number;
+  horizontalAlignment: number | null;
+  verticalAlignment: number | null;
+  attachmentPoint: number | null;
+  multiline: boolean;
+};
+
 export type DrawingPrimitive =
   | LinePrimitive
   | PolylinePrimitive
   | ArcPrimitive
-  | HatchPrimitive;
+  | HatchPrimitive
+  | TextPrimitive;
 
 export type EntityCountMap = Record<string, number>;
 

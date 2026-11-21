@@ -1,4 +1,18 @@
-import { rgb, type PDFFont, type PDFPage } from "pdf-lib";
+import {
+  beginText,
+  endText,
+  LineCapStyle,
+  popGraphicsState,
+  pushGraphicsState,
+  rgb,
+  setCharacterSqueeze,
+  setFillingRgbColor,
+  setFontAndSize,
+  setTextMatrix,
+  showText,
+  type PDFFont,
+  type PDFPage,
+} from "pdf-lib";
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
 import type { Bounds, DrawingPrimitive, NormalizedDrawing, Point2D } from "@/lib/geometry/types";
 import { MM_POR_PT } from "@/lib/obra/rotuloFormato";
@@ -38,6 +52,14 @@ export function ajustarAZona(
   zona: ZonaPlanta,
   margenMm = MARGEN_MM,
 ) {
+  return crearAjusteAZona(limites, zona, margenMm).punto;
+}
+
+function crearAjusteAZona(
+  limites: Bounds,
+  zona: ZonaPlanta,
+  margenMm = MARGEN_MM,
+) {
   const anchoFuente = Math.max(limites.maxX - limites.minX, 1e-9);
   const altoFuente = Math.max(limites.maxY - limites.minY, 1e-9);
   const anchoUtil = zona.x2 - zona.x1 - margenMm * 2;
@@ -46,10 +68,13 @@ export function ajustarAZona(
   const offsetX = zona.x1 + margenMm + (anchoUtil - anchoFuente * escala) / 2;
   const offsetY = zona.y1 + margenMm + (altoUtil - altoFuente * escala) / 2;
 
-  return (punto: Point2D): Point2D => ({
-    x: offsetX + (punto.x - limites.minX) * escala,
-    y: offsetY + (limites.maxY - punto.y) * escala,
-  });
+  return {
+    escala,
+    punto: (punto: Point2D): Point2D => ({
+      x: offsetX + (punto.x - limites.minX) * escala,
+      y: offsetY + (limites.maxY - punto.y) * escala,
+    }),
+  };
 }
 
 export function dibujarPlantaPdf(params: {
@@ -66,8 +91,16 @@ export function dibujarPlantaPdf(params: {
     (entidad) => datos.capasVisibles?.[entidad.layer] !== false,
   );
   const lineasPlano = entidades.flatMap(lineasDeEntidad);
+  const textosPlano = entidades.filter(
+    (entidad): entidad is Extract<DrawingPrimitive, { kind: "text" }> =>
+      entidad.kind === "text",
+  );
   const puntos = [
     ...lineasPlano.flat(),
+    ...textosPlano.flatMap((texto) => [
+      texto.position,
+      ...(texto.alignmentPoint ? [texto.alignmentPoint] : []),
+    ]),
     ...piernas.flatMap((pierna) => [pierna.from, pierna.to]),
   ];
 
@@ -75,20 +108,33 @@ export function dibujarPlantaPdf(params: {
     return;
   }
 
-  const aHoja = ajustarAZona(limitesDe(puntos), zona);
+  const ajuste = crearAjusteAZona(limitesDe(puntos), zona);
+  const aHoja = ajuste.punto;
   const yPdf = (mm: number) => page.getHeight() - mmAPt(mm);
   const aPdf = (punto: Point2D) => {
     const hoja = aHoja(punto);
     return { x: mmAPt(hoja.x), y: yPdf(hoja.y) };
   };
 
-  for (const [desde, hasta] of lineasPlano) {
-    page.drawLine({
-      start: aPdf(desde),
-      end: aPdf(hasta),
-      thickness: LINEA_PLANO_PT,
-      color: NEGRO,
-    });
+  for (const entidad of entidades) {
+    if (entidad.kind === "text") {
+      dibujarTextoArquitectura({ ajuste, entidad, fuente, page, aPdf });
+      continue;
+    }
+
+    const thickness = grosorDeEntidad(entidad);
+    const dashArray = patronDeEntidad(entidad, ajuste.escala, thickness);
+
+    for (const [desde, hasta] of lineasDeEntidad(entidad)) {
+      page.drawLine({
+        start: aPdf(desde),
+        end: aPdf(hasta),
+        thickness,
+        color: NEGRO,
+        dashArray,
+        lineCap: dashArray ? LineCapStyle.Round : LineCapStyle.Butt,
+      });
+    }
   }
   for (const pierna of piernas) {
     page.drawLine({
@@ -139,6 +185,120 @@ export function dibujarPlantaPdf(params: {
   }
 }
 
+function dibujarTextoArquitectura(params: {
+  ajuste: ReturnType<typeof crearAjusteAZona>;
+  entidad: Extract<DrawingPrimitive, { kind: "text" }>;
+  fuente: PDFFont;
+  page: PDFPage;
+  aPdf: (punto: Point2D) => Point2D;
+}) {
+  const { ajuste, entidad, fuente, page, aPdf } = params;
+  const sourcePosition =
+    entidad.alignmentPoint &&
+    ((entidad.horizontalAlignment ?? 0) !== 0 ||
+      (entidad.verticalAlignment ?? 0) !== 0)
+      ? entidad.alignmentPoint
+      : entidad.position;
+  const position = aPdf(sourcePosition);
+  const size = mmAPt(entidad.height * ajuste.escala);
+
+  if (!Number.isFinite(size) || size <= 0) {
+    return;
+  }
+
+  const allowed = new Set(fuente.getCharacterSet());
+  const lines = entidad.text.split("\n").map((line) =>
+    Array.from(line.normalize("NFC"), (character) =>
+      allowed.has(character.codePointAt(0) ?? -1) ? character : "?",
+    ).join(""),
+  );
+  const cos = Math.cos(entidad.rotation);
+  const sin = Math.sin(entidad.rotation);
+  const widthFactor = entidad.widthFactor > 0 ? entidad.widthFactor : 1;
+  const lineHeight = size * 1.2;
+  const verticalOffset = textVerticalOffset(entidad, size);
+
+  for (const [index, line] of lines.entries()) {
+    if (line.length === 0) {
+      continue;
+    }
+
+    const textWidth = fuente.widthOfTextAtSize(line, size) * widthFactor;
+    const horizontalOffset = textHorizontalOffset(entidad, textWidth);
+    const localY = verticalOffset - index * lineHeight;
+    const x = position.x + horizontalOffset * cos - localY * sin;
+    const y = position.y + horizontalOffset * sin + localY * cos;
+
+    page.pushOperators(
+      pushGraphicsState(),
+      beginText(),
+      setFillingRgbColor(0, 0, 0),
+      setFontAndSize(fuente.name, size),
+      setCharacterSqueeze(widthFactor * 100),
+      setTextMatrix(cos, sin, -sin, cos, x, y),
+      showText(fuente.encodeText(line)),
+      endText(),
+      popGraphicsState(),
+    );
+  }
+}
+
+function textHorizontalOffset(
+  entidad: Extract<DrawingPrimitive, { kind: "text" }>,
+  width: number,
+) {
+  if (entidad.attachmentPoint) {
+    const column = ((entidad.attachmentPoint - 1) % 3) + 1;
+    return column === 2 ? -width / 2 : column === 3 ? -width : 0;
+  }
+
+  return entidad.horizontalAlignment === 1 || entidad.horizontalAlignment === 4
+    ? -width / 2
+    : entidad.horizontalAlignment === 2
+      ? -width
+      : 0;
+}
+
+function textVerticalOffset(
+  entidad: Extract<DrawingPrimitive, { kind: "text" }>,
+  height: number,
+) {
+  if (entidad.attachmentPoint) {
+    const row = Math.ceil(entidad.attachmentPoint / 3);
+    return row === 1 ? -height : row === 2 ? -height / 2 : 0;
+  }
+
+  return entidad.verticalAlignment === 3
+    ? -height
+    : entidad.verticalAlignment === 2
+      ? -height / 2
+      : 0;
+}
+
+function grosorDeEntidad(entidad: DrawingPrimitive) {
+  const hundredthsOfMillimeter = entidad.visual.resolvedLineweight;
+
+  return hundredthsOfMillimeter === undefined || hundredthsOfMillimeter === null
+    ? LINEA_PLANO_PT
+    : mmAPt(hundredthsOfMillimeter / 100);
+}
+
+function patronDeEntidad(
+  entidad: DrawingPrimitive,
+  escala: number,
+  thickness: number,
+) {
+  const pattern = entidad.visual.lineTypePattern;
+
+  if (!pattern || pattern.length === 0) {
+    return undefined;
+  }
+
+  return pattern.map((length) =>
+    Math.max(mmAPt(Math.abs(length) * escala), Math.max(thickness, 0.1)),
+  );
+}
+
 function lineasDeEntidad(entidad: DrawingPrimitive): Array<[Point2D, Point2D]> {
   if (entidad.kind === "line") {
     return [[entidad.start, entidad.end]];
@@ -148,6 +308,9 @@ function lineasDeEntidad(entidad: DrawingPrimitive): Array<[Point2D, Point2D]> {
   }
   if (entidad.kind === "hatch") {
     return entidad.rings.flatMap((anillo) => unir(anillo, true));
+  }
+  if (entidad.kind === "text") {
+    return [];
   }
 
   const fin =

@@ -54,6 +54,15 @@ export function addEntityToBounds(
     return entity.rings.flat().reduce(addPointToBounds, bounds);
   }
 
+  if (entity.kind === "text") {
+    return entity.alignmentPoint
+      ? addPointToBounds(
+          addPointToBounds(bounds, entity.position),
+          entity.alignmentPoint,
+        )
+      : addPointToBounds(bounds, entity.position);
+  }
+
   return addArcToBounds(bounds, entity);
 }
 

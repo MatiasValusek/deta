@@ -26,6 +26,9 @@ Lo más valioso. Usa lo que el motor ya calcula.
       gabinete 50×40×30, tablas Referencias / Materiales / Cálculo SIGAS, rótulo.
   - [x] Vista previa temporal desde Entregar, conectada al DXF, cañería, artefactos,
         resultados del cálculo y datos de obra actuales. No reemplaza la descarga existente.
+  - [x] La planta DXF conserva y representa TEXT, MTEXT, cotas con bloque gráfico,
+        tipos de línea y espesores heredados por capa o bloque.
+  - [ ] Completar cotas sin bloque gráfico, bloques anidados y formato MTEXT avanzado.
   - [ ] Completar isométrica, gabinete y corte opcional antes de cerrar la lámina.
 - [ ] **Planilla de accesorios por tramo** igual a la hoja "Cal. Artefactos" del Excel.
 - [ ] **Lámina "Factibilidad" A3:** planta + croquis + rótulo.
@@ -67,9 +70,36 @@ Lo más valioso. Usa lo que el motor ya calcula.
   representar una Planta cargada desde PDF sin rasterizarla ni perder escala.
 - **Duda pendiente:** el estado actual no guarda qué artefactos son bocas taponadas. La tabla
   no puede marcarlas hasta definir ese dato en la Fase 2, sin cambiar el cálculo.
-- **Duda pendiente:** el importador normalizado no entrega textos ni cotas del DXF a la lámina.
-  Falta decidir si se amplía la importación o si esas anotaciones se reconstruyen al exportar.
 - Isométrica, gabinete y corte siguen sin implementar, por decisión de alcance de esta tarea.
+
+### Fidelidad de arquitectura DXF en la lámina A3 (2026-11-21)
+- La pérdida estaba repartida entre dos puntos: el importador descartaba TEXT, MTEXT y
+  DIMENSION; el generador PDF ignoraba patrones y espesores que ya estaban parcialmente
+  disponibles. El modelo ahora conserva texto original y visible, posición, alineación,
+  rotación, escala, capa, patrón de línea y espesor resuelto.
+- Las cotas compatibles se recuperan desde su bloque gráfico original. No se calculan ni se
+  inventan medidas. Quedan pendientes las cotas sin bloque, los bloques anidados y las partes
+  de cota expresadas con entidades todavía no soportadas, por ejemplo flechas SOLID.
+- MTEXT conserva párrafos y formato geométrico básico. Quedan pendientes columnas, fuentes,
+  apilados y códigos de formato avanzados; el texto original permanece guardado en el modelo.
+- `plano-base.dxf` no contiene TEXT, MTEXT ni DIMENSION. Sí contiene dos arcos en la capa
+  `puertas punteado`, con patrón `ACAD_ISO02W100` y espesor 0,05 mm; se representan con esos
+  valores originales. Las cotas y nombres de ambientes visibles en la referencia real no se
+  pueden recuperar de este archivo sin inventarlos.
+- Captura de comparación generada desde la interfaz con datos de prueba en
+  `_material-prueba/vistas-previas/captura-interfaz-a3-fidelidad.png`.
+- Para cerrar la validación se revisaron todos los DXF de `_material-prueba`; ninguno tenía
+  TEXT, MTEXT ni DIMENSION. Se creó localmente `dxf-fidelidad-anotado.dxf`, ignorado por Git,
+  con siete textos, dos cotas, cuatro rotaciones, escalas, capas, patrones y espesores distintos.
+- La importación desde la aplicación recuperó 17 líneas, 7 textos y 2 cotas, sin entidades
+  ignoradas. Visor y PDF conservaron posiciones, proporciones, factores de ancho y rotaciones
+  de 0°, 30°, 45° y 90°. Los patrones y espesores coincidieron con el archivo original.
+- Evidencia local: `visor-dxf-fidelidad.png`, `plano-a3-dxf-fidelidad.png`, el PDF generado y
+  `comparacion-dxf-fidelidad.json`, todos dentro de `_material-prueba/vistas-previas/` y fuera
+  de Git.
+- Limitaciones que siguen abiertas: cotas sin bloque gráfico, INSERT anidados, componentes de
+  cota basados en entidades no soportadas y formato MTEXT avanzado. No bloquean las entidades
+  compatibles comprobadas y no se amplía su alcance en esta fase.
 
 ### Decisiones tras la Fase 0 (2026-11-20)
 - Los paneles ocultos (diagnóstico, preparación del plano, obstáculos) quedan para

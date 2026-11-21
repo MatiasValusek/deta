@@ -55,7 +55,7 @@ export async function crearPlanoInstalacionPdf(
     // Como en los planos reales, la planta va sin recuadro propio.
     if (recuadro.id === "planta") {
       if (planta) {
-        dibujarPlantaPdf({ datos: planta, fuente, page, zona: recuadro });
+        dibujarPlantaPdf({ datos: planta, fuente: fuenteTabla, page, zona: recuadro });
         continue;
       }
     } else {
