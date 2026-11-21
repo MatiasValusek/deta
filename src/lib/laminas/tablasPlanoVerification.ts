@@ -70,16 +70,16 @@ export async function runTablasPlanoVerifications() {
     const [primera, segunda] = tablas.referencias.filas;
 
     return (
-      primera.join("|") === "1|Calefón|18.600|2,000|—" &&
-      segunda.join("|") === "2|Cocina|9.300|1,000|Sí"
+      primera.join("|") === "1|CALEFÓN|18.600|2,000" &&
+      segunda.join("|") === "2|COCINA|9.300|1,000" &&
+      tablas.referencias.notasDerecha?.notas.join("|") === "|BOCA TAPONADA"
     );
   });
 
-  check(results, "Materiales deja las llaves de paso al final", () => {
-    const nombres = tablas.materiales.filas.map((fila) => fila[0]);
-
-    return nombres.join("|") === "Caño 25 mm|Codo 25|Llave de paso 20";
-  });
+  check(results, "Materiales resume por tipo y diámetro con marca SIGAS", () =>
+    tablas.materiales.filas.map((fila) => fila.join("|")).join(";") ===
+    "CAÑO|25|8,00 m|SIGAS|044-42;ACCESORIOS|25|3|SIGAS|044-42;LLAVE DE PASO|20|1|SIGAS|044-42",
+  );
 
   check(results, "Cálculo suma longitud real y equivalente", () => {
     const fila = tablas.calculo.filas.find((item) => item[0] === "1-A");
@@ -161,20 +161,28 @@ function hojaFicticia(): TechnicalCalculationSheet {
 }
 
 function materialesFicticios(): TechnicalMaterialTakeoff {
-  const accesorio = (label: string, accessoryKind: "elbow" | "valve") => ({
+  const accesorio = (
+    label: string,
+    accessoryKind: "elbow" | "reduction" | "valve",
+    quantity = 1,
+  ) => ({
     accessoryKind,
     configurationKey: label,
     familyId: label,
     kind: "accessory" as const,
     label,
-    quantity: 1,
+    quantity,
     quantityDomain: "physical_material" as const,
     source: "route_accessory" as const,
     sourceIds: [],
   });
 
   return {
-    accessoryItems: [accesorio("Llave de paso 20", "valve"), accesorio("Codo 25", "elbow")],
+    accessoryItems: [
+      accesorio("Llave Ø20", "valve"),
+      accesorio("Codo Ø25", "elbow", 2),
+      accesorio("Reducción Ø25-20", "reduction"),
+    ],
     calculationQuantities: {
       routeAccessoryEquivalentLengthMetersByRouteId: {},
       routeTransitionEquivalentLengthMetersByRouteId: {},

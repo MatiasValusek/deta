@@ -78,10 +78,11 @@ export function dibujarTablasPdf(params: {
   for (const tabla of tablas) {
     const arriba = y + altoFila;
     const abajo = arriba + altoFila * (tabla.filas.length + 1);
+    const anchoTabla = ancho * (1 - (tabla.notasDerecha?.reserva ?? 0));
     const posiciones = tabla.columnas.reduce<number[]>(
       (acumulado, columna) => [
         ...acumulado,
-        acumulado[acumulado.length - 1] + columna.ancho * ancho,
+        acumulado[acumulado.length - 1] + columna.ancho * anchoTabla,
       ],
       [x],
     );
@@ -90,13 +91,25 @@ export function dibujarTablasPdf(params: {
     page.drawRectangle({
       x: mmAPt(x),
       y: yPdf(arriba + altoFila),
-      width: mmAPt(ancho),
+      width: mmAPt(anchoTabla),
       height: mmAPt(altoFila),
       color: GRIS_ENCABEZADO,
     });
 
     tabla.columnas.forEach((columna, indice) => {
-      texto(columna.titulo, columna, posiciones[indice], columna.ancho * ancho, arriba, fuenteTitulo);
+      texto(columna.titulo, columna, posiciones[indice], columna.ancho * anchoTabla, arriba, fuenteTitulo);
+    });
+    tabla.notasDerecha?.notas.forEach((nota, indiceFila) => {
+      if (nota) {
+        texto(
+          nota,
+          {},
+          x + anchoTabla,
+          ancho - anchoTabla,
+          arriba + altoFila * (indiceFila + 1),
+          fuenteTitulo,
+        );
+      }
     });
     tabla.filas.forEach((fila, indiceFila) => {
       fila.forEach((celda, indice) => {
@@ -107,7 +120,7 @@ export function dibujarTablasPdf(params: {
             celda,
             columna,
             posiciones[indice],
-            columna.ancho * ancho,
+            columna.ancho * anchoTabla,
             arriba + altoFila * (indiceFila + 1),
             fuente,
           );
@@ -116,7 +129,7 @@ export function dibujarTablasPdf(params: {
     });
 
     for (let fila = 0; fila <= tabla.filas.length + 1; fila += 1) {
-      linea(x, arriba + altoFila * fila, x + ancho, arriba + altoFila * fila);
+      linea(x, arriba + altoFila * fila, x + anchoTabla, arriba + altoFila * fila);
     }
     for (const posicion of posiciones) {
       linea(posicion, arriba, posicion, abajo);

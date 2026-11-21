@@ -20,17 +20,24 @@ export type TablaLamina = {
   titulo: string;
   columnas: ColumnaTabla[];
   filas: string[][];
+  /** Texto fuera de la tabla, a la derecha de cada fila. */
+  notasDerecha?: { reserva: number; notas: string[] };
 };
 
 export type TablasPlano = {
   referencias: TablaLamina;
   materiales: TablaLamina;
   calculo: TablaLamina;
+  numeracion: NumeracionPlano;
   avisos: string[];
 };
 
 const SIN_DATO = "—";
 const TOLERANCIA_LONGITUD_M = 0.011;
+const MARCA_SIGAS = "SIGAS";
+const MATRICULA_SIGAS = "044-42";
+const RESERVA_BOCA_TAPONADA = 0.2;
+const ORDEN_MATERIALES = ["CAÑO", "ACCESORIOS", "LLAVE DE PASO"];
 
 export function crearTablasPlano(params: {
   bocasTaponadas?: ReadonlySet<string>;
@@ -56,6 +63,7 @@ export function crearTablasPlano(params: {
     referencias: crearReferencias(params, numeracion, avisos),
     materiales: crearMateriales(params.materialTakeoff, avisos),
     calculo: crearCalculo(params.calculationSheet, numeracion, avisos),
+    numeracion,
     avisos,
   };
 }
@@ -78,7 +86,7 @@ function crearReferencias(
       const numero = etiquetaPorArtefacto.get(item.id) ?? null;
       const consumo = normalizeEquipmentDemand(item, params.projectGas);
       const m3h = consumo.status === "resolved" ? consumo.normalizedFlowM3h : null;
-      const nombre = item.name.trim() || equipmentTypeLabel(item.type);
+      const nombre = (item.name.trim() || equipmentTypeLabel(item.type)).toLocaleUpperCase("es-AR");
       const calorPorM3 = params.projectGas.heatingValueKcalPerM3;
       const kcalh =
         consumo.status !== "resolved"
@@ -98,30 +106,32 @@ function crearReferencias(
 
       return {
         numero,
+        nota: params.bocasTaponadas?.has(item.id) ? "BOCA TAPONADA" : "",
         celdas: [
           numero ?? SIN_DATO,
           nombre,
           kcalh === null ? SIN_DATO : numero_(kcalh, 0),
           m3h === null ? SIN_DATO : numero_(m3h, 3),
-          params.bocasTaponadas?.has(item.id) ? "Sí" : SIN_DATO,
         ],
       };
     })
     .sort((a, b) =>
       (a.numero ?? "~").localeCompare(b.numero ?? "~", "es", { numeric: true }),
-    )
-    .map((fila) => fila.celdas);
+    );
 
   return {
     titulo: "REFERENCIAS",
     columnas: [
-      { titulo: "N°", ancho: 0.08, alinear: "centro" },
-      { titulo: "Artefacto", ancho: 0.42 },
-      { titulo: "kcal/h", ancho: 0.16, alinear: "derecha" },
-      { titulo: "m³/h", ancho: 0.14, alinear: "derecha" },
-      { titulo: "Boca taponada", ancho: 0.2, alinear: "centro" },
+      { titulo: "N°", ancho: 0.1, alinear: "centro" },
+      { titulo: "Artefacto", ancho: 0.5 },
+      { titulo: "kcal/h", ancho: 0.2, alinear: "derecha" },
+      { titulo: "m³/h", ancho: 0.2, alinear: "derecha" },
     ],
-    filas,
+    filas: filas.map((fila) => fila.celdas),
+    notasDerecha: {
+      reserva: RESERVA_BOCA_TAPONADA,
+      notas: filas.map((fila) => fila.nota),
+    },
   };
 }
 
@@ -135,30 +145,69 @@ function crearMateriales(
     );
   }
 
-  const accesorios = [...takeoff.accessoryItems].sort(
-    (a, b) =>
-      Number(a.accessoryKind === "valve") - Number(b.accessoryKind === "valve") ||
-      a.label.localeCompare(b.label, "es", { numeric: true }),
-  );
+  const resumen = new Map<string, { material: string; diametro: string; cantidad: number }>();
+  const sumar = (material: string, diametroTexto: string, cantidad: number) => {
+    const clave = `${material}|${diametroTexto}`;
+    const actual = resumen.get(clave);
+
+    resumen.set(clave, {
+      material,
+      diametro: diametroTexto,
+      cantidad: (actual?.cantidad ?? 0) + cantidad,
+    });
+  };
+
+  for (const item of takeoff.pipeItems) {
+    sumar("CAÑO", diametro(item.diameter), item.physicalLengthMeters);
+  }
+  for (const item of takeoff.accessoryItems) {
+    const medida = mayorDiametroDeEtiqueta(item.label);
+
+    if (medida === null) {
+      avisos.push(`No se pudo leer el diámetro de ${item.label}. Revisalo en Calcular.`);
+    }
+    sumar(
+      item.accessoryKind === "valve" ? "LLAVE DE PASO" : "ACCESORIOS",
+      medida === null ? SIN_DATO : String(medida),
+      item.quantity,
+    );
+  }
 
   return {
     titulo: "MATERIALES",
     columnas: [
-      { titulo: "Material", ancho: 0.52 },
-      { titulo: "Cantidad", ancho: 0.14, alinear: "derecha" },
-      { titulo: "Marca", ancho: 0.17 },
-      { titulo: "Matrícula", ancho: 0.17 },
+      { titulo: "Material", ancho: 0.32 },
+      { titulo: "Diám. (mm)", ancho: 0.16, alinear: "centro" },
+      { titulo: "Cantidad", ancho: 0.18, alinear: "derecha" },
+      { titulo: "Marca", ancho: 0.17, alinear: "centro" },
+      { titulo: "Matrícula", ancho: 0.17, alinear: "centro" },
     ],
-    filas: [
-      ...takeoff.pipeItems.map((item) => [
-        `Caño ${diametro(item.diameter)}`,
-        `${numero_(item.physicalLengthMeters, 2)} m`,
-        "",
-        "",
+    filas: [...resumen.values()]
+      .sort(
+        (a, b) =>
+          ORDEN_MATERIALES.indexOf(a.material) - ORDEN_MATERIALES.indexOf(b.material) ||
+          a.diametro.localeCompare(b.diametro, "es", { numeric: true }),
+      )
+      .map((fila) => [
+        fila.material,
+        fila.diametro,
+        fila.material === "CAÑO"
+          ? `${numero_(fila.cantidad, 2)} m`
+          : String(fila.cantidad),
+        MARCA_SIGAS,
+        MATRICULA_SIGAS,
       ]),
-      ...accesorios.map((item) => [item.label, String(item.quantity), "", ""]),
-    ],
   };
+}
+
+/** Las reducciones se resumen en su diámetro mayor. */
+function mayorDiametroDeEtiqueta(etiqueta: string) {
+  const medidas = [...etiqueta.matchAll(/Ø\s*(\d+)(?:\s*[-x×]\s*Ø?\s*(\d+))?/g)]
+    .flatMap((coincidencia) => [coincidencia[1], coincidencia[2]])
+    .filter((valor): valor is string => valor !== undefined)
+    .map(Number);
+
+  return medidas.length > 0 ? Math.max(...medidas) : null;
 }
 
 function crearCalculo(
@@ -213,8 +262,8 @@ function crearCalculo(
       { titulo: "Long. equiv. (m)", ancho: 0.15, alinear: "derecha" },
       { titulo: "Long. total (m)", ancho: 0.14, alinear: "derecha" },
       { titulo: "Consumo m³/h", ancho: 0.15, alinear: "derecha" },
-      { titulo: "Diám. tabla", ancho: 0.14, alinear: "centro" },
-      { titulo: "Diám. adoptado", ancho: 0.16, alinear: "centro" },
+      { titulo: "Diám. tabla (mm)", ancho: 0.14, alinear: "centro" },
+      { titulo: "Diám. adoptado (mm)", ancho: 0.16, alinear: "centro" },
     ],
     filas,
   };
@@ -231,7 +280,7 @@ function diametro(valor: PipeDiameterReference | null) {
 
   return valor.externalDiameterMillimeters === undefined
     ? valor.label
-    : `${numero_(valor.externalDiameterMillimeters, 0)} mm`;
+    : numero_(valor.externalDiameterMillimeters, 0);
 }
 
 function numero_(valor: number, decimales: number) {
