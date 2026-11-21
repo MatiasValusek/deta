@@ -1,49 +1,77 @@
 import type { RotuloContenido } from "@/lib/obra/obraData";
+import {
+  MM_POR_PT,
+  ROTULO_LINEA_PT,
+  ROTULO_RECUADRO,
+  armarRotulo,
+} from "@/lib/obra/rotuloFormato";
 
-export function Rotulo({ contenido }: { contenido: RotuloContenido }) {
-  return (
-    <section
-      aria-label="Rótulo"
-      className="w-full max-w-[420px] border-2 border-black bg-white text-[13px] leading-snug text-black"
-    >
-      <h3 className="border-b-2 border-black px-3 py-2 text-center text-sm font-bold">
-        {contenido.titulo}
-      </h3>
-      <div className="border-b border-black">
-        <Linea etiqueta="Propietario" valor={contenido.propietario} />
-        <Linea etiqueta="Calle" valor={contenido.calleNumero} />
-        <p className="min-h-7 px-3 py-1 text-center">{contenido.entreCalles}</p>
-        <Linea etiqueta="Localidad" valor={contenido.localidad} />
-        <Linea etiqueta="Partido" valor={contenido.partido} />
-      </div>
-      <p className="flex min-h-8 justify-between gap-3 border-b border-black px-3 py-1.5">
-        <span className="min-w-0 break-words">
-          <span className="font-semibold">Instalador: </span>
-          {contenido.instalador}
-        </span>
-        <span className="shrink-0">{contenido.matriculaCategoria}</span>
-      </p>
-      <div className="grid grid-cols-2">
-        {contenido.firmas.map((firma, indice) => (
-          <div
-            className={`flex h-20 items-end justify-center pb-1 ${
-              indice === 0 ? "border-r border-black" : ""
-            }`}
-            key={firma}
-          >
-            {firma}
-          </div>
-        ))}
-      </div>
-    </section>
-  );
+const FUENTE = '"Arial Black", Arial, sans-serif';
+const PESO = 900;
+const GROSOR_MM = ROTULO_LINEA_PT * MM_POR_PT;
+
+let lienzo: CanvasRenderingContext2D | null = null;
+
+function medirTexto(texto: string, altoMm: number) {
+  if (typeof document === "undefined") {
+    return texto.length * altoMm * 0.7;
+  }
+
+  lienzo ??= document.createElement("canvas").getContext("2d");
+
+  if (!lienzo) {
+    return texto.length * altoMm * 0.7;
+  }
+
+  lienzo.font = `${PESO} 100px ${FUENTE}`;
+  return (lienzo.measureText(texto).width / 100) * altoMm;
 }
 
-function Linea({ etiqueta, valor }: { etiqueta: string; valor: string }) {
+export function Rotulo({ contenido }: { contenido: RotuloContenido }) {
+  const { x1, x2, y1, y2 } = ROTULO_RECUADRO;
+  const { textos, lineasFirma } = armarRotulo(contenido, medirTexto);
+
   return (
-    <p className="min-h-7 break-words px-3 py-1">
-      <span className="font-semibold">{etiqueta}: </span>
-      {valor}
-    </p>
+    <svg
+      aria-label="Rótulo"
+      className="block h-auto w-full max-w-[420px] bg-white"
+      role="img"
+      viewBox={`${x1} ${y1} ${x2 - x1} ${y2 - y1}`}
+    >
+      <rect
+        fill="white"
+        height={y2 - y1}
+        stroke="black"
+        strokeWidth={GROSOR_MM * 2}
+        width={x2 - x1}
+        x={x1}
+        y={y1}
+      />
+      {lineasFirma.map((linea) => (
+        <line
+          key={linea.x1}
+          stroke="black"
+          strokeWidth={GROSOR_MM}
+          x1={linea.x1}
+          x2={linea.x2}
+          y1={linea.y}
+          y2={linea.y}
+        />
+      ))}
+      {textos.map((item) => (
+        <text
+          fill="black"
+          fontFamily={FUENTE}
+          fontSize={item.altoMm}
+          fontWeight={PESO}
+          key={`${item.xMm}-${item.baseMm}`}
+          x={item.xMm}
+          xmlSpace="preserve"
+          y={item.baseMm}
+        >
+          {item.texto}
+        </text>
+      ))}
+    </svg>
   );
 }

@@ -38,9 +38,13 @@ export function runObraDataVerifications() {
 
     assertEqual(rotulo.titulo, "INSTALACIÓN PARA GAS NATURAL");
     assertEqual(rotulo.propietario, "Persona de Prueba");
-    assertEqual(rotulo.calleNumero, "Calle Uno N° 100");
-    assertEqual(rotulo.entreCalles, "entre Calle Dos y Calle Tres");
-    assertEqual(rotulo.matriculaCategoria, "00000 Cat. 2°");
+    assertEqual(rotulo.calleNumero, "Calle Uno N°100");
+    assertEqual(rotulo.entreCalles, "entre CALLE DOS y CALLE TRES");
+    assertEqual(rotulo.localidad, "LOCALIDAD EJEMPLO");
+    assertEqual(rotulo.partido, "PARTIDO EJEMPLO");
+    assertEqual(rotulo.instalador, "INSTALADOR DE PRUEBA");
+    assertEqual(rotulo.matricula, "00000");
+    assertEqual(rotulo.categoria, "Cat. 2°");
     assertEqual(rotulo.firmas.join(","), "Propietario,Instalador");
   });
 
@@ -49,7 +53,8 @@ export function runObraDataVerifications() {
 
     assertEqual(rotulo.calleNumero, "");
     assertEqual(rotulo.entreCalles, "");
-    assertEqual(rotulo.matriculaCategoria, "");
+    assertEqual(rotulo.matricula, "");
+    assertEqual(rotulo.categoria, "");
   });
 
   verify(results, "cada dato faltante genera un aviso con qué hacer", () => {

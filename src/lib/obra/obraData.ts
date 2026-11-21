@@ -24,7 +24,8 @@ export type RotuloContenido = {
   localidad: string;
   partido: string;
   instalador: string;
-  matriculaCategoria: string;
+  matricula: string;
+  categoria: string;
   firmas: [string, string];
 };
 
@@ -108,23 +109,27 @@ export function crearRotulo(
 ): RotuloContenido {
   const calle = obra.calle.trim();
   const numero = obra.numero.trim();
-  const entre = [obra.entreCalle1.trim(), obra.entreCalle2.trim()]
+  const entre = [obra.entreCalle1, obra.entreCalle2]
+    .map(mayusculas)
     .filter(Boolean)
     .join(" y ");
-  const matricula = instalador.matricula.trim();
-  const categoria = instalador.categoria ? `Cat. ${instalador.categoria}°` : "";
 
   return {
     titulo: "INSTALACIÓN PARA GAS NATURAL",
     propietario: obra.propietario.trim(),
-    calleNumero: [calle, numero ? `N° ${numero}` : ""].filter(Boolean).join(" "),
+    calleNumero: [calle, numero ? `N°${numero}` : ""].filter(Boolean).join(" "),
     entreCalles: entre ? `entre ${entre}` : "",
-    localidad: obra.localidad.trim(),
-    partido: obra.partido.trim(),
-    instalador: instalador.nombre.trim(),
-    matriculaCategoria: [matricula, categoria].filter(Boolean).join(" "),
+    localidad: mayusculas(obra.localidad),
+    partido: mayusculas(obra.partido),
+    instalador: mayusculas(instalador.nombre),
+    matricula: instalador.matricula.trim(),
+    categoria: instalador.categoria ? `Cat. ${instalador.categoria}°` : "",
     firmas: ["Propietario", "Instalador"],
   };
+}
+
+function mayusculas(valor: string) {
+  return valor.trim().toLocaleUpperCase("es-AR");
 }
 
 function comoRegistro(valor: unknown): Record<string, unknown> {
