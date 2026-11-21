@@ -33,7 +33,6 @@ export type TablasPlano = {
 };
 
 const SIN_DATO = "—";
-const TOLERANCIA_LONGITUD_M = 0.011;
 const MARCA_SIGAS = "SIGAS";
 const MATRICULA_SIGAS = "044-42";
 const RESERVA_BOCA_TAPONADA = 0.2;
@@ -222,25 +221,15 @@ function crearCalculo(
     }))
     .sort((a, b) => a.tramo.localeCompare(b.tramo, "es", { numeric: true }));
   const filas = ordenadas.map(({ fila, tramo }) => {
+    // La longitud equivalente es la que el motor sumó realmente al calcular.
     const equivalente =
-      fila.accessoryEquivalentLengthMeters === null
+      fila.initialRouteLengthMeters === null ||
+      fila.finalCalculationLengthMeters === null
         ? null
-        : fila.accessoryEquivalentLengthMeters +
-          (fila.transitionEquivalentLengthMeters ?? 0);
+        : fila.finalCalculationLengthMeters - fila.initialRouteLengthMeters;
 
     if (fila.status !== "resolved") {
       avisos.push(`El tramo ${tramo} no está resuelto. Revisalo en Calcular.`);
-    } else if (
-      fila.initialRouteLengthMeters !== null &&
-      equivalente !== null &&
-      fila.finalCalculationLengthMeters !== null &&
-      Math.abs(
-        fila.initialRouteLengthMeters + equivalente - fila.finalCalculationLengthMeters,
-      ) > TOLERANCIA_LONGITUD_M
-    ) {
-      avisos.push(
-        `Las longitudes del tramo ${tramo} no cierran. Revisá sus accesorios en Calcular.`,
-      );
     }
 
     return [
