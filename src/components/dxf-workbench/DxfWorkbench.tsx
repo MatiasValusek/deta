@@ -279,6 +279,8 @@ import {
   type SourceCalibrationState,
 } from "./CalibrationPanel";
 import { CalculationPanel } from "./CalculationPanel";
+import { DatosObraBoton } from "@/components/obra/DatosObraBoton";
+import { borrarObra, hayObraCargada } from "@/lib/obra/obraStore";
 import { LayerPanel } from "./LayerPanel";
 import { PdfDiagnosticsPanel } from "./PdfDiagnosticsPanel";
 import { PdfPanel } from "./PdfPanel";
@@ -2370,7 +2372,10 @@ export function DxfWorkbench() {
 
   function handleResetLocalProject() {
     if (
-      (bases.length > 0 || sectionPlanLinks.length > 0 || routeProposal) &&
+      (bases.length > 0 ||
+        sectionPlanLinks.length > 0 ||
+        routeProposal ||
+        hayObraCargada()) &&
       !window.confirm(
         "Borrar el proyecto local guardado y volver al estado inicial?",
       )
@@ -2383,6 +2388,7 @@ export function DxfWorkbench() {
     }
 
     const result = clearPersistedWorkbenchProject();
+    borrarObra();
 
     setBases([]);
     setActiveBaseId(null);
@@ -6647,7 +6653,8 @@ export function DxfWorkbench() {
               );
             })}
           </nav>
-          <div className="flex justify-end">
+          <div className="flex justify-end gap-2">
+            <DatosObraBoton />
             <button
               className="rounded border border-[var(--line)] bg-white px-3 py-2 text-sm font-medium hover:border-[var(--accent)]"
               type="button"

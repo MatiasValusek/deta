@@ -16,10 +16,11 @@ Marcar con [x] lo terminado. Hacer una fase a la vez y mostrar el resultado ante
 
 ## Fase 1 — La salida: las 3 hojas
 Lo más valioso. Usa lo que el motor ya calcula.
-- [ ] **Datos de la obra:** modelo + formulario (propietario, calle y número, entre calles,
+- [x] **Datos de la obra:** modelo + formulario (propietario, calle y número, entre calles,
       localidad, partido). **Datos del instalador** (nombre, matrícula, categoría)
       guardados aparte y reutilizados en cada obra.
-- [ ] **Rótulo** reutilizable para las láminas A3.
+- [x] **Rótulo** reutilizable para las láminas A3. (Contenido y vista en pantalla; el dibujo
+      en PDF se hace con la lámina A3, usando el mismo `crearRotulo`.)
 - [ ] **Lámina "Plano de instalación" A3** con el mismo armado que los planos reales de
       `cata/`: planta + traza roja + tramos numerados, isométrica, croquis de ubicación,
       gabinete 50×40×30, tablas Referencias / Materiales / Cálculo SIGAS, rótulo.
