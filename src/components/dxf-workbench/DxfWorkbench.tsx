@@ -288,6 +288,7 @@ import { PdfViewer } from "./PdfViewer";
 import { RouteContextCard } from "./RouteContextCard";
 import { RouteIntentContextCard } from "./RouteIntentContextCard";
 import { RoutePanel } from "./RoutePanel";
+import { ObraEjemploBoton } from "./ObraEjemploBoton";
 import { ReviewPanel, type ReviewTechnicalViewItem } from "./ReviewPanel";
 import {
   RightPanelSections,
@@ -7256,6 +7257,7 @@ function EmptyPlanStart({
         >
           Cargar Planta
         </button>
+        <ObraEjemploBoton disabled={isImporting} />
       </div>
     </div>
   );
