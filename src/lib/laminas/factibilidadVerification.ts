@@ -1,4 +1,5 @@
-import { PDFDocument } from "pdf-lib";
+import { inflateSync } from "node:zlib";
+import { PDFDict, PDFDocument, PDFName, PDFRawStream, type PDFPage } from "pdf-lib";
 import { crearDatosCroquis, crearRotulo } from "@/lib/obra/obraData";
 import { ROTULO_RECUADRO } from "@/lib/obra/rotuloFormato";
 import {
@@ -62,5 +63,34 @@ export async function runFactibilidadVerifications() {
     Math.abs(pagina.getHeight() - 841.89) < 1,
   );
 
+  check("toda letra que usa la hoja está incluida en el PDF (si no, otros visores no muestran los textos)", () => {
+    const usadas = letrasUsadas(pagina);
+    const incluidas = letrasIncluidas(pagina);
+    return usadas.length > 0 && usadas.every((nombre) => incluidas.includes(nombre));
+  });
+
   return results;
+}
+
+function letrasUsadas(pagina: PDFPage) {
+  const contenido = pagina.node.Contents();
+  const flujos = contenido
+    ? "asArray" in contenido
+      ? contenido.asArray().map((ref) => pagina.doc.context.lookup(ref))
+      : [contenido]
+    : [];
+  const texto = flujos
+    .filter((flujo): flujo is PDFRawStream => flujo instanceof PDFRawStream)
+    .map((flujo) => {
+      const filtro = flujo.dict.get(PDFName.of("Filter"));
+      const bytes = flujo.getContents();
+      return Buffer.from(filtro ? inflateSync(bytes) : bytes).toString("latin1");
+    })
+    .join("\n");
+  return [...new Set([...texto.matchAll(/\/(\S+)\s+[\d.]+\s+Tf/g)].map((m) => m[1]))];
+}
+
+function letrasIncluidas(pagina: PDFPage) {
+  const fuentes = pagina.node.Resources()?.lookup(PDFName.of("Font"), PDFDict);
+  return fuentes ? fuentes.keys().map((clave) => clave.decodeText()) : [];
 }

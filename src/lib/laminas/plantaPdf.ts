@@ -11,6 +11,7 @@ import {
   setTextMatrix,
   showText,
   type PDFFont,
+  type PDFName,
   type PDFPage,
 } from "pdf-lib";
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
@@ -116,9 +117,13 @@ export function dibujarPlantaPdf(params: {
     return { x: mmAPt(hoja.x), y: yPdf(hoja.y) };
   };
 
+  // La letra se nombra por su clave en los recursos de la hoja (F1, F2…), no por
+  // "Helvetica": con el nombre suelto otros visores no la encuentran y no muestran el texto.
+  const claveFuente = page.node.newFontDictionary(fuente.name, fuente.ref);
+
   for (const entidad of entidades) {
     if (entidad.kind === "text") {
-      dibujarTextoArquitectura({ ajuste, entidad, fuente, page, aPdf });
+      dibujarTextoArquitectura({ ajuste, claveFuente, entidad, fuente, page, aPdf });
       continue;
     }
 
@@ -187,12 +192,13 @@ export function dibujarPlantaPdf(params: {
 
 function dibujarTextoArquitectura(params: {
   ajuste: ReturnType<typeof crearAjusteAZona>;
+  claveFuente: PDFName;
   entidad: Extract<DrawingPrimitive, { kind: "text" }>;
   fuente: PDFFont;
   page: PDFPage;
   aPdf: (punto: Point2D) => Point2D;
 }) {
-  const { ajuste, entidad, fuente, page, aPdf } = params;
+  const { ajuste, claveFuente, entidad, fuente, page, aPdf } = params;
   const sourcePosition =
     entidad.alignmentPoint &&
     ((entidad.horizontalAlignment ?? 0) !== 0 ||
@@ -233,7 +239,7 @@ function dibujarTextoArquitectura(params: {
       pushGraphicsState(),
       beginText(),
       setFillingRgbColor(0, 0, 0),
-      setFontAndSize(fuente.name, size),
+      setFontAndSize(claveFuente, size),
       setCharacterSqueeze(widthFactor * 100),
       setTextMatrix(cos, sin, -sin, cos, x, y),
       showText(fuente.encodeText(line)),
