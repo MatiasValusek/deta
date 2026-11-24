@@ -93,11 +93,16 @@ export function crearPlanillaTramos(params: {
   routeTransitionResolutions?: Record<string, TechnicalRouteTransitionResolution>;
 }): PlanillaTramos {
   const segmentos = new Map(params.result?.segments.map((s) => [s.segmentId, s]) ?? []);
+  // Los accesorios que usó el cálculo final (con las medidas adoptadas y sin tes repetidas).
+  const accesoriosPorRuta =
+    params.result?.transitionAwareNetworkSizing?.routeAccessoryResolutions ??
+    params.result?.routeAccessoryResolutions ??
+    {};
   const avisos: string[] = [];
   const tramos = params.calculationSheet.rows.map((fila): TramoPlanilla => {
     const nombre = params.numeracion.tramos.get(fila.segmentId) ?? fila.tramo;
     const ruta = segmentos.get(fila.segmentId)?.governingRoute?.routeId;
-    const accesorios = ruta ? params.result?.routeAccessoryResolutions[ruta]?.contributions ?? [] : [];
+    const accesorios = ruta ? accesoriosPorRuta[ruta]?.contributions ?? [] : [];
     const transiciones = ruta ? params.routeTransitionResolutions?.[ruta]?.contributions ?? [] : [];
     const items: ItemPlanilla[] = [
       ...accesorios.map((a) => ({

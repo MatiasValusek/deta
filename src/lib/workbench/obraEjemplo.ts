@@ -151,7 +151,7 @@ const tramo = (id: string, fromNodeId: string, toNodeId: string): RouteSegment =
       ? {
           accessories: [
             {
-              catalogCode: "te-normal-32-mm-flujo-a-90",
+              // Sin medida fija: el motor elige la te del diámetro de cada tramo.
               catalogFamilyId: FAMILIA_TE,
               equivalentLengthMetersPerUnit: null,
               equivalentLengthSource: "pipe_system" as const,

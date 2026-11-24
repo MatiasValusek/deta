@@ -205,7 +205,7 @@ export function runProfessionalDiameterAdoptionVerifications() {
     assertClose(routeTransition?.equivalentLengthMeters, 0);
   });
 
-  verify(results, "Caso 8 - aumento crea transicion pendiente", () => {
+  verify(results, "Caso 8 - aumento resuelve solo la reduccion con la cupla por defecto", () => {
     const result = createLineFixture({
       adoptedDiameterDecisions: [adopted("s1", "test-32")],
       pipeSystem: createTestPipeSystem({
@@ -213,18 +213,17 @@ export function runProfessionalDiameterAdoptionVerifications() {
           s1: "test-25",
           s2: "test-25",
         },
-        transitionEquivalentByFamily: familyPairs({
-          "32-25": 1,
-        }),
+        transitionEquivalentByFamily: {
+          "cupla-reduccion-hh": { "32-25": 1 },
+        },
       }),
       segmentCount: 2,
     }).result;
     const adoption = assertAdoption(result);
 
-    assertEqual(adoption.status, "pending_validation");
-    assertSegmentStatus(adoption, "s1", "pending_validation");
-    assertIssue(result, "pending_adopted_diameter_validation");
-    assertAdoptionTechnicalIssue(adoption, "unconfirmed_required_transition");
+    assertEqual(adoption.status, "validated");
+    assertEffectiveDiameter(adoption, "s1", "test-32");
+    assertEffectiveDiameter(adoption, "s2", "test-25");
   });
 
   verify(results, "Caso 9 - cambia variante de accesorio", () => {

@@ -93,17 +93,19 @@ export function runTechnicalCalculationSheetVerifications() {
     assertEqual(JSON.stringify(first), JSON.stringify(second));
   });
 
-  verify(results, "fixture parcial usa datos esperados", () => {
+  verify(results, "fixture parcial: reducciones de la app se suman y se adopta el minimo de tabla", () => {
     const sheet = createTechnicalCalculationSheet({
       result: calculatePartialFixture(),
     });
     const row = rowBySegmentId(sheet, "A-B");
+    const reducciones = row.transitionEquivalentLengthMeters ?? 0;
 
     assertClose(row.initialRouteLengthMeters, 10.75);
     assertClose(row.accessoryEquivalentLengthMeters, 10.97);
-    assertClose(row.finalCalculationLengthMeters, 21.72);
+    assertEqual(reducciones > 0, true);
+    assertClose(row.finalCalculationLengthMeters, 10.75 + 10.97 + reducciones);
     assertEqual(row.calculatedDiameter?.id, "sigas-25");
-    assertEqual(row.effectiveDiameter?.id, "sigas-32");
+    assertEqual(row.effectiveDiameter?.id, "sigas-25");
   });
 
   return results;

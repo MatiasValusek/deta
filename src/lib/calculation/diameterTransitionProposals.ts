@@ -56,7 +56,22 @@ export type DiameterTransitionDecisionStatus =
   | "pending"
   | "rejected";
 
-export type DiameterTransitionDecisionOrigin = "user_confirmed";
+/** "app_default": la app eligió la pieza compatible sola; el gasista la puede cambiar en Modo experto. */
+export type DiameterTransitionDecisionOrigin = "app_default" | "user_confirmed";
+
+/**
+ * Pieza que la app pone sola cuando el diámetro baja (SIGAS, único sistema hoy):
+ * te de reducción central en las derivaciones (sirve a 90° y a través) y
+ * cupla de reducción en el tramo que sigue derecho.
+ */
+const FAMILIA_POR_DEFECTO: Partial<Record<DiameterTransitionKind, string>> = {
+  branch_transition: "te-reduc-central",
+  simple_reduction: "cupla-reduccion-hh",
+};
+const ESTADOS_A_RESOLVER_SOLOS: ReadonlySet<DiameterTransitionState> = new Set([
+  "needs_review",
+  "transition_required",
+]);
 
 export type DiameterTransitionDecision = {
   catalogFamilyId?: string;
@@ -217,9 +232,13 @@ export function applyDiameterTransitionDecisions(params: {
   );
 
   return params.proposals.map((proposal) => {
-    const decision = decisionByTransitionId.get(proposal.id);
+    const decisionGuardada = decisionByTransitionId.get(proposal.id);
+    const decision =
+      decisionGuardada && decisionGuardada.geometryKey === proposal.geometryKey
+        ? decisionGuardada
+        : decisionPorDefecto(proposal);
 
-    if (!decision || decision.geometryKey !== proposal.geometryKey) {
+    if (!decision) {
       return proposal;
     }
 
@@ -238,6 +257,34 @@ export function applyDiameterTransitionDecisions(params: {
       state: decision.status,
     };
   });
+}
+
+/** Reducción sin decisión del gasista: la app la da por resuelta con la pieza compatible. */
+function decisionPorDefecto(
+  proposal: DiameterTransitionProposal,
+): DiameterTransitionDecision | null {
+  const familia = FAMILIA_POR_DEFECTO[proposal.kind];
+  const upstream = proposal.upstreamDiameter?.diameter?.externalDiameterMillimeters;
+  const bajadas = proposal.downstreamDiameters.map(
+    (item) => item.diameter?.externalDiameterMillimeters,
+  );
+  const soloReduce =
+    upstream !== undefined &&
+    bajadas.length > 0 &&
+    bajadas.every((valor) => valor !== undefined && valor <= upstream);
+
+  if (!familia || !ESTADOS_A_RESOLVER_SOLOS.has(proposal.state) || !soloReduce) {
+    return null;
+  }
+
+  return {
+    catalogFamilyId: familia,
+    decidedAt: 0,
+    geometryKey: proposal.geometryKey,
+    origin: "app_default",
+    status: "confirmed",
+    transitionId: proposal.id,
+  };
 }
 
 export function withDiameterTransitionTechnicalReview(

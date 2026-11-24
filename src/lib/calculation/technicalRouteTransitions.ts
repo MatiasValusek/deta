@@ -413,7 +413,7 @@ function createTransitionContributions(params: {
   }
 
   if (transition.kind === "branch_transition") {
-    return [createBranchTransitionContribution({
+    return createBranchTransitionContributions({
       base,
       diameterBySegmentId: params.diameterBySegmentId,
       downstreamSegmentId,
@@ -424,7 +424,7 @@ function createTransitionContributions(params: {
       transition,
       upstreamDiameter,
       upstreamSegmentId,
-    })];
+    });
   }
 
   if (transition.kind !== "simple_reduction") {
@@ -617,6 +617,108 @@ function compoundPreviewContributionToRouteContribution(params: {
     status,
     variantLabel: params.contribution.variantLabel,
   };
+}
+
+/** Familia de la reducción que va en el tramo que sigue derecho cuando la te tiene tres medidas. */
+const FAMILIA_REDUCCION_EN_LINEA = "cupla-reduccion-hh";
+
+/**
+ * Te con tres medidas distintas (entra U, sigue derecho en D, baja en B), como la arma el gasista:
+ * te de reducción central U-B y, en el tramo que sigue derecho, cupla de reducción U-D.
+ * - Recorrido que baja: te de reducción U-B a 90°.
+ * - Recorrido que sigue derecho: te de reducción U-B a través + cupla U-D.
+ * Con dos medidas o menos se resuelve como siempre.
+ */
+function createBranchTransitionContributions(
+  params: Parameters<typeof createBranchTransitionContribution>[0],
+): TechnicalRouteTransitionContribution[] {
+  const diametroDe = (segmentId: string) =>
+    resolveDiameter(params.diameterBySegmentId, segmentId) ??
+    segmentDiameter(params.transition, segmentId);
+  const incidentes = params.transition.incidentSegments.map((segment) => ({
+    diameter: diametroDe(segment.segmentId),
+    segmentId: segment.segmentId,
+  }));
+  const medidas = new Set(
+    incidentes.map((item) => item.diameter?.externalDiameterMillimeters),
+  );
+  const entrada = params.upstreamDiameter;
+  const salida = params.base.downstreamDiameter;
+
+  if (medidas.size !== 3 || !entrada || !salida || !params.upstreamSegmentId) {
+    return [createBranchTransitionContribution(params)];
+  }
+
+  const traversalKind = classifyBranchTraversalKind({
+    downstreamSegmentId: params.downstreamSegmentId,
+    equipment: params.equipment,
+    network: params.network,
+    transition: params.transition,
+    upstreamSegmentId: params.upstreamSegmentId,
+  });
+  // Para la te se ve sólo el par entrada-bajada: el otro lado de la te se toma con la medida de entrada.
+  const otroLado =
+    traversalKind === "through"
+      ? params.downstreamSegmentId
+      : incidentes.find(
+          (item) =>
+            item.segmentId !== params.upstreamSegmentId &&
+            item.segmentId !== params.downstreamSegmentId,
+        )?.segmentId;
+  const diametrosTe: Record<string, PipeDiameterReference | null> = Object.fromEntries(
+    incidentes.map((item) => [
+      item.segmentId,
+      item.segmentId === otroLado ? entrada : item.diameter,
+    ]),
+  );
+  const te = createBranchTransitionContribution({
+    ...params,
+    diameterBySegmentId: diametrosTe,
+  });
+
+  if (traversalKind !== "through") {
+    return [te];
+  }
+
+  const cupla = params.pipeSystem.resolveDiameterTransitionEquivalentLength({
+    downstreamDiameter: salida,
+    junction: {
+      downstreamSegmentId: params.downstreamSegmentId,
+      geometryKey: params.transition.geometryKey,
+      upstreamSegmentId: params.upstreamSegmentId,
+    },
+    transition: {
+      catalogFamilyId: FAMILIA_REDUCCION_EN_LINEA,
+      id: params.transition.id,
+      kind: "simple_reduction",
+      nodeId: params.transition.nodeId,
+    },
+    upstreamDiameter: entrada,
+  });
+  const reduccion: TechnicalRouteTransitionContribution =
+    cupla.status === "resolved"
+      ? {
+          ...params.base,
+          catalogCode: cupla.value.catalogCode,
+          catalogFamilyId: cupla.value.catalogFamilyId,
+          equivalentLengthMeters: cupla.value.equivalentLengthMeters,
+          equivalentLengthResolution: cupla,
+          source: "pipe_system",
+          status: "resolved",
+          transitionKind: "simple_reduction",
+          variant: cupla.value.variant,
+        }
+      : {
+          ...params.base,
+          catalogFamilyId: FAMILIA_REDUCCION_EN_LINEA,
+          equivalentLengthResolution: cupla,
+          reason: cupla.reason,
+          source: "pipe_system",
+          status: cupla.status,
+          transitionKind: "simple_reduction",
+        };
+
+  return [te, reduccion];
 }
 
 function createBranchTransitionContribution(params: {

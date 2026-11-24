@@ -137,7 +137,7 @@ export function runTechnicalRouteTransitionVerifications() {
     assertEqual(resolution.equivalentLengthMeters, null);
   });
 
-  verify(results, "Caso F - activa sin confirmacion", () => {
+  verify(results, "Caso F - activa sin decision se resuelve sola con cupla", () => {
     const proposal = simpleReductionWithDiameters({
       s1: diameter(32),
       s2: diameter(25),
@@ -150,9 +150,12 @@ export function runTechnicalRouteTransitionVerifications() {
       transitions: [proposal],
     });
 
-    assertEqual(resolution.status, "unresolved");
-    assertEqual(resolution.equivalentLengthMeters, null);
-    assert(resolution.reasons[0]?.includes("sin familia"), "Debe quedar pendiente.");
+    assertEqual(resolution.status, "resolved");
+    assertEqual(resolution.contributions[0]?.catalogFamilyId, "cupla-reduccion-hh");
+    assert(
+      (resolution.equivalentLengthMeters ?? 0) > 0,
+      "La cupla suma longitud equivalente.",
+    );
   });
 
   verify(results, "Caso G - rechazada pero requerida", () => {

@@ -239,12 +239,15 @@ export function runTechnicalTransitionAwareNetworkSizingVerifications() {
     assertIssue(evaluation, "transition_family_incompatible");
   });
 
-  verify(results, "Caso I - transicion nueva no confirmada", () => {
+  verify(results, "Caso I - transicion nueva sin decision se resuelve sola", () => {
     const fixture = createLineFixture({
       pipeSystem: createTestPipeSystem({
         requiredBySegmentId: {
           s1: "test-25",
           s2: "test-25",
+        },
+        transitionEquivalentByFamily: {
+          "cupla-reduccion-hh": { "32-25": 1 },
         },
       }),
     });
@@ -253,11 +256,16 @@ export function runTechnicalTransitionAwareNetworkSizingVerifications() {
       s2: "test-25",
     });
 
-    assertEqual(evaluation.status, "incomplete");
-    assertIssue(evaluation, "unconfirmed_required_transition");
+    assertEqual(evaluation.status, "resolved");
+    assert(
+      evaluation.transitions.some(
+        (transition) => transition.decision?.origin === "app_default",
+      ),
+      "La reduccion la decide la app.",
+    );
   });
 
-  verify(results, "Caso J - branch transition", () => {
+  verify(results, "Caso J - branch transition sin decision usa la familia por defecto", () => {
     const fixture = createBranchFixture({
       pipeSystem: createTestPipeSystem({
         requiredBySegmentId: {
@@ -272,9 +280,12 @@ export function runTechnicalTransitionAwareNetworkSizingVerifications() {
       branchB: "test-32",
       common: "test-32",
     });
+    const tee = evaluation.transitions.find(
+      (transition) => transition.kind === "branch_transition",
+    );
 
-    assertEqual(evaluation.status, "incomplete");
-    assertIssue(evaluation, "branch_transition_required");
+    assertEqual(tee?.decision?.origin, "app_default");
+    assertEqual(tee?.decision?.catalogFamilyId, "te-reduc-central");
   });
 
   verify(results, "Caso K - compound transition", () => {

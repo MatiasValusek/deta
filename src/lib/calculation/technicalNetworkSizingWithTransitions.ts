@@ -768,6 +768,17 @@ function createCompoundTurnAccessoryExclusionKeys(params: {
   const keys = new Set<string>();
 
   for (const transition of params.transitions) {
+    if (
+      transition.kind === "branch_transition" &&
+      transition.state === "confirmed"
+    ) {
+      // La te de reducción reemplaza a la te normal del mismo nodo: no se cuentan las dos.
+      for (const candidate of confirmedTeesAtNode({ network: params.network, transition })) {
+        keys.add(accessoryKey(candidate.segmentId, candidate.accessory.id));
+      }
+      continue;
+    }
+
     if (transition.kind !== "compound_turn_transition") {
       continue;
     }
@@ -805,6 +816,30 @@ function confirmedSigasElbowsAtCompoundTurn(params: {
       (first, second) =>
         first.segmentId.localeCompare(second.segmentId) ||
         first.accessory.id.localeCompare(second.accessory.id),
+    );
+}
+
+/** Tes confirmadas del nodo: las propuestas por la app llevan el nodo en su id. */
+function confirmedTeesAtNode(params: {
+  network: ManualRouteNetwork;
+  transition: DiameterTransitionProposal;
+}) {
+  const incidentSegmentIds = new Set(
+    params.transition.incidentSegments.map((segment) => segment.segmentId),
+  );
+  const marcaNodo = `accessory-proposal:${params.transition.nodeId}:tee:`;
+
+  return params.network.segments
+    .filter((segment) => incidentSegmentIds.has(segment.id))
+    .flatMap((segment) =>
+      (segment.accessories ?? [])
+        .filter(
+          (accessory) =>
+            accessory.type === "tee" &&
+            accessory.equivalentLengthSource === "pipe_system" &&
+            accessory.id.includes(marcaNodo),
+        )
+        .map((accessory) => ({ accessory, segmentId: segment.id })),
     );
 }
 
