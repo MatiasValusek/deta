@@ -1,4 +1,4 @@
-import { degrees, rgb, type PDFFont, type PDFPage } from "pdf-lib";
+import { rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import { MM_POR_PT } from "@/lib/obra/rotuloFormato";
 import type { ZonaPlanta } from "./plantaPdf";
 
@@ -6,7 +6,7 @@ const NEGRO = rgb(0, 0, 0);
 const ROJO = rgb(0.9, 0, 0);
 const LINEA_PT = 0.5;
 const FINA_PT = 0.25;
-const ALTO_COTA_MM = 1.6;
+const ALTO_COTA_MM = 2.4;
 /** Escala del detalle: 50 mm de hoja por metro (0,40 m → 20 mm). */
 const MM_POR_METRO = 50;
 const ANCHO_M = 0.4;
@@ -58,14 +58,13 @@ export function dibujarGabinetePdf(params: {
       borderColor: NEGRO,
       borderWidth: grosor,
     });
-  const texto = (t: string, x: number, y: number, rotar = false) =>
+  const texto = (t: string, x: number, y: number) =>
     page.drawText(t, {
       x: mmAPt(x),
       y: yPdf(y),
       size: mmAPt(ALTO_COTA_MM),
       font: fuente,
       color: NEGRO,
-      ...(rotar ? { rotate: degrees(90) } : {}),
     });
   const anchoTexto = (t: string) => fuente.widthOfTextAtSize(t, mmAPt(ALTO_COTA_MM)) * MM_POR_PT;
 
@@ -132,6 +131,8 @@ export function dibujarGabinetePdf(params: {
   for (const y of [m.arriba, m.pisoGabinete, m.suelo]) {
     linea(xCota - 1, y, xCota + 1, y, FINA_PT);
   }
-  texto("0,50 Mts.", xCota - 0.8, (m.arriba + m.pisoGabinete) / 2 + anchoTexto("0,50 Mts.") / 2, true);
-  texto("0,10", xCota - 0.8, (m.pisoGabinete + m.suelo) / 2 + anchoTexto("0,10") / 2, true);
+  // Como en los planos presentados: textos horizontales a la izquierda de la cota.
+  const alTexto = (t: string) => xCota - 1.5 - anchoTexto(t);
+  texto("0,50 Mts.", alTexto("0,50 Mts."), (m.arriba + m.pisoGabinete) / 2 + ALTO_COTA_MM / 2);
+  texto("0,10 Mts.", alTexto("0,10 Mts."), (m.pisoGabinete + m.suelo) / 2 + ALTO_COTA_MM / 2);
 }
