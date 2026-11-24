@@ -154,7 +154,8 @@ function terminalSectionProjectionFixture(
   equipment = fixtureEquipment(terminalHeightMeters),
 ) {
   const result = calculateTechnicalTree({
-    codosDeSubida: false, // esta prueba mide otra parte del motor
+    codosDeSubida: false,
+    llavesDePaso: false, // esta prueba mide otra parte del motor
     equipment,
     minSegmentLengthSource: EPSILON,
     network,
@@ -314,7 +315,8 @@ function confirmedTerminalNetwork(
   assert(update.ok, update.ok ? "" : update.message);
 
   const initialResult = calculateTechnicalTree({
-    codosDeSubida: false, // esta prueba mide otra parte del motor
+    codosDeSubida: false,
+    llavesDePaso: false, // esta prueba mide otra parte del motor
     equipment,
     minSegmentLengthSource: EPSILON,
     network: update.network,

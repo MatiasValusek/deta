@@ -14,6 +14,7 @@ import {
   type PDFName,
   type PDFPage,
 } from "pdf-lib";
+import { agregarLlavesDePaso, nodosConLlave } from "@/lib/calculation/llavesDePaso";
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
 import type { Bounds, DrawingPrimitive, NormalizedDrawing, Point2D } from "@/lib/geometry/types";
 import { MM_POR_PT } from "@/lib/obra/rotuloFormato";
@@ -24,6 +25,7 @@ import {
 } from "@/lib/routing/network";
 import type { ManualRouteNetwork } from "@/lib/routing/types";
 import type { NumeracionPlano } from "./numeracionPlano";
+import { dibujarSimboloLlave, LARGO_LLAVE_MM } from "./simboloLlave";
 
 export type DatosPlanta = {
   capasVisibles?: Record<string, boolean>;
@@ -149,6 +151,37 @@ export function dibujarPlantaPdf(params: {
       thickness: LINEA_TRAZA_PT,
       color: ROJO,
     });
+  }
+
+  // Llaves de paso (la general y una por artefacto), las mismas que cuenta el cálculo.
+  const redConLlaves = agregarLlavesDePaso({ equipment: datos.equipment, network: datos.network });
+  const conLlave = nodosConLlave(redConLlaves);
+  const tramoConLlave = new Set(
+    redConLlaves.segments
+      .filter((tramo) => (tramo.accessories ?? []).some((pieza) => pieza.type === "valve"))
+      .map((tramo) => tramo.id),
+  );
+
+  for (const tramo of tramos) {
+    if (!tramoConLlave.has(tramo.id) || tramo.path.length < 2) continue;
+    const ultimo = tramo.path.length - 1;
+    for (const [nodeId, extremo, siguiente] of [
+      [tramo.fromNodeId, tramo.path[0], tramo.path[1]],
+      [tramo.toNodeId, tramo.path[ultimo], tramo.path[ultimo - 1]],
+    ] as const) {
+      if (!conLlave.has(nodeId)) continue;
+      const desde = aPdf(extremo);
+      const hacia = aPdf(siguiente);
+      const dx = hacia.x - desde.x;
+      const dy = hacia.y - desde.y;
+      const largo = Math.hypot(dx, dy) || 1;
+      const distancia = Math.min(mmAPt(LARGO_LLAVE_MM * 1.5), largo / 2);
+      dibujarSimboloLlave(
+        page,
+        { x: desde.x + (dx / largo) * distancia, y: desde.y + (dy / largo) * distancia },
+        { x: dx, y: dy },
+      );
+    }
   }
 
   const tamano = mmAPt(ALTO_ETIQUETA_MM);

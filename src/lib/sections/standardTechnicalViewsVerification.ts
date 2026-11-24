@@ -565,7 +565,8 @@ function diameterBySegmentIdFromResult(result: TechnicalCalculationResult) {
 
 function calculateResult(fixture: SimpleReviewFixture) {
   const result = calculateTechnicalTree({
-    codosDeSubida: false, // esta prueba mide otra parte del motor
+    codosDeSubida: false,
+    llavesDePaso: false, // esta prueba mide otra parte del motor
     equipment: fixture.equipment,
     minSegmentLengthSource: EPSILON,
     network: fixture.network,

@@ -78,7 +78,8 @@ function sectionRouteProjectionFixture() {
   const network = confirmedPhysicalRouteNetwork();
   const accessoryProposals = terminalBranchAccessoryProposals();
   const result = calculateTechnicalTree({
-    codosDeSubida: false, // esta prueba mide otra parte del motor
+    codosDeSubida: false,
+    llavesDePaso: false, // esta prueba mide otra parte del motor
     equipment,
     minSegmentLengthSource: EPSILON,
     network,
@@ -532,7 +533,8 @@ function assertRouteNodeZIsInferredFromConfirmedGeometry(
     ),
   };
   const result = calculateTechnicalTree({
-    codosDeSubida: false, // esta prueba mide otra parte del motor
+    codosDeSubida: false,
+    llavesDePaso: false, // esta prueba mide otra parte del motor
     equipment: fixture.equipment,
     minSegmentLengthSource: EPSILON,
     network,
@@ -581,7 +583,8 @@ function assertMissingApplianceZUsesDefaultWithoutBlocking(
       : item,
   );
   const result = calculateTechnicalTree({
-    codosDeSubida: false, // esta prueba mide otra parte del motor
+    codosDeSubida: false,
+    llavesDePaso: false, // esta prueba mide otra parte del motor
     equipment,
     minSegmentLengthSource: EPSILON,
     network: fixture.network,

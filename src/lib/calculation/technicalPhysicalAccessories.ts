@@ -3,6 +3,7 @@ import {
   puntoCambioDeNivel,
   tipoCodosDeSubida,
 } from "@/lib/calculation/codosDeSubida";
+import { agregarLlavesDePaso, tipoLlaveDePaso } from "@/lib/calculation/llavesDePaso";
 import type {
   PipeDiameterReference,
   PipeDiameterTransitionTraversalKind,
@@ -170,9 +171,12 @@ export function createTechnicalPhysicalAccessoryInventory(params: {
     network: params.network,
   });
   const routeAccessoryGeometryByKey = createRouteAccessoryGeometryIndex({
-    // La misma cañería que usó el cálculo, con los codos de subida agregados.
+    // La misma cañería que usó el cálculo, con los codos de subida y las llaves agregados.
     network: params.network
-      ? agregarCodosDeSubida({ equipment: params.equipment ?? [], network: params.network })
+      ? agregarLlavesDePaso({
+          equipment: params.equipment ?? [],
+          network: agregarCodosDeSubida({ equipment: params.equipment ?? [], network: params.network }),
+        })
       : undefined,
     routeNodeGeometryById,
   });
@@ -734,6 +738,17 @@ function inferRouteSegmentAccessoryGeometry(params: {
   if (codosDeSubida) {
     // Los codos de subida van en el extremo del tramo: el artefacto o el medidor.
     const kind = codosDeSubida === "subida" ? "appliance" : "supply";
+    const extremo = [params.segment.fromNodeId, params.segment.toNodeId].find(
+      (nodeId) => params.nodeById.get(nodeId)?.kind === kind,
+    );
+    return extremo ? params.routeNodeGeometryById.get(extremo) ?? null : null;
+  }
+
+  const llave = tipoLlaveDePaso(params.accessory.id);
+
+  if (llave) {
+    // La llave general va al lado del medidor; la del artefacto, al lado del artefacto.
+    const kind = llave === "general" ? "supply" : "appliance";
     const extremo = [params.segment.fromNodeId, params.segment.toNodeId].find(
       (nodeId) => params.nodeById.get(nodeId)?.kind === kind,
     );

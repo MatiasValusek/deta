@@ -19,16 +19,17 @@ type Resultado = { name: string; status: "passed" };
  * - B-3 por tabla: la app da 20 y el plano 25. Con 0,699 m³/h, el caño de 20 alcanza en la
  *   fila de 16 m (1,399 m³/h) y en la de 18 m (1,319 m³/h): el 25 no sale de la tabla.
  * - Longitud equivalente: la app pone sola 4 codos a la salida del medidor y 2 en cada
- *   bajada, y en las derivaciones que bajan de medida cuenta te normal + cupla. Los recorridos
- *   al 1 y al 2 quedan 1,72 m por encima de la gasista (ella no contó codos en esas bajadas)
- *   y el del 4 da igual.
- * - B-3 queda 0,77 m por debajo por método, no por seguridad: la app cuenta los codos y la
+ *   bajada, y en las derivaciones que bajan de medida cuenta te normal + cupla. Además pone la
+ *   llave general a la salida del medidor (Ø32, 0,33 m), que la gasista no contó. Los recorridos
+ *   al 1 y al 2 quedan 2,04 m por encima de la gasista (ella no contó codos en esas bajadas)
+ *   y el del 4, 0,33 m (la llave general).
+ * - B-3 queda 0,44 m por debajo por método, no por seguridad: la app cuenta los codos y la
  *   llave del tramo en 25, que es su medida; la gasista los contó en 32. Con la longitud de
  *   ella la tabla da el mismo diámetro (20 en la fila de 18 m), así que en B-3 se controla
  *   el diámetro en lugar de la longitud.
  */
 const TOLERANCIA_M = 0.005;
-const DIFERENCIA_DE_METODO_B3_M = 0.77;
+const DIFERENCIA_DE_METODO_B3_M = 0.442;
 
 function calcular(equipment: WorkbenchEquipment[]) {
   const result = calculateTechnicalTree({
@@ -97,7 +98,7 @@ export function runObraPruebaTresDerivacionesVerifications() {
       ),
   );
 
-  // B-3: con la longitud de la gasista (la de la app + 0,77 m) el diámetro no puede dar
+  // B-3: con la longitud de la gasista (la de la app + 0,44 m) el diámetro no puede dar
   // mayor que el que da la app ni que el adoptado.
   const b3 = filas.find(({ tramo }) => tramo === "B-3")?.app;
   const diametroB3 = (largo: number) => {

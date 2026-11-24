@@ -8,6 +8,7 @@ import type { Point2D } from "@/lib/geometry/types";
 import { MM_POR_PT } from "@/lib/obra/rotuloFormato";
 import type { ManualRouteNetwork } from "@/lib/routing/types";
 import type { NumeracionPlano } from "./numeracionPlano";
+import { dibujarSimboloLlave, LARGO_LLAVE_MM } from "./simboloLlave";
 import type { ZonaPlanta } from "./plantaPdf";
 
 export type DatosIsometrica = {
@@ -59,6 +60,32 @@ export function diametrosPorTramo(
   }
 
   return diametros;
+}
+
+/**
+ * Medidor y artefactos que tienen la llave de paso al lado, según las piezas de la vista
+ * (las mismas que se cuentan en Materiales). Solo ahí van el símbolo y el "LL.P".
+ */
+export function nodosConLlaveEnVista(vista: TechnicalAxonometricView): Set<string> {
+  const tipoDeNodo = new Map(vista.nodes.map((nodo) => [nodo.id, nodo.kind]));
+  const extremo = (nodeId: string | null | undefined) =>
+    nodeId && (tipoDeNodo.get(nodeId) === "supply" || tipoDeNodo.get(nodeId) === "appliance");
+  const nodos = new Set<string>();
+
+  for (const pieza of vista.accessories) {
+    if (pieza.kind !== "valve") continue;
+    if (extremo(pieza.nodeId)) {
+      nodos.add(pieza.nodeId as string);
+      continue;
+    }
+    for (const tramo of vista.segments.filter((item) => pieza.segmentIds.includes(item.id))) {
+      for (const nodeId of [tramo.fromNodeId, tramo.toNodeId]) {
+        if (extremo(nodeId)) nodos.add(nodeId);
+      }
+    }
+  }
+
+  return nodos;
 }
 
 /** Hay alturas cargadas a mano (no las sugeridas por la app) en la cañería o en los artefactos. */
@@ -198,6 +225,31 @@ export function dibujarIsometricaPdf(params: {
     }
   }
 
+  const conLlave = nodosConLlaveEnVista(datos.vista);
+  // Sentido del caño que llega a cada nodo, para orientar el símbolo de la llave.
+  const salidaDe = (nodeId: string) => {
+    for (const tramo of datos.vista.segments) {
+      const puntos = recorridos.find((item) => item.id === tramo.id)?.puntos;
+      if (!puntos || puntos.length < 2) continue;
+      if (tramo.fromNodeId === nodeId) return { desde: aPdf(puntos[0]), hacia: aPdf(puntos[1]) };
+      if (tramo.toNodeId === nodeId) {
+        return { desde: aPdf(puntos[puntos.length - 1]), hacia: aPdf(puntos[puntos.length - 2]) };
+      }
+    }
+    return null;
+  };
+  const llaveSobreCano = (nodeId: string) => {
+    const salida = salidaDe(nodeId);
+    if (!salida) return null;
+    const dx = salida.hacia.x - salida.desde.x;
+    const dy = salida.hacia.y - salida.desde.y;
+    const largo = Math.hypot(dx, dy) || 1;
+    const distancia = Math.min(mmAPt(LARGO_LLAVE_MM * 1.5), largo / 2);
+    const centro = { x: salida.desde.x + (dx / largo) * distancia, y: salida.desde.y + (dy / largo) * distancia };
+    dibujarSimboloLlave(page, centro, { x: dx, y: dy });
+    return centro;
+  };
+
   for (const nodo of nodos) {
     const base = aPdf(nodo.punto);
     let centro = base;
@@ -212,6 +264,11 @@ export function dibujarIsometricaPdf(params: {
 
     if (nodo.kind === "supply") {
       dibujarMedidor(page, fuente, centro);
+      // Llave general a la salida del medidor.
+      const llave = conLlave.has(nodo.id) ? llaveSobreCano(nodo.id) : null;
+      if (llave) {
+        escribir(page, fuente, "LL.P", llave.x - mmAPt(1), llave.y + mmAPt(1.5), ALTO_LLAVE_MM);
+      }
       continue;
     }
     if (nodo.kind === "derivation") {
@@ -220,7 +277,13 @@ export function dibujarIsometricaPdf(params: {
     if (etiqueta) {
       escribir(page, fuente, etiqueta, centro.x + mmAPt(1), centro.y + mmAPt(1), ALTO_ETIQUETA_MM);
     }
-    if (nodo.kind === "appliance") {
+    if (nodo.kind === "appliance" && conLlave.has(nodo.id)) {
+      // Llave antes del artefacto: sobre la subida, o sobre el caño si no hay subida dibujada.
+      if (conSubidas) {
+        dibujarSimboloLlave(page, { x: base.x, y: (base.y + centro.y) / 2 }, { x: 0, y: 1 });
+      } else {
+        llaveSobreCano(nodo.id);
+      }
       const ancho = fuente.widthOfTextAtSize("LL.P", mmAPt(ALTO_LLAVE_MM));
       escribir(page, fuente, "LL.P", centro.x - ancho - mmAPt(1), centro.y + mmAPt(1), ALTO_LLAVE_MM);
     }

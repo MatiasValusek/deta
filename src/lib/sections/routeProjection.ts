@@ -1,4 +1,5 @@
 import { puntoCambioDeNivel, tipoCodosDeSubidaEnId } from "@/lib/calculation/codosDeSubida";
+import { extremoDeLlave } from "@/lib/calculation/llavesDePaso";
 import type {
   PipeDiameterReference,
 } from "@/lib/calculation/pipeSystem";
@@ -914,7 +915,7 @@ function terminalRouteAccessoryPlanPoint(params: {
   resolvedSegmentById: Map<string, ResolvedRouteSegment>;
 }): Point2D | null {
   const codos = [params.item.id, ...params.item.sourceIds]
-    .map(tipoCodosDeSubidaEnId)
+    .map((id) => tipoCodosDeSubidaEnId(id) ?? extremoDeLlave(id))
     .find((tipo) => tipo !== null);
   const terminalKind = codos ?? terminalRouteAccessoryKind(params.item);
 

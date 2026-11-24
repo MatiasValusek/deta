@@ -37,6 +37,7 @@ import {
   type ProfessionalDiameterAdoptionResult,
 } from "@/lib/calculation/professionalDiameterAdoption";
 import { agregarCodosDeSubida } from "@/lib/calculation/codosDeSubida";
+import { agregarLlavesDePaso } from "@/lib/calculation/llavesDePaso";
 import type { TechnicalRouteAccessoryResolution } from "@/lib/calculation/technicalRouteAccessories";
 import type { DiameterTransitionDecision } from "@/lib/calculation/diameterTransitionProposals";
 import {
@@ -238,6 +239,8 @@ export function calculateTechnicalTree(params: {
   adoptedDiameterDecisions?: AdoptedDiameterDecision[];
   /** Codos de subidas y de salida del medidor (por defecto, sí). */
   codosDeSubida?: boolean;
+  /** Llave general a la salida del medidor y una por artefacto (por defecto, sí). */
+  llavesDePaso?: boolean;
   diameterTransitionDecisions?: DiameterTransitionDecision[];
   equipment: WorkbenchEquipment[];
   minSegmentLengthSource: number;
@@ -253,6 +256,16 @@ export function calculateTechnicalTree(params: {
     params = {
       ...params,
       network: agregarCodosDeSubida({
+        ...params,
+        pipeSystemId: params.pipeSystem?.identity.id ?? "",
+      }),
+    };
+  }
+  // Llaves de paso: van siempre, aunque el gasista no cargue alturas.
+  if (params.llavesDePaso !== false) {
+    params = {
+      ...params,
+      network: agregarLlavesDePaso({
         ...params,
         pipeSystemId: params.pipeSystem?.identity.id ?? "",
       }),
