@@ -79,21 +79,48 @@ Lo más valioso. Usa lo que el motor ya calcula.
   por tramo. (`2ed23b0`)
 - Motor congelado otra vez. Verificaciones: 51 grupos, 377, 0 fallas. Typecheck sin errores.
 
-**Problema: ramas separadas.** Todo lo de esta sesión está en `main` local (33 commits sobre
-`3bcf275`), respaldado en `origin/respaldo/sesion-2026-11-24`. El remoto avanzó por otro
-lado desde el mismo `3bcf275`: `origin/main` tiene 4 commits (hasta `30abe81`, el deploy de
-producción del 27/10) y `origin/wip/integracion-02a` 10 más (hasta `cedaedf`, 30/10):
-propuestas XY-Z de subidas y cambios de nivel, conexión al artefacto, borradores
-guardados (~10.700 líneas). Vercel publica `main` como Production; el resto sale como Preview.
+**Ramas: unidas.** El trabajo de la sesión y el del remoto (`origin/wip/integracion-02a`,
+hasta `cedaedf`) quedaron juntos en `wip/integracion-02a` con el commit `79e7866`. Ya no
+hay ramas separadas. Vercel publica `main` como Production; el resto sale como Preview.
 
-**Plan de fusión (pendiente de confirmación):**
-1. Crear `wip/integracion-02a` local desde la del remoto.
-2. Fusionar ahí el trabajo de la sesión y resolver conflictos. Probables en conexión al
-   artefacto y alturas (`terminalConnection`, `technicalRouteElevation`, verificaciones).
-3. `npm run typecheck` y `npm run verify`; si pasan, push de la rama y probar el Preview.
-4. Con el OK: fusionar `wip/integracion-02a` en `main` y push; confirmar en Vercel
-   Production + Ready. Desde ahí, cada tarea que pase typecheck y verificaciones va a `main`.
-- Duda abierta: si los 14 commits del remoto se conservan todos (uno es "asdadasds").
+### Arreglos tras el relevamiento (2026-11-24, sobre `RELEVAMIENTO.md`)
+- **Red de seguridad** (`28e10c4`, `workbench/redDeSeguridadVerification.ts`): foto de las
+  tablas del A3 (SIGAS, Referencias, Materiales) de las 3 obras de prueba (ejemplo, tres
+  derivaciones y la casa cargada desde cero, `workbench/obraCasaDesdeCero.ts`); codos de
+  subida y de medidor, tapones y una te por derivación; una obra guardada con el formato de
+  hoy (`workbench/obraGuardadaHoy.ts`) se sigue abriendo igual. Si un número del A3 cambia,
+  la prueba falla y dice cuál.
+- **Un solo cálculo** (`workbench/calculoObra.ts`): pantalla, láminas y pruebas calculan por
+  el mismo camino.
+- **Diámetro adoptado igual en pantalla, A3, isométrica y materiales** (`6ac6bee`,
+  `47782f6`, prueba `workbench/diametroAdoptadoVerification.ts`). Dos causas: el cálculo
+  de la tabla SIGAS del A3 no recibía los diámetros agrandados por el gasista; y, sin
+  agrandar nada, pantalla y materiales tomaban un diámetro que podía quedar por debajo del
+  cálculo (obra de ejemplo: A-B en 25 cuando el cálculo pide 32). Corrección de seguridad:
+  el requerido nunca baja del diámetro final del cálculo de la red.
+- **Llaves de paso automáticas** (`732f962`, `calculation/llavesDePaso.ts`, prueba
+  `workbench/llavesDePasoVerification.ts`): llave general en el tramo que sale del medidor
+  y una por artefacto (también boca taponada), sin pedir alturas. Diámetro del tramo, en
+  materiales, suman longitud equivalente, se dibujan en la planta y la isométrica del A3,
+  y "LL.P" solo donde hay llave. No se duplican con las cargadas a mano o las de la
+  conexión con altura confirmada. Un artefacto se puede marcar sin llave
+  (`requiresShutoffValve = false`, para Modo experto).
+- **Plano Parcial:** ningún diámetro cambia. La llave general (Ø32, 0,33 m) que la gasista
+  no contó suma 0,33 m a todos los recorridos; B-3 queda 0,44 m por debajo por método (antes
+  0,77 m), con el mismo diámetro.
+- Verificaciones: 62 grupos, 495, 0 fallas. Typecheck sin errores.
+
+**Huecos encontrados (para la próxima tarea, la de pantallas):**
+- Sin confirmar tes, la te solo se cuenta donde la derivación baja de medida. En la casa
+  desde cero, la derivación del calefón y el calefactor (todo en 25) queda sin te.
+  Tampoco se cuenta el codo de una esquina del caño principal. Las dos cosas acortan la
+  longitud equivalente. Al hacer "la app decide por defecto", poner te y codo solos.
+- La pantalla sigue pidiendo confirmar tes que no se pueden confirmar ("requiere datos").
+- La prueba de punta a punta con el navegador (punto 9.5 del relevamiento) queda para
+  cuando estén las pantallas nuevas: hoy probaría pantallas que se van a rehacer y
+  necesita sumar Playwright al proyecto.
+- La altura sugerida del tipo "Otro" es 0 m. No afecta llaves ni cálculo, pero conviene un
+  valor razonable cuando se arme la pantalla de Artefactos.
 
 **Después:** datos de obra, propietario, matrícula, rótulo y carátula en el PDF (mostrar
 antes qué datos se piden y dónde van); ventilaciones y conductos de evacuación; pantalla
