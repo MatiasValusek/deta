@@ -134,7 +134,14 @@ function validateSegmentAdoptedDiameter(params: {
     });
   }
 
-  const requiredDiameter = params.equivalentVerification?.requiredDiameter ?? null;
+  // Corrección de seguridad: el requerido nunca queda por debajo del diámetro que dio el
+  // cálculo de la red (el "Diám. tabla" del A3). La verificación de accesorios cuenta solo las
+  // piezas del inventario y puede dar uno menor; antes la pantalla y los materiales usaban ese.
+  const requiredDiameter = mayorDiametro(
+    params.catalog,
+    params.equivalentVerification?.requiredDiameter ?? null,
+    params.equivalentVerification?.requiredDiameter ? params.provisionalDiameter : null,
+  );
   const requiredIndex = requiredDiameter
     ? params.catalog.byId.get(requiredDiameter.id)?.index
     : undefined;
@@ -293,4 +300,17 @@ function diameterSortValue(diameter: PipeDiameterReference) {
     diameter.internalDiameterMillimeters ??
     Number.MAX_SAFE_INTEGER
   );
+}
+
+function mayorDiametro(
+  catalog: DiameterCatalog,
+  a: PipeDiameterReference | null,
+  b: PipeDiameterReference | null,
+): PipeDiameterReference | null {
+  const indiceA = a ? catalog.byId.get(a.id)?.index : undefined;
+  const indiceB = b ? catalog.byId.get(b.id)?.index : undefined;
+
+  if (indiceA === undefined) return a;
+  if (indiceB === undefined) return a;
+  return indiceB > indiceA ? catalog.byId.get(b!.id)!.diameter : a;
 }

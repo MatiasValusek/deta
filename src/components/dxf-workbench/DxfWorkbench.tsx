@@ -38,8 +38,8 @@ import {
   type DiameterTransitionProposal,
   type DiameterTransitionTechnicalReview,
 } from "@/lib/calculation/diameterTransitionProposals";
+import { calcularObra } from "@/lib/workbench/calculoObra";
 import {
-  calculateTechnicalTree,
   formatTechnicalFlow,
   technicalCalculationStatusLabel,
 } from "@/lib/calculation/technicalTree";
@@ -1251,17 +1251,17 @@ export function DxfWorkbench() {
   const technicalCalculationResult = useMemo(
     () =>
       planBase
-        ? calculateTechnicalTree({
+        ? calcularObra({
+            adoptedDiameterDecisions: planBase.adoptedDiameterDecisions,
             diameterTransitionDecisions: planBase.diameterTransitionDecisions,
             equipment: planEquipment,
             minSegmentLengthSource: MIN_SECTION_LINK_LENGTH,
             network: routeNetwork,
-            pipeSystem: SIGAS_PIPE_SYSTEM,
-            projectGas: DEFAULT_PROJECT_GAS_CONFIG,
             scaleMetersPerSourceUnit: planScaleMetersPerSourceUnit,
           })
         : null,
     [
+      planBase?.adoptedDiameterDecisions,
       planBase?.diameterTransitionDecisions,
       planBase?.id,
       planEquipment,

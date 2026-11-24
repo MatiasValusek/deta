@@ -49,34 +49,28 @@ import type {
   TechnicalRouteTransitionResolution,
 } from "@/lib/calculation/technicalRouteTransitions";
 import {
-  createTechnicalMaterialTakeoff,
   type TechnicalMaterialTakeoff,
 } from "@/lib/calculation/technicalMaterialTakeoff";
 import {
-  createTechnicalPhysicalAccessoryInventory,
   technicalPhysicalAccessoryKindLabel,
   type TechnicalPhysicalAccessory,
   type TechnicalPhysicalAccessoryInventory,
   type TechnicalPhysicalAccessoryRouteUse,
 } from "@/lib/calculation/technicalPhysicalAccessories";
 import {
-  createTechnicalEquivalentAccessoryVerification,
   type TechnicalEquivalentAccessorySegmentVerification,
 } from "@/lib/calculation/technicalEquivalentAccessoryVerification";
 import {
-  createTechnicalAdoptedDiameterValidation,
   type TechnicalAdoptedDiameterSegmentValidation,
   type TechnicalAdoptedDiameterValidation,
 } from "@/lib/calculation/technicalAdoptedDiameterValidation";
 import {
-  createTechnicalAxonometricView,
   type TechnicalAxonometricAccessory,
   type TechnicalAxonometricNode,
   type TechnicalAxonometricSegment,
   type TechnicalAxonometricView,
 } from "@/lib/calculation/technicalAxonometric";
 import {
-  createTechnicalCalculationSheet,
   type TechnicalCalculationSheet,
   type TechnicalCalculationSheetRow,
 } from "@/lib/calculation/technicalCalculationSheet";
@@ -95,6 +89,7 @@ import {
   calculationLengthState,
   technicalCalculationNeedsRoute,
 } from "@/lib/workbench/calculationPresentation";
+import { armarResultadosObra } from "@/lib/workbench/calculoObra";
 import { AgrandarDiametroPanel } from "./AgrandarDiametroPanel";
 import { FactibilidadPreview } from "./FactibilidadPreview";
 import { PlanillaTramosPreview } from "./PlanillaTramosPreview";
@@ -244,57 +239,35 @@ export function CalculationPanel({
   const [excelExportError, setExcelExportError] = useState<string | null>(null);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [pdfExportError, setPdfExportError] = useState<string | null>(null);
-  const calculationSheet = useMemo(
+  // El mismo cálculo que usan las láminas y las pruebas (workbench/calculoObra.ts).
+  const {
+    adoptedDiameterValidation,
+    axonometricView,
+    calculationSheet,
+    materialTakeoff,
+  } = useMemo(
     () =>
-      createTechnicalCalculationSheet({
-        equipment,
-        result,
-        routeTransitionResolutions,
-      }),
-    [equipment, result, routeTransitionResolutions],
-  );
-  const physicalAccessoryInventory = useMemo(
-    () =>
-      createTechnicalPhysicalAccessoryInventory({
+      armarResultadosObra({
         accessoryProposals,
+        adoptedDiameterDecisions,
         diameterTransitionProposals,
         equipment,
         network: routeNetwork,
+        pipeSystem,
         result,
         routeTransitionResolutions,
+        scaleMetersPerSourceUnit,
       }),
     [
       accessoryProposals,
+      adoptedDiameterDecisions,
       diameterTransitionProposals,
       equipment,
+      pipeSystem,
       result,
       routeNetwork,
       routeTransitionResolutions,
-    ],
-  );
-  const equivalentAccessoryVerificationBySegmentId = useMemo(
-    () =>
-      createTechnicalEquivalentAccessoryVerification({
-        inventory: physicalAccessoryInventory,
-        pipeSystem,
-        result,
-      }),
-    [physicalAccessoryInventory, pipeSystem, result],
-  );
-  const adoptedDiameterValidation = useMemo(
-    () =>
-      createTechnicalAdoptedDiameterValidation({
-        decisions: adoptedDiameterDecisions,
-        equivalentVerificationBySegmentId:
-          equivalentAccessoryVerificationBySegmentId,
-        pipeSystem,
-        result,
-      }),
-    [
-      adoptedDiameterDecisions,
-      equivalentAccessoryVerificationBySegmentId,
-      pipeSystem,
-      result,
+      scaleMetersPerSourceUnit,
     ],
   );
   const adoptedDiameterValidationBySegmentId = useMemo<
@@ -308,44 +281,6 @@ export function CalculationPanel({
         ]),
       ),
     [adoptedDiameterValidation],
-  );
-  const materialTakeoff = useMemo(
-    () =>
-      createTechnicalMaterialTakeoff({
-        accessoryProposals,
-        adoptedDiameterValidation,
-        diameterTransitionProposals,
-        physicalAccessoryInventory,
-        result,
-        routeTransitionResolutions,
-      }),
-    [
-      accessoryProposals,
-      adoptedDiameterValidation,
-      diameterTransitionProposals,
-      physicalAccessoryInventory,
-      result,
-      routeTransitionResolutions,
-    ],
-  );
-  const axonometricView = useMemo(
-    () =>
-      createTechnicalAxonometricView({
-        adoptedDiameterValidation,
-        equipment,
-        inventory: physicalAccessoryInventory,
-        network: routeNetwork,
-        result,
-        scaleMetersPerSourceUnit,
-      }),
-    [
-      adoptedDiameterValidation,
-      equipment,
-      physicalAccessoryInventory,
-      result,
-      routeNetwork,
-      scaleMetersPerSourceUnit,
-    ],
   );
   const selectedSegment =
     result?.segments.find((segment) => segment.segmentId === selectedSegmentId) ??

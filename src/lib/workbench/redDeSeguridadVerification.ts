@@ -33,8 +33,9 @@ const FOTO: Record<ObraDePrueba["nombre"], FotoTablas> = {
     notas: ["", "", "BOCA TAPONADA", "", ""],
     materiales: [
       ["CAÑO", "20", "6,30 m"],
-      ["CAÑO", "25", "7,70 m"],
-      ["CAÑO", "32", "7,80 m"],
+      // A-B iba en 25 en materiales aunque el cálculo pide 32 (corregido): 3 m pasan a 32.
+      ["CAÑO", "25", "4,70 m"],
+      ["CAÑO", "32", "10,80 m"],
       ["CODO", "20", "6"],
       ["CODO", "25", "2"],
       ["CODO", "32", "4"],
