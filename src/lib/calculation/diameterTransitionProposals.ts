@@ -298,6 +298,12 @@ export function withDiameterTransitionTechnicalReview(
     return proposal;
   }
 
+  // La pieza que eligió la app la resuelve el cálculo (también la te con tres medidas,
+  // que no figura entre los candidatos de pantalla): no se le pide confirmar al gasista.
+  if (proposal.decision.origin === "app_default") {
+    return proposal;
+  }
+
   if (!review.selectedCandidate) {
     return {
       ...proposal,
