@@ -7,6 +7,7 @@ import type { TechnicalCalculationResult } from "@/lib/calculation/technicalTree
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
 import { equipmentTypeLabel } from "@/lib/equipment/types";
 import type { ManualRouteNetwork } from "@/lib/routing/types";
+import { motivoDiametroAdoptado } from "./motivoDiametro";
 import { numerarDesdeResultado, type NumeracionPlano } from "./numeracionPlano";
 
 export type ColumnaTabla = {
@@ -36,6 +37,7 @@ const SIN_DATO = "—";
 const MARCA_SIGAS = "SIGAS";
 const MATRICULA_SIGAS = "044-42";
 const RESERVA_BOCA_TAPONADA = 0.2;
+const RESERVA_MOTIVO = 0.3;
 const ORDEN_MATERIALES = ["CAÑO", "ACCESORIOS", "LLAVE DE PASO"];
 
 export function crearTablasPlano(params: {
@@ -235,6 +237,8 @@ function crearCalculo(
     ];
   });
 
+  const motivos = ordenadas.map(({ fila }) => motivoDiametroAdoptado(fila));
+
   return {
     titulo: "CÁLCULO CAÑERÍA SIGAS",
     columnas: [
@@ -247,6 +251,10 @@ function crearCalculo(
       { titulo: "Diám. adoptado (mm)", ancho: 0.16, alinear: "centro" },
     ],
     filas,
+    // Si el adoptado supera al de tabla, el motivo va a la derecha de la fila.
+    ...(motivos.some(Boolean)
+      ? { notasDerecha: { reserva: RESERVA_MOTIVO, notas: motivos.map((motivo) => motivo ?? "") } }
+      : {}),
   };
 }
 

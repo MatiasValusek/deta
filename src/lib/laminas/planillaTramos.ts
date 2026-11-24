@@ -1,4 +1,5 @@
 import { tipoCodosDeSubida } from "@/lib/calculation/codosDeSubida";
+import { motivoDiametroAdoptado } from "./motivoDiametro";
 import { resolucionesFinales } from "@/lib/calculation/resolucionesFinales";
 import type { PipeDiameterReference } from "@/lib/calculation/pipeSystem";
 import type { TechnicalCalculationSheet } from "@/lib/calculation/technicalCalculationSheet";
@@ -52,6 +53,8 @@ export type TramoPlanilla = {
   longitudInicial: number | null;
   caudal: number | null;
   diametroInicial: number | null;
+  /** Solo si el adoptado es mayor que el de tabla: medida y motivo. */
+  adoptado: { diametro: number | null; motivo: string } | null;
   items: ItemPlanilla[];
   /** Longitud equivalente que el motor sumó para este tramo. */
   equivalente: number | null;
@@ -136,6 +139,7 @@ export function crearPlanillaTramos(params: {
         ? null
         : fila.finalCalculationLengthMeters - fila.initialRouteLengthMeters;
     const suma = items.reduce((total, item) => total + item.metros, 0);
+    const motivo = motivoDiametroAdoptado(fila);
 
     if (equivalente !== null && Math.abs(suma - equivalente) > TOLERANCIA_M) {
       avisos.push(
@@ -149,6 +153,7 @@ export function crearPlanillaTramos(params: {
       longitudInicial: fila.initialRouteLengthMeters,
       caudal: fila.flowM3h,
       diametroInicial: mm(fila.calculatedDiameter),
+      adoptado: motivo ? { diametro: mm(fila.effectiveDiameter), motivo } : null,
       items,
       equivalente,
       total: fila.finalCalculationLengthMeters,
@@ -174,7 +179,10 @@ export function tablaDeTramo(tramo: TramoPlanilla, diametros: number[]): TablaLa
     titulo:
       `TRAMO ${tramo.tramo}   ·   Long. inicial: ${longitud(tramo.longitudInicial)} m   ·   ` +
       `Caudal: ${tramo.caudal === null ? SIN_DATO : formatear(tramo.caudal, 3)} m³/h   ·   ` +
-      `Diám. inicial: ${tramo.diametroInicial ?? SIN_DATO}`,
+      `Diám. inicial: ${tramo.diametroInicial ?? SIN_DATO}` +
+      (tramo.adoptado
+        ? `   ·   Diám. adoptado: ${tramo.adoptado.diametro ?? SIN_DATO} (${tramo.adoptado.motivo})`
+        : ""),
     columnas: [
       { titulo: "Accesorios", ancho: 0.28 },
       ...diametros.map((d) => ({ titulo: `${d}`, ancho: anchoDiametro, alinear: "centro" as const })),

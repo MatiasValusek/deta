@@ -4,6 +4,7 @@ import { DEFAULT_PROJECT_GAS_CONFIG } from "@/lib/calculation/projectGas";
 import { createTechnicalCalculationSheet } from "@/lib/calculation/technicalCalculationSheet";
 import { calculateTechnicalTree } from "@/lib/calculation/technicalTree";
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
+import { MOTIVO_AMPLIACION, motivoDiametroAdoptado } from "@/lib/laminas/motivoDiametro";
 import {
   ADOPTADOS_PRUEBA,
   ARTEFACTOS_PRUEBA,
@@ -119,6 +120,14 @@ export function runObraPruebaTresDerivacionesVerifications() {
       diametroB3(largoGasista) <= mm(b3?.effectiveDiameter)
     );
   });
+
+  check("si el adoptado supera a la tabla, figura el motivo con palabras del oficio", () =>
+    filas.every(({ app, tramo }) =>
+      app && mm(app.effectiveDiameter) > mm(app.calculatedDiameter)
+        ? motivoDiametroAdoptado(app) === MOTIVO_AMPLIACION
+        : app !== undefined && motivoDiametroAdoptado(app) === null,
+    ) && motivoDiametroAdoptado(filas.find(({ tramo }) => tramo === "B-3")!.app!) === MOTIVO_AMPLIACION,
+  );
 
   // Con alturas confirmadas por el gasista, la bajada al anafe se cuenta por las alturas:
   // si llega al mismo nivel que la cañería, no lleva codos de bajada (no se cuentan dos veces).
