@@ -8,7 +8,7 @@ import type { TechnicalMaterialTakeoff } from "@/lib/calculation/technicalMateri
 import type { TechnicalCalculationResult } from "@/lib/calculation/technicalTree";
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
 import type { NormalizedDrawing } from "@/lib/geometry/types";
-import { diametrosPorTramo } from "@/lib/laminas/isometricaPdf";
+import { diametrosPorTramo, hayAlturasCargadas } from "@/lib/laminas/isometricaPdf";
 import { crearPlanoInstalacionPdf } from "@/lib/laminas/planoInstalacionPdf";
 import { crearTablasPlano } from "@/lib/laminas/tablasPlano";
 import {
@@ -133,6 +133,7 @@ export function PlanoInstalacionPreview({
           numeracion: tablas.numeracion,
         },
         {
+          alturasCargadas: hayAlturasCargadas(network, equipment),
           diametros: diametrosPorTramo(tablas.numeracion, tablas.calculo.filas),
           numeracion: tablas.numeracion,
           vista: axonometricView,

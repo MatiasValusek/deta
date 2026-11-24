@@ -3,7 +3,10 @@ import type {
   TechnicalAxonometricProjectedPoint,
   TechnicalAxonometricView,
 } from "@/lib/calculation/technicalAxonometric";
+import type { WorkbenchEquipment } from "@/lib/equipment/types";
+import type { Point2D } from "@/lib/geometry/types";
 import { MM_POR_PT } from "@/lib/obra/rotuloFormato";
+import type { ManualRouteNetwork } from "@/lib/routing/types";
 import type { NumeracionPlano } from "./numeracionPlano";
 import type { ZonaPlanta } from "./plantaPdf";
 
@@ -12,6 +15,11 @@ export type DatosIsometrica = {
   numeracion: NumeracionPlano;
   /** Diámetro adoptado por tramo, en mm, como en la tabla de cálculo ("25"). */
   diametros: Map<string, string>;
+  /**
+   * Si el gasista cargó alturas a mano, se dibujan. Si no, la traza va toda a un mismo
+   * nivel con una subida vertical en cada artefacto, como en los planos presentados.
+   */
+  alturasCargadas?: boolean;
 };
 
 type Punto = TechnicalAxonometricProjectedPoint;
@@ -27,6 +35,9 @@ const ALTO_DIAMETRO_MM = 1.8;
 const ALTO_LLAVE_MM = 1.6;
 const LADO_MEDIDOR_MM = 3.2;
 const RADIO_DERIVACION_MM = 0.5;
+/** Largo en la hoja de la subida vertical a cada artefacto. */
+const SUBIDA_MM = 8;
+const COS30 = Math.cos(Math.PI / 6);
 const mmAPt = (mm: number) => mm / MM_POR_PT;
 
 /** Diámetro adoptado por tramo, leído de la tabla "Cálculo cañería SIGAS". */
@@ -50,23 +61,82 @@ export function diametrosPorTramo(
   return diametros;
 }
 
-/** Recorridos de cada tramo en la vista isométrica (sin puntos repetidos). */
-export function recorridosIsometrica(vista: TechnicalAxonometricView) {
-  return vista.segments
-    .map((tramo) => {
-      const puntos = tramo.path
-        .map((punto) => punto.projected)
-        .filter((punto): punto is Punto => Boolean(punto));
-      const recorrido =
-        puntos.length >= 2
-          ? puntos
-          : [tramo.fromProjected, tramo.toProjected].filter(
-              (punto): punto is Punto => Boolean(punto),
-            );
+/** Hay alturas cargadas a mano (no las sugeridas por la app) en la cañería o en los artefactos. */
+export function hayAlturasCargadas(network: ManualRouteNetwork, equipment: WorkbenchEquipment[]) {
+  const aMano = (fuente?: string) => fuente === "professional_edit";
 
-      return { id: tramo.id, puntos: sinRepetidos(recorrido) };
+  return (
+    network.nodes.some((nodo) => aMano(nodo.elevation?.source)) ||
+    network.segments.some((tramo) =>
+      (tramo.vertexElevations ?? []).some((altura) => aMano(altura?.source)),
+    ) ||
+    equipment.some((item) => aMano(item.terminalConfig?.heightSource))
+  );
+}
+
+/**
+ * Proyección isométrica de la lámina, con la Y de la hoja hacia abajo.
+ * Norte de la planta (Y+) va arriba a la derecha y Este (X+) abajo a la derecha:
+ * mismo sentido de giro que la planta, así la isométrica no sale espejada.
+ */
+export function proyectarIsometrica(xMetros: number, yMetros: number, zMetros = 0): Punto {
+  return {
+    x: (xMetros + yMetros) * COS30,
+    y: (xMetros - yMetros) * 0.5 - zMetros,
+  };
+}
+
+type TramoIsometrica = { id: string; puntos: Punto[] };
+type NodoIsometrica = {
+  id: string;
+  kind: TechnicalAxonometricView["nodes"][number]["kind"];
+  punto: Punto;
+};
+
+/** Metros por unidad del plano, leídos de los nodos de la vista. */
+function metrosPorUnidad(vista: TechnicalAxonometricView) {
+  const conEscala = vista.nodes.find(
+    (nodo) => nodo.point && Math.abs(nodo.point.source.x) > 1e-9,
+  );
+  return conEscala?.point ? conEscala.point.xMeters / conEscala.point.source.x : 1;
+}
+
+/** Tramos y nodos ya proyectados. Sin alturas cargadas, todo queda a nivel 0. */
+export function geometriaIsometrica(
+  vista: TechnicalAxonometricView,
+  alturasCargadas = false,
+): { tramos: TramoIsometrica[]; nodos: NodoIsometrica[] } {
+  const escala = metrosPorUnidad(vista);
+  const proyectar = (p: Point2D, z: number) =>
+    proyectarIsometrica(p.x * escala, p.y * escala, alturasCargadas ? z : 0);
+  const extremos = new Map<string, Punto>();
+  const tramos = vista.segments
+    .map((tramo) => {
+      const puntos = sinRepetidos(
+        tramo.path.map((punto) => proyectar(punto.planPoint, punto.elevationMeters)),
+      );
+
+      if (puntos.length >= 1) {
+        extremos.set(tramo.fromNodeId, extremos.get(tramo.fromNodeId) ?? puntos[0]);
+        extremos.set(tramo.toNodeId, extremos.get(tramo.toNodeId) ?? puntos[puntos.length - 1]);
+      }
+
+      return { id: tramo.id, puntos };
     })
     .filter((tramo) => tramo.puntos.length >= 2);
+  const nodos = vista.nodes.flatMap((nodo) => {
+    const punto = nodo.point
+      ? proyectar(nodo.point.source, nodo.point.zMeters ?? 0)
+      : extremos.get(nodo.id);
+    return punto ? [{ id: nodo.id, kind: nodo.kind, punto }] : [];
+  });
+
+  return { tramos, nodos };
+}
+
+/** Recorridos de cada tramo en la isométrica de la lámina (sin puntos repetidos). */
+export function recorridosIsometrica(vista: TechnicalAxonometricView, alturasCargadas = false) {
+  return geometriaIsometrica(vista, alturasCargadas).tramos;
 }
 
 export function dibujarIsometricaPdf(params: {
@@ -77,11 +147,9 @@ export function dibujarIsometricaPdf(params: {
 }) {
   const { datos, fuente, page } = params;
   const zona = { ...params.zona, y1: params.zona.y1 + MARGEN_TITULO_MM };
-  const recorridos = recorridosIsometrica(datos.vista);
-  const nodos = datos.vista.nodes.filter(
-    (nodo): nodo is typeof nodo & { projected: Punto } => Boolean(nodo.projected),
-  );
-  const puntos = [...recorridos.flatMap((tramo) => tramo.puntos), ...nodos.map((nodo) => nodo.projected)];
+  const conSubidas = !datos.alturasCargadas;
+  const { tramos: recorridos, nodos } = geometriaIsometrica(datos.vista, datos.alturasCargadas);
+  const puntos = [...recorridos.flatMap((tramo) => tramo.puntos), ...nodos.map((nodo) => nodo.punto)];
 
   if (recorridos.length === 0 || puntos.length === 0) {
     return false;
@@ -92,14 +160,17 @@ export function dibujarIsometricaPdf(params: {
   const minY = Math.min(...puntos.map((p) => p.y));
   const maxY = Math.max(...puntos.map((p) => p.y));
   const anchoUtil = zona.x2 - zona.x1 - MARGEN_MM * 2;
-  const altoUtil = zona.y2 - zona.y1 - MARGEN_MM * 2;
+  // Lugar arriba para las subidas a los artefactos.
+  const reservaSubida = conSubidas ? SUBIDA_MM : 0;
+  const altoUtil = zona.y2 - zona.y1 - MARGEN_MM * 2 - reservaSubida;
   const escala = Math.min(
     anchoUtil / Math.max(maxX - minX, 1e-9),
     altoUtil / Math.max(maxY - minY, 1e-9),
   );
   const offsetX = zona.x1 + MARGEN_MM + (anchoUtil - (maxX - minX) * escala) / 2;
-  const offsetY = zona.y1 + MARGEN_MM + (altoUtil - (maxY - minY) * escala) / 2;
-  // La vista isométrica ya viene con Y hacia abajo, igual que la hoja.
+  const offsetY =
+    zona.y1 + MARGEN_MM + reservaSubida + (altoUtil - (maxY - minY) * escala) / 2;
+  // La proyección de la lámina ya viene con Y hacia abajo, igual que la hoja.
   const aPdf = (p: Punto) => ({
     x: mmAPt(offsetX + (p.x - minX) * escala),
     y: page.getHeight() - mmAPt(offsetY + (p.y - minY) * escala),
@@ -128,7 +199,15 @@ export function dibujarIsometricaPdf(params: {
   }
 
   for (const nodo of nodos) {
-    const centro = aPdf(nodo.projected);
+    const base = aPdf(nodo.punto);
+    let centro = base;
+
+    // Subida vertical del artefacto: la llave y el número van arriba.
+    if (nodo.kind === "appliance" && conSubidas) {
+      centro = { x: base.x, y: base.y + mmAPt(SUBIDA_MM) };
+      page.drawLine({ start: base, end: centro, thickness: LINEA_TRAZA_PT, color: ROJO });
+    }
+
     const etiqueta = datos.numeracion.nodos.get(nodo.id);
 
     if (nodo.kind === "supply") {

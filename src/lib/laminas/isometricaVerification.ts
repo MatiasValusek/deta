@@ -5,6 +5,8 @@ import { medidasGabinete } from "./gabinetePdf";
 import {
   diametrosPorTramo,
   dibujarIsometricaPdf,
+  geometriaIsometrica,
+  proyectarIsometrica,
   recorridosIsometrica,
 } from "./isometricaPdf";
 import type { NumeracionPlano } from "./numeracionPlano";
@@ -120,6 +122,31 @@ export async function runIsometricaVerifications() {
       })),
     }).length === 0,
   );
+
+  check("la isométrica no sale espejada respecto de la planta", () => {
+    // Girar de Este (X+) a Norte (Y+) es antihorario en la planta; en la hoja
+    // (Y hacia abajo) el producto cruz tiene que dar negativo para el mismo sentido.
+    const este = proyectarIsometrica(1, 0);
+    const norte = proyectarIsometrica(0, 1);
+    return este.x * norte.y - este.y * norte.x < 0 && norte.y < 0;
+  });
+
+  check("sin alturas cargadas la traza queda a un mismo nivel", () => {
+    const conAlturas = {
+      ...VISTA_EJEMPLO,
+      segments: VISTA_EJEMPLO.segments.map((s) => ({
+        ...s,
+        path: s.path.map((p, i) => ({ ...p, elevationMeters: i * 0.7 })),
+      })),
+    };
+    const plano = geometriaIsometrica(conAlturas).tramos;
+    const base = geometriaIsometrica(VISTA_EJEMPLO).tramos;
+    const conZ = geometriaIsometrica(conAlturas, true).tramos;
+    return (
+      JSON.stringify(plano) === JSON.stringify(base) &&
+      JSON.stringify(conZ) !== JSON.stringify(base)
+    );
+  });
 
   const doc = await PDFDocument.create();
   const page = doc.addPage([1190.55, 841.89]);
