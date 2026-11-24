@@ -66,6 +66,39 @@ Lo más valioso. Usa lo que el motor ya calcula.
 
 ## Notas
 
+### Estado al 2026-11-24 (fin de sesión)
+**Hecho hoy** (detalle en "Diámetro adoptado y comparación con un plano presentado"):
+- Codos de subida (2 por bajada a artefacto, también boca taponada; el codo con rosca
+  hembra cuenta como uno) y 4 de salida del medidor. Con alturas confirmadas se cuentan por
+  cambio de nivel. Filas propias en la planilla. (`6619dbb`)
+- Te normal + cupla por defecto en derivaciones con reducción. (`1389a09`)
+- B-3: diferencia de método (accesorios en 25 contra 32), mismo diámetro por tabla con la
+  longitud de la gasista. Test de seguridad sin excepciones. (`1389a09`)
+- Motivo del diámetro adoptado cuando supera al de tabla: "Previsto para ampliación" o
+  "Por longitud equivalente de reducciones", en la tabla SIGAS del plano y en la planilla
+  por tramo. (`2ed23b0`)
+- Motor congelado otra vez. Verificaciones: 51 grupos, 377, 0 fallas. Typecheck sin errores.
+
+**Problema: ramas separadas.** Todo lo de esta sesión está en `main` local (33 commits sobre
+`3bcf275`), respaldado en `origin/respaldo/sesion-2026-11-24`. El remoto avanzó por otro
+lado desde el mismo `3bcf275`: `origin/main` tiene 4 commits (hasta `30abe81`, el deploy de
+producción del 27/10) y `origin/wip/integracion-02a` 10 más (hasta `cedaedf`, 30/10):
+propuestas XY-Z de subidas y cambios de nivel, conexión al artefacto, borradores
+guardados (~10.700 líneas). Vercel publica `main` como Production; el resto sale como Preview.
+
+**Plan de fusión (pendiente de confirmación):**
+1. Crear `wip/integracion-02a` local desde la del remoto.
+2. Fusionar ahí el trabajo de la sesión y resolver conflictos. Probables en conexión al
+   artefacto y alturas (`terminalConnection`, `technicalRouteElevation`, verificaciones).
+3. `npm run typecheck` y `npm run verify`; si pasan, push de la rama y probar el Preview.
+4. Con el OK: fusionar `wip/integracion-02a` en `main` y push; confirmar en Vercel
+   Production + Ready. Desde ahí, cada tarea que pase typecheck y verificaciones va a `main`.
+- Duda abierta: si los 14 commits del remoto se conservan todos (uno es "asdadasds").
+
+**Después:** datos de obra, propietario, matrícula, rótulo y carátula en el PDF (mostrar
+antes qué datos se piden y dónde van); ventilaciones y conductos de evacuación; pantalla
+de Modo experto (codos de subida, codos de salida del medidor, te de reducción).
+
 ### Integración temporal del Plano de instalación A3 (2026-11-21)
 - La vista A3 se genera en el navegador con los datos actuales del área de trabajo. No usa
   datos ficticios, no guarda el PDF en el proyecto y mantiene la exportación anterior.
