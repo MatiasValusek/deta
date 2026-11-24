@@ -105,6 +105,30 @@ Lo más valioso. Usa lo que el motor ya calcula.
   cota basados en entidades no soportadas y formato MTEXT avanzado. No bloquean las entidades
   compatibles comprobadas y no se amplía su alcance en esta fase.
 
+### Diámetro adoptado y comparación con un plano presentado (2026-11-24)
+**Decisión del diámetro adoptado.** Por defecto, el diámetro adoptado es el mínimo que da
+la tabla SIGAS. La app resuelve sola las reducciones (te de reducción en derivaciones,
+cupla de reducción en línea) para que ningún tramo suba de diámetro por no tener confirmada
+una pieza. El gasista puede agrandar el diámetro adoptado de un tramo (por ejemplo, para
+dejar prevista una ampliación). Ese diámetro mayor es el que se usa en accesorios,
+reducciones y hojas.
+
+**Comparación** (obra de prueba `workbench/obraPruebaTresDerivaciones.ts`, misma geometría,
+consumos y largos que un plano parcial ya presentado, con los accesorios cargados a mano
+como los contó la gasista):
+- Largos reales, consumos y diámetro adoptado: iguales en los 7 tramos.
+- Diámetro por tabla: igual salvo B-3. La app da 20 y el plano 25. Con 0,699 m³/h, el 20
+  alcanza en la tabla, así que el 25 de la gasista es una elección, no un resultado de la tabla.
+- Longitud total: diferencia de 0,14 m en los recorridos al 1, al 2 y al 4. En el recorrido
+  al 3 (B-3) la app da 14,91 m y el plano 16,31 m: 1,40 m menos. Donde baja el diámetro, la
+  app cuenta te de reducción con la medida real. La gasista contó te normal y cupla, todo en 32.
+- **Codos de subidas y bajadas: la app no los cuenta.** Solo pone codos donde la traza dobla
+  en planta. En los extremos (medidor y artefactos) no agrega nada, y las alturas cargadas
+  solo se usan para dibujar, no para el cálculo. En la prueba los codos están cargados a mano.
+  Con la propuesta automática, B-3 y C-M son rectos en planta y quedarían con 0 codos (la
+  gasista contó 2 y 4). La longitud equivalente queda corta, que es el lado inseguro.
+  Pendiente: decidir cuántos codos contar por defecto en cada subida y en la salida del medidor.
+
 ### Decisiones tras la Fase 0 (2026-11-20)
 - Los paneles ocultos (diagnóstico, preparación del plano, obstáculos) quedan para
   "Modo experto". Cómo se integran se decide en la Fase 2.
