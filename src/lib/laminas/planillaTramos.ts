@@ -21,6 +21,7 @@ export const FILAS_PLANILLA = [
   "Codo normal 45°",
   "Codos de subida",
   "Codos de salida del medidor",
+  "Codos de cambio de nivel",
   "Codo a 90° c/RH",
   "Te normal flujo a 90°",
   "Te normal flujo a través",
@@ -225,7 +226,7 @@ function formatear(valor: number, decimales = 2) {
   });
 }
 
-/** Los codos de subida y de salida del medidor van en su propia fila, para que se vean. */
+/** Los codos de subida, de salida del medidor y de cambio de nivel van en su propia fila, para que se vean. */
 function clasificarContribucion(a: {
   accessoryId: string;
   catalogCode?: string;
@@ -234,5 +235,6 @@ function clasificarContribucion(a: {
   const tipo = tipoCodosDeSubida(a.accessoryId);
   if (tipo === "subida") return { fila: "Codos de subida", medida: "" };
   if (tipo === "salida_medidor") return { fila: "Codos de salida del medidor", medida: "" };
+  if (tipo === "cambio_nivel") return { fila: "Codos de cambio de nivel", medida: "" };
   return clasificarAccesorio(a.catalogCode ?? a.catalogFamilyId ?? "");
 }

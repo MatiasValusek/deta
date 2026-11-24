@@ -1,5 +1,6 @@
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
 import { pointZMeters } from "@/lib/geometry/height";
+import type { Point2D } from "@/lib/geometry/types";
 import type {
   ManualRouteNetwork,
   RouteSegment,
@@ -22,6 +23,12 @@ import {
  * Van con el diámetro del tramo. Si ese extremo tiene alturas cargadas por el gasista, se
  * cuentan 2 codos por cada cambio de nivel del tramo en lugar de los fijos (sin contar dos
  * veces). Si el tramo ya trae la pieza con el mismo id (cambiada en Modo experto), se respeta.
+ *
+ * Codos de cambio de nivel (corrección de seguridad): en los tramos que no llegan al medidor
+ * ni a un artefacto, 2 codos a 90° por cada cambio de nivel, con alturas sugeridas o
+ * confirmadas (si no, el hueco sigue cuando se acepta una propuesta sin revisar alturas).
+ * Si el cambio de nivel arranca justo en una unión donde el detector de giros ya puso un
+ * codo, ese codo es uno de los 2.
  */
 
 export const CODOS_POR_SUBIDA = 2;
@@ -29,6 +36,8 @@ export const CODOS_SALIDA_MEDIDOR = 4;
 
 const PREFIJO_SUBIDA = "codos-subida:";
 const PREFIJO_SALIDA_MEDIDOR = "codos-salida-medidor:";
+const PREFIJO_CAMBIO_NIVEL = "codos-cambio-nivel:";
+const PREFIJO_DETECTOR = "route-accessory:accessory-proposal:";
 const CAMBIO_DE_NIVEL_M = 0.05;
 const SIGAS_ID = "sigas-thermofusion";
 
@@ -37,15 +46,39 @@ const codosFinalesDelArtefacto = (segment: RouteSegment) =>
     .filter((accessory) => accessory.id.startsWith("route-terminal:") && accessory.type === "elbow")
     .reduce((total, accessory) => total + accessory.quantity, 0);
 
-export type TipoCodosDeSubida = "subida" | "salida_medidor";
+export type TipoCodosDeSubida = "subida" | "salida_medidor" | "cambio_nivel";
+
+const PREFIJOS: Record<TipoCodosDeSubida, string> = {
+  cambio_nivel: PREFIJO_CAMBIO_NIVEL,
+  salida_medidor: PREFIJO_SALIDA_MEDIDOR,
+  subida: PREFIJO_SUBIDA,
+};
 
 export const codosDeSubidaId = (tipo: TipoCodosDeSubida, segmentId: string) =>
-  `${tipo === "subida" ? PREFIJO_SUBIDA : PREFIJO_SALIDA_MEDIDOR}${segmentId}`;
+  `${PREFIJOS[tipo]}${segmentId}`;
+
+/** Índices i donde la altura cambia entre path[i - 1] y path[i]. */
+export function cambiosDeNivelEn(path: Point2D[]): number[] {
+  const indices: number[] = [];
+  for (let i = 1; i < path.length; i += 1) {
+    if (Math.abs(pointZMeters(path[i]) - pointZMeters(path[i - 1])) > CAMBIO_DE_NIVEL_M) {
+      indices.push(i);
+    }
+  }
+  return indices;
+}
+
+/** Punto donde arranca el primer cambio de nivel del recorrido (para dibujar los codos). */
+export function puntoCambioDeNivel(path: Point2D[]): Point2D | null {
+  const [primero] = cambiosDeNivelEn(path);
+  return primero === undefined ? null : path[primero - 1] ?? null;
+}
 
 /** Dice si un accesorio es de subida o de salida del medidor, por su id. */
 export function tipoCodosDeSubida(accessoryId: string): TipoCodosDeSubida | null {
   if (accessoryId.startsWith(PREFIJO_SUBIDA)) return "subida";
   if (accessoryId.startsWith(PREFIJO_SALIDA_MEDIDOR)) return "salida_medidor";
+  if (accessoryId.startsWith(PREFIJO_CAMBIO_NIVEL)) return "cambio_nivel";
   return null;
 }
 
@@ -70,14 +103,25 @@ export function agregarCodosDeSubida(params: {
   const extremoConAlturas = (nodeId: string, segment: RouteSegment) =>
     elevaciones.get(nodeId)?.verificationStatus === "confirmed" ||
     (segment.vertexElevations ?? []).some((elevation) => elevation?.status === "confirmed");
-  const cambiosDeNivel = (segmentId: string) => {
-    const recorrido = recorridos.get(segmentId);
-    const alturas = recorrido?.path.map((point) => pointZMeters(point)) ?? [];
-    let cambios = 0;
-    for (let i = 1; i < alturas.length; i += 1) {
-      if (Math.abs(alturas[i] - alturas[i - 1]) > CAMBIO_DE_NIVEL_M) cambios += 1;
+  const cambiosDeNivel = (segmentId: string) =>
+    cambiosDeNivelEn(recorridos.get(segmentId)?.path ?? []).length;
+  // Uniones donde el detector de giros ya puso un codo (mide la dirección en 3D).
+  const nodosConCodoDelDetector = new Set(
+    params.network.segments.flatMap((segment) =>
+      (segment.accessories ?? [])
+        .filter((a) => a.type === "elbow" && a.id.startsWith(PREFIJO_DETECTOR) && a.quantity > 0)
+        .map((a) => a.id.slice(PREFIJO_DETECTOR.length).split(":").slice(0, -2).join(":")),
+    ),
+  );
+  const codosDeCambioDeNivel = (segment: RouteSegment) => {
+    const path = recorridos.get(segment.id)?.path ?? [];
+    let total = 0;
+    for (const i of cambiosDeNivelEn(path)) {
+      total += CODOS_POR_SUBIDA;
+      if (i - 1 === 0 && nodosConCodoDelDetector.has(segment.fromNodeId)) total -= 1;
+      if (i === path.length - 1 && nodosConCodoDelDetector.has(segment.toNodeId)) total -= 1;
     }
-    return cambios;
+    return total;
   };
   const cantidad = (segment: RouteSegment, nodeId: string, fijos: number) =>
     extremoConAlturas(nodeId, segment) ? CODOS_POR_SUBIDA * cambiosDeNivel(segment.id) : fijos;
@@ -87,6 +131,29 @@ export function agregarCodosDeSubida(params: {
     segments: params.network.segments.map((segment) => {
       const extremos = [segment.fromNodeId, segment.toNodeId];
       const agregados: RouteSegmentAccessory[] = [];
+      const llegaAExtremo = extremos.some((nodeId) => {
+        const kind = nodeById.get(nodeId)?.kind;
+        return kind === "appliance" || kind === "supply";
+      });
+      const idCambioNivel = codosDeSubidaId("cambio_nivel", segment.id);
+      if (
+        !llegaAExtremo &&
+        !(segment.accessories ?? []).some((accessory) => accessory.id === idCambioNivel)
+      ) {
+        const n = codosDeCambioDeNivel(segment);
+        if (n > 0) {
+          agregados.push({
+            catalogFamilyId: "codo-normal-a-90",
+            equivalentLengthMetersPerUnit: null,
+            equivalentLengthSource: "pipe_system",
+            id: idCambioNivel,
+            origin: "automatic_confirmed",
+            quantity: n,
+            segmentId: segment.id,
+            type: "elbow",
+          });
+        }
+      }
 
       for (const nodeId of extremos) {
         const kind = nodeById.get(nodeId)?.kind;
@@ -123,5 +190,6 @@ export function agregarCodosDeSubida(params: {
 export function tipoCodosDeSubidaEnId(id: string): TipoCodosDeSubida | null {
   if (id.includes(PREFIJO_SUBIDA)) return "subida";
   if (id.includes(PREFIJO_SALIDA_MEDIDOR)) return "salida_medidor";
+  if (id.includes(PREFIJO_CAMBIO_NIVEL)) return "cambio_nivel";
   return null;
 }

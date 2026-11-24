@@ -1,4 +1,8 @@
-import { agregarCodosDeSubida, tipoCodosDeSubida } from "@/lib/calculation/codosDeSubida";
+import {
+  agregarCodosDeSubida,
+  puntoCambioDeNivel,
+  tipoCodosDeSubida,
+} from "@/lib/calculation/codosDeSubida";
 import type {
   PipeDiameterReference,
   PipeDiameterTransitionTraversalKind,
@@ -715,6 +719,12 @@ function inferRouteSegmentAccessoryGeometry(params: {
   segment: RouteSegment;
 }): RouteAccessoryGeometry | null {
   const codosDeSubida = tipoCodosDeSubida(params.accessory.id);
+
+  if (codosDeSubida === "cambio_nivel") {
+    // Los codos de cambio de nivel van donde arranca el cambio de altura del tramo.
+    const punto = puntoCambioDeNivel(params.segment.vertices ?? []);
+    return punto ? { nodeId: null, position: { ...punto } } : null;
+  }
 
   if (codosDeSubida) {
     // Los codos de subida van en el extremo del tramo: el artefacto o el medidor.

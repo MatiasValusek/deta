@@ -1,4 +1,4 @@
-import { tipoCodosDeSubidaEnId } from "@/lib/calculation/codosDeSubida";
+import { puntoCambioDeNivel, tipoCodosDeSubidaEnId } from "@/lib/calculation/codosDeSubida";
 import { equipmentCode, type WorkbenchEquipment } from "@/lib/equipment/types";
 import type { Point2D } from "@/lib/geometry/types";
 import {
@@ -555,7 +555,9 @@ function terminalRouteAccessoryPlanPoint(params: {
   }
 
   const point =
-    terminalKind === "terminal" || terminalKind === "subida"
+    terminalKind === "cambio_nivel"
+      ? puntoCambioDeNivel(segment.path)
+      : terminalKind === "terminal" || terminalKind === "subida"
       ? segment.path[segment.path.length - 1]
       : terminalKind === "salida_medidor"
         ? segment.path[0]
