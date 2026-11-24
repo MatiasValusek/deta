@@ -91,6 +91,7 @@ import type { NormalizedDrawing } from "@/lib/geometry/types";
 import type {
   SigasAccessoryExactSelectionDecision,
 } from "@/lib/calculation/pipeSystems/sigas/sigasAccessoryExactSelection";
+import { AgrandarDiametroPanel } from "./AgrandarDiametroPanel";
 import { FactibilidadPreview } from "./FactibilidadPreview";
 import { PlanillaTramosPreview } from "./PlanillaTramosPreview";
 import { PlanoInstalacionPreview } from "./PlanoInstalacionPreview";
@@ -556,6 +557,16 @@ export function CalculationPanel({
               onSelectAccessoryExactCatalogRow
             }
           />
+          {isDeliverMode ? null : (
+            <AgrandarDiametroPanel
+              adoptedDiameterDecisions={adoptedDiameterDecisions}
+              calculationSheet={calculationSheet}
+              network={routeNetwork}
+              pipeSystem={pipeSystem}
+              result={result}
+              onAdoptSegmentDiameter={onAdoptSegmentDiameter}
+            />
+          )}
           {isDeliverMode ? (
             <>
               <MaterialTakeoffSection
