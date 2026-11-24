@@ -6,7 +6,7 @@ export type RawDxfScan = {
     BLOCKS: EntityCountMap;
   };
   colorMetadata: {
-    layers: Record<string, RawDxfColorRecord>;
+    layers: Record<string, RawDxfLayerRecord>;
     entitiesByHandle: Record<string, RawDxfColorRecord>;
   };
   hatches: RawDxfHatchRecord[];
@@ -16,6 +16,11 @@ export type RawDxfColorRecord = {
   colorIndex: number | null;
   trueColor: string | null;
   trueColorValue: number | null;
+};
+
+export type RawDxfLayerRecord = RawDxfColorRecord & {
+  lineType: string | null;
+  lineweight: number | null;
 };
 
 export type RawDxfPair = {
@@ -96,6 +101,8 @@ export function scanDxfSource(source: string): RawDxfScan {
           flushLayerRecord(colorMetadata, layerRecord);
           layerRecord = {
             colorIndex: null,
+            lineType: null,
+            lineweight: null,
             name: null,
             trueColor: null,
             trueColorValue: null,
@@ -144,7 +151,7 @@ function increment(counts: EntityCountMap, key: string) {
   counts[key] = (counts[key] ?? 0) + 1;
 }
 
-type RawLayerRecord = RawDxfColorRecord & {
+type RawLayerRecord = RawDxfLayerRecord & {
   name: string | null;
 };
 
@@ -181,6 +188,14 @@ function readLayerColorPair(
 
   if (code === "62") {
     record.colorIndex = parseDxfInteger(value);
+  }
+
+  if (code === "6") {
+    record.lineType = value?.trim() || null;
+  }
+
+  if (code === "370") {
+    record.lineweight = parseDxfInteger(value);
   }
 
   if (code === "420") {
@@ -224,6 +239,8 @@ function flushLayerRecord(
 
   metadata.layers[record.name] = {
     colorIndex: record.colorIndex,
+    lineType: record.lineType,
+    lineweight: record.lineweight,
     trueColor: record.trueColor,
     trueColorValue: record.trueColorValue,
   };

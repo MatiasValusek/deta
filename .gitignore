@@ -14,3 +14,4 @@ pnpm-debug.log*
 .next-dev.*.log
 
 _material-prueba/
+.playwright-mcp/

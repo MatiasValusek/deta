@@ -1,12 +1,16 @@
 import DxfParser, {
   type IArcEntity,
   type IBlock,
+  type IDimensionEntity,
   type IDxf,
   type IEntity,
   type IInsertEntity,
   type ILayer,
+  type ILineType,
   type ILineEntity,
   type ILwpolylineEntity,
+  type IMtextEntity,
+  type ITextEntity,
 } from "dxf-parser";
 import { boundsFromEntities } from "@/lib/geometry/bounds";
 import type {
@@ -25,6 +29,7 @@ import type {
   NormalizedDrawing,
   Point2D,
   PolylinePrimitive,
+  TextPrimitive,
 } from "@/lib/geometry/types";
 import {
   scanDxfSource,
@@ -40,12 +45,15 @@ type DxfPoint = {
 };
 
 type DxfLayerTable = Record<string, ILayer>;
+type DxfLineTypeTable = Record<string, ILineType>;
 
 type ImportContext = {
   layers: Map<string, DrawingLayer>;
   entities: DrawingPrimitive[];
   normalizedCounts: EntityCountMap;
   rawColorMetadata: RawDxfScan["colorMetadata"];
+  lineTypes: Map<string, number[]>;
+  globalLineTypeScale: number;
   warnings: ImportWarning[];
   unsupportedHatchCount: number;
 };
@@ -56,6 +64,8 @@ type BlockTransform = {
   blockColorIndex: number | null;
   blockTrueColor: string | null;
   blockTrueColorValue: number | null;
+  blockLineType: string | null;
+  blockLineweight: number | null;
   blockName: string;
   insertion: Point2D;
   scaleX: number;
@@ -65,8 +75,23 @@ type BlockTransform = {
   sourcePath: string;
 };
 
-const SOURCE_TYPES_WITH_RENDERING = new Set(["LINE", "LWPOLYLINE", "ARC"]);
-const SUPPORTED_SOURCE_TYPES = ["LINE", "LWPOLYLINE", "ARC", "INSERT", "HATCH"];
+const SOURCE_TYPES_WITH_RENDERING = new Set([
+  "LINE",
+  "LWPOLYLINE",
+  "ARC",
+  "TEXT",
+  "MTEXT",
+]);
+const SUPPORTED_SOURCE_TYPES = [
+  "LINE",
+  "LWPOLYLINE",
+  "ARC",
+  "TEXT",
+  "MTEXT",
+  "DIMENSION",
+  "INSERT",
+  "HATCH",
+];
 
 export function importDxf(fileName: string, source: string): NormalizedDrawing {
   const rawScan = scanDxfSource(source);
@@ -80,6 +105,8 @@ export function importDxf(fileName: string, source: string): NormalizedDrawing {
   const context: ImportContext = {
     layers: readLayers(parsed, rawScan.colorMetadata.layers),
     entities: [],
+    globalLineTypeScale: readGlobalLineTypeScale(parsed),
+    lineTypes: readLineTypes(parsed),
     normalizedCounts: {},
     rawColorMetadata: rawScan.colorMetadata,
     unsupportedHatchCount: 0,
@@ -140,6 +167,11 @@ function normalizeTopLevelEntity(
     return;
   }
 
+  if (entity.type === "DIMENSION") {
+    normalizeDimension(parsed, entity as IDimensionEntity, context, sourcePath);
+    return;
+  }
+
   normalizeRenderableEntity(entity, context, sourcePath);
 }
 
@@ -183,6 +215,8 @@ function normalizeInsert(
         insertVisual.explicitTrueColorValue ??
         insertVisual.layerTrueColorValue ??
         insertVisual.blockTrueColorValue,
+      blockLineType: insertVisual.resolvedLineType ?? null,
+      blockLineweight: insertVisual.resolvedLineweight ?? null,
       blockName: block.name,
       insertion: instance.insertion,
       scaleX: finiteOrDefault(insert.xScale, 1),
@@ -194,6 +228,53 @@ function normalizeInsert(
 
     normalizeBlockEntities(block, context, transform);
   }
+}
+
+function normalizeDimension(
+  parsed: IDxf,
+  dimension: IDimensionEntity,
+  context: ImportContext,
+  sourcePath: string,
+) {
+  const block = parsed.blocks?.[dimension.block];
+  const layer = layerName(dimension.layer);
+  ensureLayer(context, layer, null, null, true);
+
+  if (!block) {
+    context.warnings.push({
+      entityType: "DIMENSION",
+      sourcePath,
+      message: `Cota conservada sin representación: no se encontró el bloque gráfico "${dimension.block}".`,
+    });
+    return;
+  }
+
+  const visual = resolveVisualMetadata(dimension, layer, context);
+  const transform: BlockTransform = {
+    blockBase: pointFromDxf(block.position),
+    blockColor: visual.resolvedColor,
+    blockColorIndex:
+      visual.explicitColorIndex ?? visual.layerColorIndex ?? visual.blockColorIndex,
+    blockTrueColor:
+      visual.explicitTrueColor ?? visual.layerTrueColor ?? visual.blockTrueColor,
+    blockTrueColorValue:
+      visual.explicitTrueColorValue ??
+      visual.layerTrueColorValue ??
+      visual.blockTrueColorValue,
+    blockLineType: visual.resolvedLineType ?? null,
+    blockLineweight: visual.resolvedLineweight ?? null,
+    blockName: block.name,
+    insertion: { x: 0, y: 0 },
+    scaleX: 1,
+    scaleY: 1,
+    rotation: 0,
+    inheritedLayer: layer,
+    sourcePath: `${sourcePath}/BLOCKS/${block.name}`,
+  };
+
+  normalizeBlockEntities(block, context, transform);
+  context.normalizedCounts.dimension =
+    (context.normalizedCounts.dimension ?? 0) + 1;
 }
 
 function normalizeBlockEntities(
@@ -248,7 +329,127 @@ function normalizeRenderableEntity(
     if (primitive) {
       addPrimitive(context, primitive);
     }
+    return;
   }
+
+  if (entity.type === "TEXT") {
+    const primitive = normalizeText(
+      entity as ITextEntity,
+      sourcePath,
+      layer,
+      visual,
+      transform,
+    );
+    if (primitive) {
+      addPrimitive(context, primitive);
+    }
+    return;
+  }
+
+  if (entity.type === "MTEXT") {
+    const primitive = normalizeMtext(
+      entity as IMtextEntity,
+      sourcePath,
+      layer,
+      visual,
+      transform,
+    );
+    if (primitive) {
+      addPrimitive(context, primitive);
+    }
+  }
+}
+
+function normalizeText(
+  entity: ITextEntity,
+  sourcePath: string,
+  layer: string,
+  visual: DrawingVisualMetadata,
+  transform?: BlockTransform,
+): TextPrimitive | null {
+  if (!entity.startPoint || !entity.text || !Number.isFinite(entity.textHeight)) {
+    return null;
+  }
+
+  const metrics = transformTextMetrics(
+    finiteOrDefault(entity.rotation, 0),
+    finiteOrDefault(entity.xScale, 1),
+    transform,
+  );
+
+  return {
+    id: primitiveId(sourcePath),
+    kind: "text",
+    sourceType: "TEXT",
+    sourcePath,
+    layer,
+    color: visual.resolvedColor,
+    visual,
+    position: transformPoint(pointFromDxf(entity.startPoint), transform),
+    alignmentPoint: entity.endPoint
+      ? transformPoint(pointFromDxf(entity.endPoint), transform)
+      : null,
+    text: entity.text,
+    rawText: entity.text,
+    height: entity.textHeight * metrics.heightScale,
+    width: null,
+    widthFactor: metrics.widthFactor,
+    rotation: metrics.rotation,
+    horizontalAlignment: finiteOrNull(entity.halign),
+    verticalAlignment: finiteOrNull(entity.valign),
+    attachmentPoint: null,
+    multiline: false,
+  };
+}
+
+function normalizeMtext(
+  entity: IMtextEntity,
+  sourcePath: string,
+  layer: string,
+  visual: DrawingVisualMetadata,
+  transform?: BlockTransform,
+): TextPrimitive | null {
+  if (!entity.position || !entity.text || !Number.isFinite(entity.height)) {
+    return null;
+  }
+
+  const directionRotation = entity.directionVector
+    ? radiansToDegrees(
+        Math.atan2(entity.directionVector.y ?? 0, entity.directionVector.x ?? 1),
+      )
+    : undefined;
+  const metrics = transformTextMetrics(
+    finiteOrDefault(entity.rotation, finiteOrDefault(directionRotation, 0)),
+    1,
+    transform,
+  );
+  const blockWidthScale = transform
+    ? Math.hypot(transform.scaleX, transform.scaleY) / Math.SQRT2
+    : 1;
+
+  return {
+    id: primitiveId(sourcePath),
+    kind: "text",
+    sourceType: "MTEXT",
+    sourcePath,
+    layer,
+    color: visual.resolvedColor,
+    visual,
+    position: transformPoint(pointFromDxf(entity.position), transform),
+    alignmentPoint: null,
+    text: plainMtext(entity.text),
+    rawText: entity.text,
+    height: entity.height * metrics.heightScale,
+    width: Number.isFinite(entity.width)
+      ? entity.width * blockWidthScale
+      : null,
+    widthFactor: metrics.widthFactor,
+    rotation: metrics.rotation,
+    horizontalAlignment: null,
+    verticalAlignment: null,
+    attachmentPoint: finiteOrNull(entity.attachmentPoint),
+    multiline: true,
+  };
 }
 
 function normalizeLine(
@@ -424,6 +625,26 @@ function resolveVisualMetadata(
         : colorSource === "bylayer"
           ? layerTrueColor ?? layerColor
           : null;
+  const originalLineType = normalizeLineType(entity.lineType);
+  const resolvedLineType = resolveLineType(
+    originalLineType,
+    layer?.lineType ?? null,
+    transform?.blockLineType ?? null,
+  );
+  const entityLineTypeScale = positiveOrDefault(entity.lineTypeScale, 1);
+  const blockScale = transform
+    ? Math.hypot(transform.scaleX, transform.scaleY) / Math.SQRT2
+    : 1;
+  const lineTypeScale = context.globalLineTypeScale * entityLineTypeScale * blockScale;
+  const pattern = resolvedLineType
+    ? context.lineTypes.get(resolvedLineType.toUpperCase()) ?? null
+    : null;
+  const originalLineweight = finiteOrNull(entity.lineweight);
+  const resolvedLineweight = resolveLineweight(
+    originalLineweight,
+    layer?.lineweight ?? null,
+    transform?.blockLineweight ?? null,
+  );
 
   return {
     originalLayer: layerName(entity.layer),
@@ -442,8 +663,12 @@ function resolveVisualMetadata(
     blockTrueColorValue,
     resolvedColor,
     colorSource,
-    lineType: normalizeLineType(entity.lineType),
-    lineweight: finiteOrNull(entity.lineweight),
+    lineType: originalLineType,
+    lineTypePattern: pattern?.map((length) => length * lineTypeScale) ?? null,
+    lineTypeScale,
+    resolvedLineType,
+    lineweight: originalLineweight,
+    resolvedLineweight,
     blockName: transform?.blockName ?? null,
     sourceEntityType: entity.type,
   };
@@ -724,7 +949,11 @@ function resolveRawHatchVisualMetadata(
     resolvedColor,
     colorSource,
     lineType: null,
+    lineTypePattern: null,
+    lineTypeScale: null,
+    resolvedLineType: null,
     lineweight: null,
+    resolvedLineweight: null,
     blockName: null,
     sourceEntityType: "HATCH",
   };
@@ -848,6 +1077,62 @@ function normalizeLineType(lineType: string | undefined): string | null {
   return lineType;
 }
 
+function resolveLineType(
+  entityLineType: string | null,
+  layerLineType: string | null,
+  blockLineType: string | null,
+) {
+  const normalized = entityLineType?.trim().toUpperCase();
+
+  if (normalized === "BYBLOCK") {
+    return blockLineType ?? layerLineType ?? "Continuous";
+  }
+
+  if (!normalized || normalized === "BYLAYER") {
+    return layerLineType ?? "Continuous";
+  }
+
+  return entityLineType;
+}
+
+function resolveLineweight(
+  entityLineweight: number | null,
+  layerLineweight: number | null,
+  blockLineweight: number | null,
+) {
+  if (entityLineweight !== null && entityLineweight >= 0) {
+    return entityLineweight;
+  }
+
+  if (entityLineweight === -2 && blockLineweight !== null && blockLineweight >= 0) {
+    return blockLineweight;
+  }
+
+  return layerLineweight !== null && layerLineweight >= 0
+    ? layerLineweight
+    : null;
+}
+
+function readLineTypes(parsed: IDxf) {
+  const result = new Map<string, number[]>();
+  const table = parsed.tables?.lineType?.lineTypes as DxfLineTypeTable | undefined;
+
+  for (const [name, lineType] of Object.entries(table ?? {})) {
+    result.set(
+      name.toUpperCase(),
+      (lineType.pattern ?? [])
+        .map(Number)
+        .filter((length) => Number.isFinite(length)),
+    );
+  }
+
+  return result;
+}
+
+function readGlobalLineTypeScale(parsed: IDxf) {
+  return positiveOrDefault(parsed.header?.$LTSCALE, 1);
+}
+
 function readLayers(
   parsed: IDxf,
   rawLayers: RawDxfScan["colorMetadata"]["layers"],
@@ -866,6 +1151,8 @@ function readLayers(
         layer.visible !== false,
         rawLayer?.trueColor ?? null,
         rawLayer?.trueColorValue ?? null,
+        rawLayer?.lineType ?? null,
+        rawLayer?.lineweight ?? null,
       );
     }
   }
@@ -881,6 +1168,8 @@ function ensureLayer(
   visible: boolean,
   trueColor: string | null = null,
   trueColorValue: number | null = null,
+  lineType: string | null = null,
+  lineweight: number | null = null,
 ) {
   if (context.layers.has(name)) {
     return;
@@ -894,6 +1183,8 @@ function ensureLayer(
     colorIndex,
     trueColor,
     trueColorValue,
+    lineType,
+    lineweight,
   });
 }
 
@@ -1022,6 +1313,50 @@ function transformPoint(point: Point2D, transform?: BlockTransform): Point2D {
   };
 }
 
+function transformTextMetrics(
+  rotationDegrees: number,
+  widthFactor: number,
+  transform?: BlockTransform,
+) {
+  const sourceRotation = degreesToRadians(rotationDegrees);
+  const scaleX = transform?.scaleX ?? 1;
+  const scaleY = transform?.scaleY ?? 1;
+  const baseline = {
+    x: Math.cos(sourceRotation) * scaleX,
+    y: Math.sin(sourceRotation) * scaleY,
+  };
+  const vertical = {
+    x: -Math.sin(sourceRotation) * scaleX,
+    y: Math.cos(sourceRotation) * scaleY,
+  };
+  const outerRotation = transform?.rotation ?? 0;
+  const cos = Math.cos(outerRotation);
+  const sin = Math.sin(outerRotation);
+  const rotatedBaseline = {
+    x: baseline.x * cos - baseline.y * sin,
+    y: baseline.x * sin + baseline.y * cos,
+  };
+  const baselineScale = Math.hypot(baseline.x, baseline.y);
+  const heightScale = Math.hypot(vertical.x, vertical.y);
+
+  return {
+    heightScale,
+    rotation: Math.atan2(rotatedBaseline.y, rotatedBaseline.x),
+    widthFactor:
+      finiteOrDefault(widthFactor, 1) *
+      (heightScale > Number.EPSILON ? baselineScale / heightScale : 1),
+  };
+}
+
+function plainMtext(value: string) {
+  return value
+    .replace(/\\P/gi, "\n")
+    .replace(/\\~/g, " ")
+    .replace(/\\[AaCcFfHhQqTtWw][^;]*;/g, "")
+    .replace(/\\S([^;^\\/]+)[^;]*[\^\\/]([^;]+);/g, "$1/$2")
+    .replace(/[{}]/g, "");
+}
+
 function transformArcGeometry(entity: IArcEntity, transform?: BlockTransform) {
   const sourceCenter = pointFromDxf(entity.center);
   const center = transformPoint(sourceCenter, transform);
@@ -1085,6 +1420,11 @@ function finiteOrDefault(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
+function positiveOrDefault(value: unknown, fallback: number): number {
+  const finite = finiteOrDefault(value, fallback);
+  return finite > 0 ? finite : fallback;
+}
+
 function finiteOrNull(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
@@ -1123,6 +1463,10 @@ function trueColorNumberToHex(color: number | null): string | null {
 
 function degreesToRadians(degrees: number) {
   return (degrees * Math.PI) / 180;
+}
+
+function radiansToDegrees(radians: number) {
+  return (radians * 180) / Math.PI;
 }
 
 function nearlyEqual(a: number, b: number) {

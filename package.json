@@ -5,7 +5,8 @@
   "description": "Prueba tecnica DXF de deta",
   "scripts": {
     "dev": "next dev",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "verify": "node --disable-warning=ExperimentalWarning scripts/verify.mjs"
   },
   "dependencies": {
     "dxf-parser": "^1.1.2",

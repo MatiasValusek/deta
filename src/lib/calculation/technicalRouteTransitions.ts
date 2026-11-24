@@ -8,6 +8,7 @@ import type {
 } from "@/lib/calculation/pipeSystem";
 import {
   applyDiameterTransitionDecisions,
+  FAMILIA_TE_NORMAL_MAS_CUPLA,
   type DiameterTransitionDecision,
   type DiameterTransitionKind,
   type DiameterTransitionProposal,
@@ -413,7 +414,7 @@ function createTransitionContributions(params: {
   }
 
   if (transition.kind === "branch_transition") {
-    return [createBranchTransitionContribution({
+    return createBranchTransitionContributions({
       base,
       diameterBySegmentId: params.diameterBySegmentId,
       downstreamSegmentId,
@@ -424,7 +425,7 @@ function createTransitionContributions(params: {
       transition,
       upstreamDiameter,
       upstreamSegmentId,
-    })];
+    });
   }
 
   if (transition.kind !== "simple_reduction") {
@@ -617,6 +618,191 @@ function compoundPreviewContributionToRouteContribution(params: {
     status,
     variantLabel: params.contribution.variantLabel,
   };
+}
+
+/** Familia de la reducción que va en el tramo que sigue derecho cuando la te tiene tres medidas. */
+const FAMILIA_REDUCCION_EN_LINEA = "cupla-reduccion-hh";
+
+/**
+ * Te con tres medidas distintas (entra U, sigue derecho en D, baja en B), como la arma el gasista:
+ * te de reducción central U-B y, en el tramo que sigue derecho, cupla de reducción U-D.
+ * - Recorrido que baja: te de reducción U-B a 90°.
+ * - Recorrido que sigue derecho: te de reducción U-B a través + cupla U-D.
+ * Con dos medidas o menos se resuelve como siempre.
+ */
+function createBranchTransitionContributions(
+  params: Parameters<typeof createBranchTransitionContribution>[0],
+): TechnicalRouteTransitionContribution[] {
+  if (
+    params.includeBranchTransitions &&
+    params.transition.decision?.status === "confirmed" &&
+    params.transition.decision.catalogFamilyId === FAMILIA_TE_NORMAL_MAS_CUPLA
+  ) {
+    return teNormalMasCupla(params);
+  }
+
+  const diametroDe = (segmentId: string) =>
+    resolveDiameter(params.diameterBySegmentId, segmentId) ??
+    segmentDiameter(params.transition, segmentId);
+  const incidentes = params.transition.incidentSegments.map((segment) => ({
+    diameter: diametroDe(segment.segmentId),
+    segmentId: segment.segmentId,
+  }));
+  const medidas = new Set(
+    incidentes.map((item) => item.diameter?.externalDiameterMillimeters),
+  );
+  const entrada = params.upstreamDiameter;
+  const salida = params.base.downstreamDiameter;
+
+  if (medidas.size !== 3 || !entrada || !salida || !params.upstreamSegmentId) {
+    return [createBranchTransitionContribution(params)];
+  }
+
+  const traversalKind = classifyBranchTraversalKind({
+    downstreamSegmentId: params.downstreamSegmentId,
+    equipment: params.equipment,
+    network: params.network,
+    transition: params.transition,
+    upstreamSegmentId: params.upstreamSegmentId,
+  });
+  // Para la te se ve sólo el par entrada-bajada: el otro lado de la te se toma con la medida de entrada.
+  const otroLado =
+    traversalKind === "through"
+      ? params.downstreamSegmentId
+      : incidentes.find(
+          (item) =>
+            item.segmentId !== params.upstreamSegmentId &&
+            item.segmentId !== params.downstreamSegmentId,
+        )?.segmentId;
+  const diametrosTe: Record<string, PipeDiameterReference | null> = Object.fromEntries(
+    incidentes.map((item) => [
+      item.segmentId,
+      item.segmentId === otroLado ? entrada : item.diameter,
+    ]),
+  );
+  const te = createBranchTransitionContribution({
+    ...params,
+    diameterBySegmentId: diametrosTe,
+  });
+
+  if (traversalKind !== "through") {
+    return [te];
+  }
+
+  return [te, cuplaDeReduccion(params, entrada, salida)];
+}
+
+/** Cupla de reducción entre dos medidas, como aporte del recorrido. */
+function cuplaDeReduccion(
+  params: Parameters<typeof createBranchTransitionContribution>[0],
+  entrada: PipeDiameterReference,
+  salida: PipeDiameterReference,
+): TechnicalRouteTransitionContribution {
+  const cupla = params.pipeSystem.resolveDiameterTransitionEquivalentLength({
+    downstreamDiameter: salida,
+    junction: {
+      downstreamSegmentId: params.downstreamSegmentId,
+      geometryKey: params.transition.geometryKey,
+      upstreamSegmentId: params.upstreamSegmentId,
+    },
+    transition: {
+      catalogFamilyId: FAMILIA_REDUCCION_EN_LINEA,
+      id: params.transition.id,
+      kind: "simple_reduction",
+      nodeId: params.transition.nodeId,
+    },
+    upstreamDiameter: entrada,
+  });
+
+  return cupla.status === "resolved"
+    ? {
+        ...params.base,
+        catalogCode: cupla.value.catalogCode,
+        catalogFamilyId: cupla.value.catalogFamilyId,
+        equivalentLengthMeters: cupla.value.equivalentLengthMeters,
+        equivalentLengthResolution: cupla,
+        source: "pipe_system",
+        status: "resolved",
+        transitionKind: "simple_reduction",
+        variant: cupla.value.variant,
+      }
+    : {
+        ...params.base,
+        catalogFamilyId: FAMILIA_REDUCCION_EN_LINEA,
+        equivalentLengthResolution: cupla,
+        reason: cupla.reason,
+        source: "pipe_system",
+        status: cupla.status,
+        transitionKind: "simple_reduction",
+      };
+}
+
+/**
+ * Derivación con te normal + cupla (por defecto): la te va con la medida de la entrada, a 90°
+ * o a través según el recorrido, y si el recorrido baja de medida se suma la cupla.
+ */
+function teNormalMasCupla(
+  params: Parameters<typeof createBranchTransitionContribution>[0],
+): TechnicalRouteTransitionContribution[] {
+  const entrada = params.upstreamDiameter;
+  const salida = params.base.downstreamDiameter;
+  const traversalKind = params.upstreamSegmentId
+    ? classifyBranchTraversalKind({
+        downstreamSegmentId: params.downstreamSegmentId,
+        equipment: params.equipment,
+        network: params.network,
+        transition: params.transition,
+        upstreamSegmentId: params.upstreamSegmentId,
+      })
+    : null;
+
+  if (!entrada || !salida || !traversalKind) {
+    return [
+      unresolvedContribution({
+        ...params.base,
+        catalogFamilyId: FAMILIA_TE_NORMAL_MAS_CUPLA,
+        reason: "Faltan diámetros o sentido del recorrido para contar la te y la cupla.",
+        source: "pipe_system",
+      }),
+    ];
+  }
+
+  const familiaTe =
+    traversalKind === "through" ? "te-normal-flujo-a-traves" : "te-normal-flujo-a-90";
+  const te = params.pipeSystem.resolveAccessoryEquivalentLength({
+    accessory: { catalogFamilyId: familiaTe, id: `${params.transition.id}:te`, quantity: 1, type: "tee" },
+    pipe: { diameter: entrada },
+    segment: {
+      accumulatedFlow: null,
+      accumulatedFlowUnit: null,
+      drawingLength: 0,
+      id: params.upstreamSegmentId ?? params.downstreamSegmentId,
+      physicalLengthMeters: null,
+    },
+  });
+  const aporteTe: TechnicalRouteTransitionContribution =
+    te.status === "resolved"
+      ? {
+          ...params.base,
+          catalogFamilyId: familiaTe,
+          downstreamDiameter: entrada,
+          equivalentLengthMeters: te.value,
+          equivalentLengthResolution: null,
+          source: "pipe_system",
+          status: "resolved",
+          traversalKind,
+        }
+      : unresolvedContribution({
+          ...params.base,
+          catalogFamilyId: familiaTe,
+          reason: te.reason,
+          source: "pipe_system",
+          traversalKind,
+        });
+  const baja =
+    (salida.externalDiameterMillimeters ?? 0) < (entrada.externalDiameterMillimeters ?? 0);
+
+  return baja ? [aporteTe, cuplaDeReduccion(params, entrada, salida)] : [aporteTe];
 }
 
 function createBranchTransitionContribution(params: {

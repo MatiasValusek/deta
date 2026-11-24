@@ -726,6 +726,18 @@ function isDrawingPrimitive(value: unknown) {
     return isPointArray(value.outerRing) && Array.isArray(value.rings);
   }
 
+  if (value.kind === "text") {
+    return (
+      isPoint(value.position) &&
+      (value.alignmentPoint === null || isPoint(value.alignmentPoint)) &&
+      isString(value.text) &&
+      isString(value.rawText) &&
+      isFiniteNumber(value.height) &&
+      isFiniteNumber(value.rotation) &&
+      isFiniteNumber(value.widthFactor)
+    );
+  }
+
   return false;
 }
 

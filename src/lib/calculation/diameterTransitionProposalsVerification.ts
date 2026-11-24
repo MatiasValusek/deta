@@ -47,11 +47,13 @@ export function runDiameterTransitionProposalVerifications() {
     assert(!diameterTransitionIsActive(proposal), "No debe quedar activa.");
   });
 
-  verify(results, "Caso B - DE32 a DE25 recto", () => {
+  verify(results, "Caso B - DE32 a DE25 recto se resuelve solo con cupla de reduccion", () => {
     const proposal = simpleReductionProposal();
 
     assertEqual(proposal.kind, "simple_reduction");
-    assertEqual(proposal.state, "transition_required");
+    assertEqual(proposal.state, "confirmed");
+    assertEqual(proposal.decision?.origin, "app_default");
+    assertEqual(proposal.selectedCatalogFamilyId, "cupla-reduccion-hh");
     assertEqual(proposal.direction, "reducing");
     assertEqual(proposal.upstreamSegmentId, "s1");
     assertEqual(proposal.downstreamSegmentIds.join(","), "s2");
@@ -101,7 +103,7 @@ export function runDiameterTransitionProposalVerifications() {
     assertEqual(elbow.kind, "elbow");
   });
 
-  verify(results, "Caso E - tee con una rama distinta", () => {
+  verify(results, "Caso E - tee con una rama distinta se resuelve sola", () => {
     const proposal = onlyTransition(
       detectDiameterTransitionProposals({
         diameterBySegmentId: diameterMap({
@@ -115,7 +117,9 @@ export function runDiameterTransitionProposalVerifications() {
     );
 
     assertEqual(proposal.kind, "branch_transition");
-    assertEqual(proposal.state, "needs_review");
+    assertEqual(proposal.state, "confirmed");
+    assertEqual(proposal.decision?.origin, "app_default");
+    assertEqual(proposal.selectedCatalogFamilyId, "te-normal-mas-cupla");
     assertEqual(proposal.upstreamSegmentId, "s1");
     assertEqual(proposal.downstreamDiameters.length, 2);
   });

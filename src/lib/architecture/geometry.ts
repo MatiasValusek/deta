@@ -28,6 +28,10 @@ export function drawingPrimitiveSegments(entity: DrawingPrimitive) {
     return entity.rings.flatMap((ring) => polygonalSegments(ring, true));
   }
 
+  if (entity.kind === "text") {
+    return [];
+  }
+
   return polygonalSegments(sampleDrawingArc(entity), false);
 }
 
@@ -85,6 +89,10 @@ export function drawingPrimitiveHardRestrictions(
           },
         ]
       : [];
+  }
+
+  if (entity.kind === "text") {
+    return [];
   }
 
   const restrictions: AutomaticRouteRestriction[] = [];

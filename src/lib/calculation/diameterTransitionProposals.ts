@@ -56,7 +56,28 @@ export type DiameterTransitionDecisionStatus =
   | "pending"
   | "rejected";
 
-export type DiameterTransitionDecisionOrigin = "user_confirmed";
+/** "app_default": la app eligió la pieza compatible sola; el gasista la puede cambiar en Modo experto. */
+export type DiameterTransitionDecisionOrigin = "app_default" | "user_confirmed";
+
+/**
+ * Derivación con reducción armada como la cuenta el gasista: te normal con la medida de la
+ * entrada y cupla de reducción hacia la medida que sigue. Da más longitud equivalente que la
+ * te de reducción central (lado seguro). La te de reducción se puede elegir en Modo experto.
+ */
+export const FAMILIA_TE_NORMAL_MAS_CUPLA = "te-normal-mas-cupla";
+
+/**
+ * Pieza que la app pone sola cuando el diámetro baja (SIGAS, único sistema hoy):
+ * te normal + cupla en las derivaciones y cupla de reducción en el tramo que sigue derecho.
+ */
+const FAMILIA_POR_DEFECTO: Partial<Record<DiameterTransitionKind, string>> = {
+  branch_transition: FAMILIA_TE_NORMAL_MAS_CUPLA,
+  simple_reduction: "cupla-reduccion-hh",
+};
+const ESTADOS_A_RESOLVER_SOLOS: ReadonlySet<DiameterTransitionState> = new Set([
+  "needs_review",
+  "transition_required",
+]);
 
 export type DiameterTransitionDecision = {
   catalogFamilyId?: string;
@@ -217,9 +238,13 @@ export function applyDiameterTransitionDecisions(params: {
   );
 
   return params.proposals.map((proposal) => {
-    const decision = decisionByTransitionId.get(proposal.id);
+    const decisionGuardada = decisionByTransitionId.get(proposal.id);
+    const decision =
+      decisionGuardada && decisionGuardada.geometryKey === proposal.geometryKey
+        ? decisionGuardada
+        : decisionPorDefecto(proposal);
 
-    if (!decision || decision.geometryKey !== proposal.geometryKey) {
+    if (!decision) {
       return proposal;
     }
 
@@ -240,6 +265,34 @@ export function applyDiameterTransitionDecisions(params: {
   });
 }
 
+/** Reducción sin decisión del gasista: la app la da por resuelta con la pieza compatible. */
+function decisionPorDefecto(
+  proposal: DiameterTransitionProposal,
+): DiameterTransitionDecision | null {
+  const familia = FAMILIA_POR_DEFECTO[proposal.kind];
+  const upstream = proposal.upstreamDiameter?.diameter?.externalDiameterMillimeters;
+  const bajadas = proposal.downstreamDiameters.map(
+    (item) => item.diameter?.externalDiameterMillimeters,
+  );
+  const soloReduce =
+    upstream !== undefined &&
+    bajadas.length > 0 &&
+    bajadas.every((valor) => valor !== undefined && valor <= upstream);
+
+  if (!familia || !ESTADOS_A_RESOLVER_SOLOS.has(proposal.state) || !soloReduce) {
+    return null;
+  }
+
+  return {
+    catalogFamilyId: familia,
+    decidedAt: 0,
+    geometryKey: proposal.geometryKey,
+    origin: "app_default",
+    status: "confirmed",
+    transitionId: proposal.id,
+  };
+}
+
 export function withDiameterTransitionTechnicalReview(
   proposal: DiameterTransitionProposal,
   review: DiameterTransitionTechnicalReview,
@@ -248,6 +301,12 @@ export function withDiameterTransitionTechnicalReview(
     proposal.state !== "confirmed" ||
     !proposal.decision?.catalogFamilyId
   ) {
+    return proposal;
+  }
+
+  // La pieza que eligió la app la resuelve el cálculo (también la te con tres medidas,
+  // que no figura entre los candidatos de pantalla): no se le pide confirmar al gasista.
+  if (proposal.decision.origin === "app_default") {
     return proposal;
   }
 

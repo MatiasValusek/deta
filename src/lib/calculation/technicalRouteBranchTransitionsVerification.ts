@@ -172,7 +172,7 @@ export function runTechnicalRouteBranchTransitionVerifications() {
     assertEqual(resolution.equivalentLengthMeters, 0);
   });
 
-  verify(results, "Caso H - tee no confirmada queda unresolved sin cero", () => {
+  verify(results, "Caso H - tee sin decision se resuelve sola con te normal + cupla", () => {
     const fixture = teeFixture({
       diameters: { s1: 32, s2: 32, s3: 25 },
     });
@@ -189,9 +189,15 @@ export function runTechnicalRouteBranchTransitionVerifications() {
       transitions: [proposal],
     });
 
-    assertEqual(resolution.status, "unresolved");
-    assertEqual(resolution.equivalentLengthMeters, null);
-    assertEqual(resolution.contributions[0]?.equivalentLengthMeters, null);
+    assertEqual(proposal.decision?.origin, "app_default");
+    assertEqual(resolution.status, "resolved");
+    // Te normal 32 a 90° (0,928) + cupla 32-25 (0,525), como la cuenta el gasista.
+    assertEqual(resolution.contributions[0]?.catalogFamilyId, "te-normal-flujo-a-90");
+    assertEqual(resolution.contributions[1]?.catalogCode, "cupla-reduccion-hh-32-a-25-mm");
+    assert(
+      Math.abs((resolution.equivalentLengthMeters ?? 0) - 1.453) < 0.001,
+      "Te normal + cupla suman 1,453 m.",
+    );
   });
 
   verify(results, "Caso I - variante inexistente es unsupported", () => {
@@ -215,23 +221,31 @@ export function runTechnicalRouteBranchTransitionVerifications() {
     );
   });
 
-  verify(results, "Caso J - tres diametros incompatibles son unsupported", () => {
+  verify(results, "Caso J - tres diametros: te de reduccion y cupla en el tramo derecho", () => {
     const fixture = teeFixture({
       diameters: { s1: 40, s2: 32, s3: 25 },
     });
     const proposal = confirmedReducedTee(fixture);
-    const resolution = resolvePreview({
+    const bajada = resolvePreview({
       fixture,
       route: route("route:turn", ["m", "n", "b"], ["s1", "s3"]),
       transitions: [proposal],
     });
+    const derecho = resolvePreview({
+      fixture,
+      route: route("route:through", ["m", "n", "a"], ["s1", "s2"]),
+      transitions: [proposal],
+    });
 
-    assertEqual(resolution.status, "unsupported");
-    assertEqual(resolution.equivalentLengthMeters, null);
-    assert(
-      resolution.reasons.some((reason) => reason.includes("tres diametros")),
-      "Debe rechazar tees con tres diametros distintos.",
+    assertEqual(bajada.status, "resolved");
+    assertEqual(bajada.contributions.length, 1);
+    assertEqual(bajada.contributions[0]?.transitionKind, "branch_transition");
+    assertEqual(derecho.status, "resolved");
+    assertEqual(
+      derecho.contributions.map((item) => item.transitionKind).join(","),
+      "branch_transition,simple_reduction",
     );
+    assertEqual(derecho.contributions[1]?.catalogFamilyId, "cupla-reduccion-hh");
   });
 
   verify(results, "Caso K - no doble conteo", () => {

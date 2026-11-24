@@ -1,5 +1,6 @@
 "use client";
 
+import { resolucionesFinales } from "@/lib/calculation/resolucionesFinales";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { buildArchitecturalRouteContext } from "@/lib/architecture/routeContext";
 import { createConfirmedCalibration, createPointPair } from "@/lib/calibration/calibration";
@@ -310,6 +311,8 @@ import {
   type SourceCalibrationState,
 } from "./CalibrationPanel";
 import { CalculationPanel } from "./CalculationPanel";
+import { DatosObraBoton } from "@/components/obra/DatosObraBoton";
+import { borrarObra, hayObraCargada } from "@/lib/obra/obraStore";
 import { LayerPanel } from "./LayerPanel";
 import { PdfDiagnosticsPanel } from "./PdfDiagnosticsPanel";
 import { PdfPanel } from "./PdfPanel";
@@ -317,6 +320,7 @@ import { PdfViewer } from "./PdfViewer";
 import { RouteContextCard } from "./RouteContextCard";
 import { RouteIntentContextCard } from "./RouteIntentContextCard";
 import { RoutePanel } from "./RoutePanel";
+import { ObraEjemploBoton } from "./ObraEjemploBoton";
 import { ReviewPanel, type ReviewTechnicalViewItem } from "./ReviewPanel";
 import {
   RightPanelSections,
@@ -1510,12 +1514,10 @@ export function DxfWorkbench() {
       return {};
     }
 
-    if (
-      technicalCalculationResult.transitionAwareNetworkSizing?.status ===
-      "resolved"
-    ) {
-      return technicalCalculationResult.transitionAwareNetworkSizing
-        .routeTransitionResolutions;
+    const finales = resolucionesFinales(technicalCalculationResult);
+
+    if (finales) {
+      return finales.reducciones;
     }
 
     const routeAccessoryResolutions =
@@ -2590,7 +2592,8 @@ export function DxfWorkbench() {
       (bases.length > 0 ||
         sectionPlanLinks.length > 0 ||
         routeProposal ||
-        coordinatedRouteProposal) &&
+        coordinatedRouteProposal ||
+        hayObraCargada()) &&
       !window.confirm(
         "Borrar el proyecto local guardado y volver al estado inicial?",
       )
@@ -2603,6 +2606,7 @@ export function DxfWorkbench() {
     }
 
     const result = clearPersistedWorkbenchProject();
+    borrarObra();
 
     setBases([]);
     setActiveBaseId(null);
@@ -7262,7 +7266,9 @@ export function DxfWorkbench() {
           isPlanActive={activeBase?.type === "plan"}
           mode={activeWorkflowStage === "deliver" ? "deliver" : "calculate"}
           pipeSystem={SIGAS_PIPE_SYSTEM}
+          planDrawing={planBase?.sourceType === "dxf" ? planBase.drawing : null}
           planReady={Boolean(planBase)}
+          planVisibleLayers={planBase?.visibleLayers ?? {}}
           result={
             activeCoordinatedRouteProposal?.draft.evaluation.technicalResult ??
             technicalCalculationResult
@@ -7385,7 +7391,8 @@ export function DxfWorkbench() {
               );
             })}
           </nav>
-          <div className="flex justify-end">
+          <div className="flex justify-end gap-2">
+            <DatosObraBoton />
             <button
               className="rounded border border-[var(--line)] bg-white px-3 py-2 text-sm font-medium hover:border-[var(--accent)]"
               type="button"
@@ -7985,6 +7992,7 @@ function EmptyPlanStart({
         >
           Cargar Planta
         </button>
+        <ObraEjemploBoton disabled={isImporting} />
       </div>
     </div>
   );

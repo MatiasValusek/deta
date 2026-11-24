@@ -86,6 +86,8 @@ import {
 import {
   downloadTechnicalPdf,
 } from "@/lib/calculation/technicalPdfDownload";
+import { DEFAULT_PROJECT_GAS_CONFIG } from "@/lib/calculation/projectGas";
+import type { NormalizedDrawing } from "@/lib/geometry/types";
 import type {
   SigasAccessoryExactSelectionDecision,
 } from "@/lib/calculation/pipeSystems/sigas/sigasAccessoryExactSelection";
@@ -93,6 +95,10 @@ import {
   calculationLengthState,
   technicalCalculationNeedsRoute,
 } from "@/lib/workbench/calculationPresentation";
+import { AgrandarDiametroPanel } from "./AgrandarDiametroPanel";
+import { FactibilidadPreview } from "./FactibilidadPreview";
+import { PlanillaTramosPreview } from "./PlanillaTramosPreview";
+import { PlanoInstalacionPreview } from "./PlanoInstalacionPreview";
 
 type CalculationPanelMode = "calculate" | "deliver";
 
@@ -110,7 +116,9 @@ type CalculationPanelProps = {
   isResolvingProposalDraftAccessories?: boolean;
   mode?: CalculationPanelMode;
   pipeSystem: PipeSystem;
+  planDrawing: NormalizedDrawing | null;
   planReady: boolean;
+  planVisibleLayers: Record<string, boolean>;
   result: TechnicalCalculationResult | null;
   routeNetwork: ManualRouteNetwork;
   scaleMetersPerSourceUnit: number | null;
@@ -214,7 +222,9 @@ export function CalculationPanel({
   isResolvingProposalDraftAccessories = false,
   mode = "calculate",
   pipeSystem,
+  planDrawing,
   planReady,
+  planVisibleLayers,
   result,
   routeNetwork,
   scaleMetersPerSourceUnit,
@@ -522,6 +532,35 @@ export function CalculationPanel({
         </div>
       ) : null}
 
+      {isDeliverMode ? (
+        <>
+          <FactibilidadPreview
+            drawing={planDrawing}
+            equipment={equipment}
+            visibleLayers={planVisibleLayers}
+          />
+          <PlanoInstalacionPreview
+            axonometricView={axonometricView}
+            calculationSheet={calculationSheet}
+            drawing={planDrawing}
+            equipment={equipment}
+            materialTakeoff={materialTakeoff}
+            network={routeNetwork}
+            projectGas={DEFAULT_PROJECT_GAS_CONFIG}
+            result={result}
+            revisionLista={canExportDocuments}
+            visibleLayers={planVisibleLayers}
+          />
+          <PlanillaTramosPreview
+            calculationSheet={calculationSheet}
+            network={routeNetwork}
+            result={result}
+            revisionLista={canExportDocuments}
+            routeTransitionResolutions={routeTransitionResolutions}
+          />
+        </>
+      ) : null}
+
       {needsConfirmedRoute ? (
         <div className="mt-3 rounded border border-[#dbeafe] bg-[#eff6ff] px-3 py-2 text-xs text-[#1d4ed8]">
           Generá una propuesta o dibujá y confirmá el recorrido para calcular.
@@ -555,6 +594,16 @@ export function CalculationPanel({
               onSelectAccessoryExactCatalogRow
             }
           />
+          {isDeliverMode ? null : (
+            <AgrandarDiametroPanel
+              adoptedDiameterDecisions={adoptedDiameterDecisions}
+              calculationSheet={calculationSheet}
+              network={routeNetwork}
+              pipeSystem={pipeSystem}
+              result={result}
+              onAdoptSegmentDiameter={onAdoptSegmentDiameter}
+            />
+          )}
           {isDeliverMode ? (
             <>
               <MaterialTakeoffSection

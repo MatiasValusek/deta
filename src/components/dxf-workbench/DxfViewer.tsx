@@ -886,6 +886,7 @@ export function DxfViewer({
                   classificationIndex,
                   pendingSet,
                   semanticViewMode,
+                  view,
                 )}
                 view={view}
               />
@@ -1031,6 +1032,51 @@ function PrimitiveElement({
     width: 1.25,
   };
 
+  if (entity.kind === "text") {
+    const sourcePosition =
+      entity.alignmentPoint &&
+      ((entity.horizontalAlignment ?? 0) !== 0 ||
+        (entity.verticalAlignment ?? 0) !== 0)
+        ? entity.alignmentPoint
+        : entity.position;
+    const position = worldToScreen(sourcePosition, view);
+    const lines = entity.text.split("\n");
+    const fontSize = Math.max(entity.height * view.scale, 0.1);
+    const transform = [
+      `translate(${formatCoordinate(position.x)} ${formatCoordinate(position.y)})`,
+      `rotate(${formatCoordinate((-entity.rotation * 180) / Math.PI)})`,
+      `scale(${formatCoordinate(entity.widthFactor)} 1)`,
+      `translate(${formatCoordinate(-position.x)} ${formatCoordinate(-position.y)})`,
+    ].join(" ");
+
+    return (
+      <text
+        data-entity-id={entity.id}
+        dominantBaseline={textDominantBaseline(entity)}
+        fill={style.stroke}
+        fontFamily="Arial, Helvetica, sans-serif"
+        fontSize={formatCoordinate(fontSize)}
+        onPointerDown={onPointerDown}
+        opacity={style.opacity}
+        pointerEvents={pointerEvents}
+        textAnchor={textAnchor(entity)}
+        transform={transform}
+        x={formatCoordinate(position.x)}
+        y={formatCoordinate(position.y)}
+      >
+        {lines.map((line, index) => (
+          <tspan
+            dy={index === 0 ? 0 : formatCoordinate(fontSize * 1.2)}
+            key={`${entity.id}-line-${index}`}
+            x={formatCoordinate(position.x)}
+          >
+            {line}
+          </tspan>
+        ))}
+      </text>
+    );
+  }
+
   if (entity.kind === "hatch") {
     return (
       <path
@@ -1147,7 +1193,9 @@ function PrimitiveHitElement({
     <PrimitiveElement
       entity={entity}
       layerColor="#000000"
-      pointerEvents={entity.kind === "hatch" ? "all" : "stroke"}
+      pointerEvents={
+        entity.kind === "hatch" || entity.kind === "text" ? "all" : "stroke"
+      }
       primitiveStyle={hitStyle}
       view={view}
       onPointerDown={onPointerDown}
@@ -1161,6 +1209,7 @@ function styleForEntity(
   classificationIndex: ClassificationIndex,
   pendingSet: Set<string>,
   semanticViewMode: SemanticViewMode,
+  view: ViewTransform,
 ): PrimitiveStyle {
   const isArea = entity.kind === "hatch";
 
@@ -1168,11 +1217,12 @@ function styleForEntity(
     const stroke = readableStroke(entity.color ?? layerColor);
 
     return {
+      dash: dashForEntity(entity, view),
       fill: isArea ? stroke : undefined,
       fillOpacity: isArea ? 0.34 : undefined,
       opacity: 1,
       stroke,
-      width: isArea ? 0.7 : 1.25,
+      width: isArea ? 0.7 : widthForEntity(entity),
     };
   }
 
@@ -1219,6 +1269,57 @@ function styleForEntity(
     stroke: "#8a9690",
     width: 1,
   };
+}
+
+function dashForEntity(entity: DrawingPrimitive, view: ViewTransform) {
+  const pattern = entity.visual.lineTypePattern;
+
+  if (!pattern || pattern.length === 0 || entity.kind === "text") {
+    return undefined;
+  }
+
+  const minimumDot = widthForEntity(entity);
+  return pattern
+    .map((length) => Math.max(Math.abs(length) * view.scale, minimumDot))
+    .join(" ");
+}
+
+function widthForEntity(entity: DrawingPrimitive) {
+  const hundredthsOfMillimeter = entity.visual.resolvedLineweight;
+
+  if (hundredthsOfMillimeter === undefined || hundredthsOfMillimeter === null) {
+    return 1.25;
+  }
+
+  return Math.max((hundredthsOfMillimeter / 100 / 25.4) * 96, 0.2);
+}
+
+function textAnchor(entity: Extract<DrawingPrimitive, { kind: "text" }>) {
+  if (entity.attachmentPoint) {
+    const column = ((entity.attachmentPoint - 1) % 3) + 1;
+    return column === 2 ? "middle" : column === 3 ? "end" : "start";
+  }
+
+  return entity.horizontalAlignment === 1 || entity.horizontalAlignment === 4
+    ? "middle"
+    : entity.horizontalAlignment === 2
+      ? "end"
+      : "start";
+}
+
+function textDominantBaseline(
+  entity: Extract<DrawingPrimitive, { kind: "text" }>,
+) {
+  if (entity.attachmentPoint) {
+    const row = Math.ceil(entity.attachmentPoint / 3);
+    return row === 1 ? "hanging" : row === 2 ? "middle" : "auto";
+  }
+
+  return entity.verticalAlignment === 2
+    ? "middle"
+    : entity.verticalAlignment === 3
+      ? "hanging"
+      : "auto";
 }
 
 function semanticStrokeForCategory(
