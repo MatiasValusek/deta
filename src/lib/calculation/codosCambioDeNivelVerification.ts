@@ -6,7 +6,10 @@ import {
 import { SIGAS_PIPE_SYSTEM } from "@/lib/calculation/pipeSystems/sigas";
 import { DEFAULT_PROJECT_GAS_CONFIG } from "@/lib/calculation/projectGas";
 import { createTechnicalPhysicalAccessoryInventory } from "@/lib/calculation/technicalPhysicalAccessories";
+import { createTechnicalMaterialTakeoff } from "@/lib/calculation/technicalMaterialTakeoff";
+import { createTechnicalCalculationSheet } from "@/lib/calculation/technicalCalculationSheet";
 import { calculateTechnicalTree } from "@/lib/calculation/technicalTree";
+import { crearTablasPlano } from "@/lib/laminas/tablasPlano";
 import type { ManualRouteNetwork, RouteSegment, RouteSegmentAccessory } from "@/lib/routing/types";
 import {
   createTechnicalRouteNodeElevationIndex,
@@ -132,11 +135,46 @@ export function runCodosCambioDeNivelVerifications() {
       ?.accessories.filter((a) => tipoCodosDeSubida(a.id) === "cambio_nivel")
       .reduce((total, a) => total + a.quantity, 0) ?? 0) === 2,
   );
-  const pieza = createTechnicalPhysicalAccessoryInventory({
+  const inventario = createTechnicalPhysicalAccessoryInventory({
     equipment: ARTEFACTOS_PRUEBA,
     network,
     result,
-  }).items.find((item) =>
+  });
+  const codosDelCalculo = result.segments
+    .flatMap((segment) => segment.accessories)
+    .filter((a) => a.type === "elbow")
+    .reduce((total, a) => total + a.quantity, 0);
+  const codosDeMateriales = createTechnicalMaterialTakeoff({
+    physicalAccessoryInventory: inventario,
+    result,
+  })
+    .accessoryItems.filter((item) => item.accessoryKind === "elbow" || item.accessoryKind === "rh_elbow")
+    .reduce((total, item) => total + item.quantity, 0);
+  check(
+    `Materiales trae los mismos codos que suma el cálculo (${codosDelCalculo} / ${codosDeMateriales})`,
+    () => codosDelCalculo > 0 && codosDeMateriales === codosDelCalculo,
+  );
+  const tablas = crearTablasPlano({
+    calculationSheet: createTechnicalCalculationSheet({ equipment: ARTEFACTOS_PRUEBA, result }),
+    equipment: ARTEFACTOS_PRUEBA,
+    materialTakeoff: createTechnicalMaterialTakeoff({ physicalAccessoryInventory: inventario, result }),
+    network,
+    projectGas: DEFAULT_PROJECT_GAS_CONFIG,
+    result,
+  });
+  const filasDe = (material: string) =>
+    tablas.materiales.filas.filter((fila) => fila[0] === material);
+  check("la tabla Materiales lista los codos por diámetro y suman lo del cálculo", () =>
+    filasDe("CODO").reduce((total, fila) => total + Number(fila[2]), 0) === codosDelCalculo &&
+    filasDe("CODO").length > 1,
+  );
+  check("las derivaciones figuran como TE y CUPLA DE REDUCCIÓN, con un tapón por boca taponada", () =>
+    filasDe("TE").length > 0 &&
+    filasDe("TE DE REDUCCIÓN").length === 0 &&
+    filasDe("CUPLA DE REDUCCIÓN").length > 0 &&
+    filasDe("TAPÓN").reduce((total, fila) => total + Number(fila[2]), 0) === 2,
+  );
+  const pieza = inventario.items.find((item) =>
     [item.id, ...item.sourceIds].some((id) => tipoCodosDeSubida(id.slice(id.indexOf("codos-"))) === "cambio_nivel"),
   );
   check("se ubican en el punto del cambio de nivel (isométrica y cortes)", () =>

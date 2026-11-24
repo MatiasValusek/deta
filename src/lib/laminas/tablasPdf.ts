@@ -142,7 +142,8 @@ export function dibujarTablasPdf(params: {
 function textoAdmitido(texto: string, fuente: PDFFont) {
   const admitidos = new Set(fuente.getCharacterSet());
 
-  return Array.from(texto.normalize("NFC"), (letra) =>
+  // m³/h sale como "m3/h": algunos visores no muestran el ³ de la fuente estándar.
+  return Array.from(texto.normalize("NFC").replace(/³/g, "3").replace(/²/g, "2"), (letra) =>
     admitidos.has(letra.codePointAt(0) ?? -1) ? letra : "?",
   ).join("");
 }

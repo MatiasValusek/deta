@@ -98,6 +98,8 @@ export type TechnicalPhysicalAccessory = {
   label: string;
   nodeId: string | null;
   position: Point2D | null;
+  /** Cuántas piezas iguales son (por ejemplo, 4 codos a la salida del medidor). */
+  quantity?: number;
   routeUses: TechnicalPhysicalAccessoryRouteUse[];
   segmentIds: string[];
   source: TechnicalPhysicalAccessorySource;
@@ -264,6 +266,7 @@ function addRouteAccessoryPieces(params: {
         label: routeAccessoryLabel(contribution, kind),
         nodeId: geometry.nodeId,
         position: geometry.position,
+        quantity: contribution.quantity,
         routeUse: {
           equivalentLengthMeters: contribution.equivalentLengthMetersPerUnit,
           routeId: contribution.routeId,
@@ -390,6 +393,8 @@ function addPhysicalAccessory(
     label: draft.label,
     nodeId: draft.nodeId,
     position: draft.position,
+    // La misma pieza usada por varios recorridos sigue siendo la misma cantidad.
+    ...(draft.quantity !== undefined && draft.quantity !== 1 ? { quantity: draft.quantity } : {}),
     routeUses: [draft.routeUse],
     segmentIds: [...draft.segmentIds].sort(),
     source: draft.source,

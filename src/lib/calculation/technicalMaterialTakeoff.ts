@@ -663,7 +663,7 @@ function physicalAccessoryDraft(
     configurationKey,
     familyId: item.catalogFamilyId ?? item.catalogCode ?? item.kind,
     label: `${accessoryKindLabel(accessoryKind)} ${configurationLabel}`,
-    quantity: 1,
+    quantity: item.quantity ?? 1,
     source: item.source,
     sourceId: item.id,
   };

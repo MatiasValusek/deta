@@ -72,19 +72,28 @@ export async function runTablasPlanoVerifications() {
     return (
       primera.join("|") === "1|CALEFÓN|18.600|2,000" &&
       segunda.join("|") === "2|COCINA|9.300|1,000" &&
-      tablas.referencias.notasDerecha?.notas.join("|") === "|BOCA TAPONADA"
+      tablas.referencias.notasDerecha?.notas.join("|") === "|BOCA TAPONADA|"
     );
   });
 
-  check(results, "Materiales resume por tipo y diámetro con marca SIGAS", () =>
-    tablas.materiales.filas.map((fila) => fila.join("|")).join(";") ===
-    "CAÑO|25|8,00 m|SIGAS|044-42;ACCESORIOS|25|3|SIGAS|044-42;LLAVE DE PASO|20|1|SIGAS|044-42",
+  check(results, "Referencias cierra con el total de kcal/h y m³/h", () =>
+    tablas.referencias.filas.at(-1)?.join("|") === "|TOTAL|27.900|3,000",
   );
 
-  check(results, "Cálculo suma longitud real y equivalente", () => {
+  check(results, "Materiales separa por pieza y diámetro, con tapón por boca taponada", () =>
+    tablas.materiales.filas.map((fila) => fila.slice(0, 3).join("|")).join(";") ===
+    "CAÑO|25|8,00 m;CODO|25|2;CUPLA DE REDUCCIÓN|25|1;LLAVE DE PASO|20|1;TAPÓN|20|1",
+  );
+
+  check(results, "Cálculo muestra long. del tramo y suma long. de cálculo y equivalente", () => {
     const fila = tablas.calculo.filas.find((item) => item[0] === "1-A");
 
-    return fila?.slice(1, 4).join("|") === "7,00|1,50|8,50" && tablas.avisos.length === 0;
+    return (
+      tablas.calculo.columnas[1].titulo === "Long. tramo (m)" &&
+      tablas.calculo.columnas[2].titulo === "Long. de cálculo (m)" &&
+      fila?.slice(1, 5).join("|") === "5,00|7,00|1,50|8,50" &&
+      tablas.avisos.length === 0
+    );
   });
 
   const doc = await PDFDocument.create();
@@ -154,6 +163,26 @@ function hojaFicticia(): TechnicalCalculationSheet {
         status: "resolved",
         tabulatedLengthMeters: 10,
         transitionEquivalentLengthMeters: 0.5,
+        tramo: "interno",
+      },
+      {
+        accessoryEquivalentLengthMeters: 0,
+        adoptedDiameter: null,
+        calculatedDiameter: { externalDiameterMillimeters: 20, id: "d20", label: "20" },
+        capacityM3h: 2,
+        downstreamApplianceIds: ["cerca"],
+        downstreamAppliances: ["Cocina"],
+        effectiveDiameter: { externalDiameterMillimeters: 20, id: "d20", label: "20" },
+        finalCalculationLengthMeters: 3,
+        flowM3h: 1,
+        initialRouteLengthMeters: 3,
+        observations: [],
+        physicalLengthMeters: 1,
+        segmentId: "s2",
+        source: "adoption",
+        status: "resolved",
+        tabulatedLengthMeters: 4,
+        transitionEquivalentLengthMeters: 0,
         tramo: "interno",
       },
     ],

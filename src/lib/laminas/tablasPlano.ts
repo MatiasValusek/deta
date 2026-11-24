@@ -2,7 +2,10 @@ import { normalizeEquipmentDemand } from "@/lib/calculation/demandNormalization"
 import type { PipeDiameterReference } from "@/lib/calculation/pipeSystem";
 import type { ProjectGasConfig } from "@/lib/calculation/projectGas";
 import type { TechnicalCalculationSheet } from "@/lib/calculation/technicalCalculationSheet";
-import type { TechnicalMaterialTakeoff } from "@/lib/calculation/technicalMaterialTakeoff";
+import type {
+  TechnicalMaterialAccessoryKind,
+  TechnicalMaterialTakeoff,
+} from "@/lib/calculation/technicalMaterialTakeoff";
 import type { TechnicalCalculationResult } from "@/lib/calculation/technicalTree";
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
 import { equipmentTypeLabel } from "@/lib/equipment/types";
@@ -38,7 +41,52 @@ const MARCA_SIGAS = "SIGAS";
 const MATRICULA_SIGAS = "044-42";
 const RESERVA_BOCA_TAPONADA = 0.2;
 const RESERVA_MOTIVO = 0.3;
-const ORDEN_MATERIALES = ["CAÑO", "ACCESORIOS", "LLAVE DE PASO"];
+const ORDEN_MATERIALES = [
+  "CAÑO",
+  "CODO",
+  "CODO C/ROSCA HEMBRA",
+  "TE",
+  "TE DE REDUCCIÓN",
+  "CUPLA DE REDUCCIÓN",
+  "TRANSICIÓN",
+  "LLAVE DE PASO",
+  "TAPÓN",
+  "OTROS ACCESORIOS",
+];
+
+/** Nombre de cada pieza en la tabla de Materiales. */
+const MATERIAL_POR_PIEZA: Record<TechnicalMaterialAccessoryKind, string> = {
+  elbow: "CODO",
+  other: "OTROS ACCESORIOS",
+  reduced_tee: "TE DE REDUCCIÓN",
+  reducing_coupling: "CUPLA DE REDUCCIÓN",
+  reduction: "CUPLA DE REDUCCIÓN",
+  rh_elbow: "CODO C/ROSCA HEMBRA",
+  tee: "TE",
+  transition: "TRANSICIÓN",
+  valve: "LLAVE DE PASO",
+};
+
+/** En derivaciones con reducción la app pone te normal + cupla: la te figura como TE. */
+function materialDePieza(item: { accessoryKind: TechnicalMaterialAccessoryKind; familyId: string }) {
+  if (item.accessoryKind === "reduced_tee" && item.familyId.startsWith("te-normal")) return "TE";
+  return MATERIAL_POR_PIEZA[item.accessoryKind] ?? "OTROS ACCESORIOS";
+}
+
+/** Bocas taponadas: las marcadas, o las que dicen "boca taponada" en sus notas. */
+export function bocasTaponadasDe(
+  equipment: WorkbenchEquipment[],
+  marcadas?: ReadonlySet<string>,
+): ReadonlySet<string> {
+  return (
+    marcadas ??
+    new Set(
+      equipment
+        .filter((item) => /boca\s+taponada/i.test(item.notes ?? ""))
+        .map((item) => item.id),
+    )
+  );
+}
 
 export function crearTablasPlano(params: {
   bocasTaponadas?: ReadonlySet<string>;
@@ -51,10 +99,11 @@ export function crearTablasPlano(params: {
 }): TablasPlano {
   const avisos: string[] = [];
   const numeracion = numerarDesdeResultado(params.network, params.result);
+  const bocasTaponadas = bocasTaponadasDe(params.equipment, params.bocasTaponadas);
 
   return {
-    referencias: crearReferencias(params, numeracion, avisos),
-    materiales: crearMateriales(params.materialTakeoff, avisos),
+    referencias: crearReferencias({ ...params, bocasTaponadas }, numeracion, avisos),
+    materiales: crearMateriales(params.materialTakeoff, avisos, tapones(params, bocasTaponadas)),
     calculo: crearCalculo(params.calculationSheet, numeracion, avisos),
     numeracion,
     avisos,
@@ -98,6 +147,8 @@ function crearReferencias(
       }
 
       return {
+        kcalh,
+        m3h,
         numero,
         nota: params.bocasTaponadas?.has(item.id) ? "BOCA TAPONADA" : "",
         celdas: [
@@ -120,17 +171,50 @@ function crearReferencias(
       { titulo: "kcal/h", ancho: 0.2, alinear: "derecha" },
       { titulo: "m³/h", ancho: 0.2, alinear: "derecha" },
     ],
-    filas: filas.map((fila) => fila.celdas),
+    filas: [
+      ...filas.map((fila) => fila.celdas),
+      [
+        "",
+        "TOTAL",
+        filas.some((fila) => fila.kcalh === null)
+          ? SIN_DATO
+          : numero_(filas.reduce((total, fila) => total + (fila.kcalh ?? 0), 0), 0),
+        filas.some((fila) => fila.m3h === null)
+          ? SIN_DATO
+          : numero_(filas.reduce((total, fila) => total + (fila.m3h ?? 0), 0), 3),
+      ],
+    ],
     notasDerecha: {
       reserva: RESERVA_BOCA_TAPONADA,
-      notas: filas.map((fila) => fila.nota),
+      notas: [...filas.map((fila) => fila.nota), ""],
     },
   };
+}
+
+/** Un tapón por boca taponada, con el diámetro del tramo que llega a ella. */
+function tapones(
+  params: Parameters<typeof crearTablasPlano>[0],
+  bocasTaponadas: ReadonlySet<string>,
+) {
+  const nodoPorArtefacto = new Map(
+    params.network.nodes.flatMap((nodo) =>
+      nodo.kind === "appliance" && nodo.equipmentId ? [[nodo.equipmentId, nodo.id] as const] : [],
+    ),
+  );
+  return [...bocasTaponadas].map((equipmentId) => {
+    const nodo = nodoPorArtefacto.get(equipmentId);
+    const tramo = params.network.segments.find(
+      (segment) => segment.toNodeId === nodo || segment.fromNodeId === nodo,
+    );
+    const fila = params.calculationSheet.rows.find((row) => row.segmentId === tramo?.id);
+    return diametro(fila?.effectiveDiameter ?? null);
+  });
 }
 
 function crearMateriales(
   takeoff: TechnicalMaterialTakeoff,
   avisos: string[],
+  diametrosTapones: string[] = [],
 ): TablaLamina {
   if (takeoff.pendingSummary.total > 0) {
     avisos.push(
@@ -160,10 +244,13 @@ function crearMateriales(
       avisos.push(`No se pudo leer el diámetro de ${item.label}. Revisalo en Calcular.`);
     }
     sumar(
-      item.accessoryKind === "valve" ? "LLAVE DE PASO" : "ACCESORIOS",
+      materialDePieza(item),
       medida === null ? SIN_DATO : String(medida),
       item.quantity,
     );
+  }
+  for (const medida of diametrosTapones) {
+    sumar("TAPÓN", medida, 1);
   }
 
   return {
@@ -228,6 +315,7 @@ function crearCalculo(
 
     return [
       tramo,
+      longitud(fila.physicalLengthMeters),
       longitud(fila.initialRouteLengthMeters),
       longitud(equivalente),
       longitud(fila.finalCalculationLengthMeters),
@@ -242,13 +330,14 @@ function crearCalculo(
   return {
     titulo: "CÁLCULO CAÑERÍA SIGAS",
     columnas: [
-      { titulo: "Tramo", ancho: 0.12, alinear: "centro" },
-      { titulo: "Long. real (m)", ancho: 0.14, alinear: "derecha" },
-      { titulo: "Long. equiv. (m)", ancho: 0.15, alinear: "derecha" },
-      { titulo: "Long. total (m)", ancho: 0.14, alinear: "derecha" },
-      { titulo: "Consumo m³/h", ancho: 0.15, alinear: "derecha" },
-      { titulo: "Diám. tabla (mm)", ancho: 0.14, alinear: "centro" },
-      { titulo: "Diám. adoptado (mm)", ancho: 0.16, alinear: "centro" },
+      { titulo: "Tramo", ancho: 0.09, alinear: "centro" },
+      { titulo: "Long. tramo (m)", ancho: 0.12, alinear: "derecha" },
+      { titulo: "Long. de cálculo (m)", ancho: 0.14, alinear: "derecha" },
+      { titulo: "Long. equiv. (m)", ancho: 0.13, alinear: "derecha" },
+      { titulo: "Long. total (m)", ancho: 0.12, alinear: "derecha" },
+      { titulo: "Consumo m³/h", ancho: 0.13, alinear: "derecha" },
+      { titulo: "Diám. tabla (mm)", ancho: 0.13, alinear: "centro" },
+      { titulo: "Diám. adoptado (mm)", ancho: 0.14, alinear: "centro" },
     ],
     filas,
     // Si el adoptado supera al de tabla, el motivo va a la derecha de la fila.
