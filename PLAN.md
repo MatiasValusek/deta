@@ -33,7 +33,7 @@ Lo más valioso. Usa lo que el motor ya calcula.
   - [ ] Corte opcional.
 - [x] **Planilla de accesorios por tramo** igual a la hoja "Cal. Artefactos" del Excel.
       Vista desde Entregar (A4, 3 tramos por hoja). Lee los accesorios que ya sumó el cálculo.
-- [ ] **Lámina "Factibilidad" A3:** planta + croquis + rótulo.
+- [x] **Lámina "Factibilidad" A3:** planta + croquis + rótulo. Botón en Entregar.
 - [x] Croquis de ubicación simple: manzana, calles (4 nombres), distancias a esquina, norte.
       Datos en *Datos de la obra*; en el Plano de instalación va apagado y se prende en Entregar.
 - [ ] Tabla Referencias con numeración de artefactos y "boca taponada".
