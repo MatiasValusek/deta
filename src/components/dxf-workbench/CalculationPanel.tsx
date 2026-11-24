@@ -500,6 +500,7 @@ export function CalculationPanel({
 
       {isDeliverMode ? (
         <PlanoInstalacionPreview
+          axonometricView={axonometricView}
           calculationSheet={calculationSheet}
           drawing={planDrawing}
           equipment={equipment}

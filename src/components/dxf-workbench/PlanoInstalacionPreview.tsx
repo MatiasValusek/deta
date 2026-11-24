@@ -2,11 +2,13 @@
 
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { ProjectGasConfig } from "@/lib/calculation/projectGas";
+import type { TechnicalAxonometricView } from "@/lib/calculation/technicalAxonometric";
 import type { TechnicalCalculationSheet } from "@/lib/calculation/technicalCalculationSheet";
 import type { TechnicalMaterialTakeoff } from "@/lib/calculation/technicalMaterialTakeoff";
 import type { TechnicalCalculationResult } from "@/lib/calculation/technicalTree";
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
 import type { NormalizedDrawing } from "@/lib/geometry/types";
+import { diametrosPorTramo } from "@/lib/laminas/isometricaPdf";
 import { crearPlanoInstalacionPdf } from "@/lib/laminas/planoInstalacionPdf";
 import { crearTablasPlano } from "@/lib/laminas/tablasPlano";
 import { avisosDatosFaltantes, crearRotulo } from "@/lib/obra/obraData";
@@ -18,6 +20,7 @@ import {
 import type { ManualRouteNetwork } from "@/lib/routing/types";
 
 type PlanoInstalacionPreviewProps = {
+  axonometricView: TechnicalAxonometricView;
   calculationSheet: TechnicalCalculationSheet;
   drawing: NormalizedDrawing | null;
   equipment: WorkbenchEquipment[];
@@ -30,6 +33,7 @@ type PlanoInstalacionPreviewProps = {
 };
 
 export function PlanoInstalacionPreview({
+  axonometricView,
   calculationSheet,
   drawing,
   equipment,
@@ -122,6 +126,11 @@ export function PlanoInstalacionPreview({
           network,
           numeracion: tablas.numeracion,
         },
+        {
+          diametros: diametrosPorTramo(tablas.numeracion, tablas.calculo.filas),
+          numeracion: tablas.numeracion,
+          vista: axonometricView,
+        },
       );
       const copia = new Uint8Array(bytes.byteLength);
       copia.set(bytes);
@@ -166,7 +175,7 @@ export function PlanoInstalacionPreview({
         </ul>
       ) : (
         <p className="mt-3 text-xs text-[#2f6b46]">
-          La planta, la cañería, los artefactos, las tablas y el rótulo están listos para revisar.
+          La planta, la isométrica, el gabinete, las tablas y el rótulo están listos para revisar.
         </p>
       )}
 

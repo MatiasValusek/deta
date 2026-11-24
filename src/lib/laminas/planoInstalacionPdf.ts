@@ -9,6 +9,8 @@ import {
   type OpcionesLamina,
   type RecuadroId,
 } from "./planoInstalacionArmado";
+import { dibujarGabinetePdf } from "./gabinetePdf";
+import { dibujarIsometricaPdf, type DatosIsometrica } from "./isometricaPdf";
 import { dibujarPlantaPdf, type DatosPlanta } from "./plantaPdf";
 import { dibujarTablasPdf } from "./tablasPdf";
 import type { TablasPlano } from "./tablasPlano";
@@ -20,12 +22,13 @@ const MARGEN_TITULO_MM = 3;
 const ZONAS_TABLA: RecuadroId[] = ["referencias", "materiales", "calculo"];
 const mmAPt = (mm: number) => mm / MM_POR_PT;
 
-/** Lámina A3: marco, rótulo, tablas si las hay y recuadros de lo que falta dibujar. */
+/** Lámina A3: marco, rótulo, gabinete, y planta, isométrica y tablas si las hay. */
 export async function crearPlanoInstalacionPdf(
   rotulo: RotuloContenido,
   opciones: OpcionesLamina = {},
   tablas?: TablasPlano,
   planta?: DatosPlanta,
+  isometrica?: DatosIsometrica,
 ) {
   const doc = await PDFDocument.create();
   const page = doc.addPage([mmAPt(A3_MM.ancho), mmAPt(A3_MM.alto)]);
@@ -58,7 +61,14 @@ export async function crearPlanoInstalacionPdf(
         dibujarPlantaPdf({ datos: planta, fuente: fuenteTabla, page, zona: recuadro });
         continue;
       }
-    } else {
+    } else if (recuadro.id === "gabinete") {
+      // Como en los planos reales: dibujo suelto con el título abajo, sin recuadro.
+      dibujarGabinetePdf({ fuente: fuenteTabla, page, zona: recuadro });
+    } else if (
+      recuadro.id !== "isometrica" ||
+      !isometrica ||
+      !dibujarIsometricaPdf({ datos: isometrica, fuente: fuenteTabla, page, zona: recuadro })
+    ) {
       rectangulo(recuadro);
     }
 

@@ -43,6 +43,8 @@ Lo más valioso. Usa lo que el motor ya calcula.
 - [ ] Numeración automática de tramos con letras/números como en los planos reales.
 - [ ] Consumos típicos precargados por artefacto (cocina, calefactor TB, termotanque,
       calefón, caldera, horno), editables.
+- [ ] Agregar en el paso Artefactos dónde marcar "boca taponada". La boca taponada suma
+      consumo, así que el cálculo no cambia.
 - [ ] Definir qué hacer con DWG (aceptarlo o explicar cómo convertir a DXF en un paso).
 
 ## Fase 3 — Prolijidad
