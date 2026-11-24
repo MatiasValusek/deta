@@ -19,13 +19,20 @@ const TITULO_MM = 9;
 const MARGEN_MM = 2;
 const mmAPt = (mm: number) => mm / MM_POR_PT;
 
+export type OpcionesCroquis = {
+  /** Norte adentro de la manzana, arriba a la izquierda (Factibilidad). Si no, a la izquierda del croquis. */
+  norteDentro?: boolean;
+};
+/** Distancia del centro de la flecha del norte a las esquinas de la manzana, cuando va adentro. */
+const NORTE_DENTRO_MM = 9;
+
 /** Proporción máxima ancho/alto de la manzana, para que no quede chata como una franja. */
 const PROPORCION_MAXIMA = 2.2;
 
 /** Manzana del medio, donde está el terreno, en mm de hoja. */
-export function manzanaCroquis(zona: ZonaPlanta) {
+export function manzanaCroquis(zona: ZonaPlanta, opciones: OpcionesCroquis = {}) {
   const borde = VECINA_MM + CALLE_MM;
-  const izquierda = zona.x1 + MARGEN_MM + NORTE_MM + borde;
+  const izquierda = zona.x1 + MARGEN_MM + (opciones.norteDentro ? 0 : NORTE_MM) + borde;
   const derecha = zona.x2 - MARGEN_MM - borde;
   const y1 = zona.y1 + TITULO_MM + borde;
   const y2 = zona.y2 - MARGEN_MM - borde;
@@ -51,10 +58,12 @@ export const formatoMetros = (metros: number) =>
 export function dibujarCroquisPdf(params: {
   datos: DatosCroquis;
   fuente: PDFFont;
+  opciones?: OpcionesCroquis;
   page: PDFPage;
   zona: ZonaPlanta;
 }) {
   const { datos, fuente, page, zona } = params;
+  const opciones = params.opciones ?? {};
   const yPdf = (mm: number) => page.getHeight() - mmAPt(mm);
   const linea = (x1: number, y1: number, x2: number, y2: number, grosor = LINEA_PT, color = NEGRO) =>
     page.drawLine({
@@ -100,7 +109,7 @@ export function dibujarCroquisPdf(params: {
     });
   };
 
-  const m = manzanaCroquis(zona);
+  const m = manzanaCroquis(zona, opciones);
   const exterior = {
     x1: m.x1 - CALLE_MM - VECINA_MM,
     y1: m.y1 - CALLE_MM - VECINA_MM,
@@ -143,8 +152,10 @@ export function dibujarCroquisPdf(params: {
   linea(xTerreno, m.y2 - 1.5, xTerreno, m.y2 + 2, 1, ROJO);
 
   // Flecha del norte: 0° apunta arriba, 90° a la derecha.
-  const cx = m.x1 - CALLE_MM - VECINA_MM - NORTE_MM / 2;
-  const cy = (zona.y1 + TITULO_MM + zona.y2) / 2;
+  const cx = opciones.norteDentro
+    ? m.x1 + NORTE_DENTRO_MM
+    : m.x1 - CALLE_MM - VECINA_MM - NORTE_MM / 2;
+  const cy = opciones.norteDentro ? m.y1 + NORTE_DENTRO_MM : (zona.y1 + TITULO_MM + zona.y2) / 2;
   const angulo = (datos.norteGrados * Math.PI) / 180;
   const punto = (largo: number, desvio: number) => {
     const a = angulo + desvio;

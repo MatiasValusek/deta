@@ -78,6 +78,7 @@ function crearAjusteAZona(
   };
 }
 
+/** Dibuja la planta y devuelve cómo pasar del plano a mm de hoja (null si no hay nada). */
 export function dibujarPlantaPdf(params: {
   datos: DatosPlanta;
   fuente: PDFFont;
@@ -106,7 +107,7 @@ export function dibujarPlantaPdf(params: {
   ];
 
   if (puntos.length === 0) {
-    return;
+    return null;
   }
 
   const ajuste = crearAjusteAZona(limitesDe(puntos), zona);
@@ -188,6 +189,9 @@ export function dibujarPlantaPdf(params: {
       color: NEGRO,
     });
   }
+
+  // Para que cada lámina pueda dibujar encima con la misma escala.
+  return aHoja;
 }
 
 function dibujarTextoArquitectura(params: {

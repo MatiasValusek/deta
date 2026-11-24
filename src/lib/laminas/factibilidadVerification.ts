@@ -40,10 +40,11 @@ export async function runFactibilidadVerifications() {
   const base = crearProyectoEjemplo().bases[0];
   const planta = plantaFactibilidad({ drawing: base.drawing, equipment: base.equipment });
 
-  check("la planta lleva solo el medidor marcado con M y sin cañería", () =>
+  check("la planta lleva solo el medidor, sin cañería ni numeración", () =>
     planta.network.segments.length === 0 &&
+    planta.numeracion.nodos.size === 0 &&
     planta.equipment.length === 1 &&
-    [...planta.numeracion.nodos.values()].join() === "M",
+    planta.equipment[0].role === "supply",
   );
 
   const croquis = crearDatosCroquis(OBRA_EJEMPLO);
