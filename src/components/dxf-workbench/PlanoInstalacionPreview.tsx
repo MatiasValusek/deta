@@ -12,6 +12,7 @@ import { diametrosPorTramo, hayAlturasCargadas } from "@/lib/laminas/isometricaP
 import { crearPlanoInstalacionPdf } from "@/lib/laminas/planoInstalacionPdf";
 import { crearTablasPlano } from "@/lib/laminas/tablasPlano";
 import {
+  avisosCroquis,
   avisosDatosFaltantes,
   crearDatosCroquis,
   crearRotulo,
@@ -54,6 +55,8 @@ export function PlanoInstalacionPreview({
     leerObraSnapshotServidor,
   );
   const [generando, setGenerando] = useState(false);
+  // Apagado por defecto: con croquis las tablas tienen menos lugar.
+  const [conCroquis, setConCroquis] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [vistaUrl, setVistaUrl] = useState<string | null>(null);
   const tablas = useMemo(
@@ -88,6 +91,7 @@ export function PlanoInstalacionPreview({
           revisionLista,
         }),
         ...tablas.avisos,
+        ...(conCroquis ? avisosCroquis(obra) : []),
       ]),
     [
       calculationSheet,
@@ -99,6 +103,7 @@ export function PlanoInstalacionPreview({
       result,
       revisionLista,
       tablas.avisos,
+      conCroquis,
     ],
   );
 
@@ -119,8 +124,8 @@ export function PlanoInstalacionPreview({
     setGenerando(true);
 
     try {
-      // El croquis es opcional en esta lámina: sale solo si sus datos están completos.
-      const croquis = crearDatosCroquis(obra) ?? undefined;
+      // El croquis es opcional en esta lámina: sale solo si el gasista lo pide.
+      const croquis = conCroquis ? (crearDatosCroquis(obra) ?? undefined) : undefined;
       const bytes = await crearPlanoInstalacionPdf(
         crearRotulo(obra, instalador),
         { conCroquis: Boolean(croquis) },
@@ -174,6 +179,15 @@ export function PlanoInstalacionPreview({
           {generando ? "Preparando..." : "Ver plano A3"}
         </button>
       </div>
+
+      <label className="mt-3 flex items-center gap-2 text-xs">
+        <input
+          checked={conCroquis}
+          type="checkbox"
+          onChange={(evento) => setConCroquis(evento.target.checked)}
+        />
+        Agregar croquis de ubicación (achica las tablas)
+      </label>
 
       {avisos.length > 0 ? (
         <ul className="mt-3 space-y-1 text-xs text-[var(--warning)]">

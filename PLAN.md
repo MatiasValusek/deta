@@ -34,7 +34,7 @@ Lo más valioso. Usa lo que el motor ya calcula.
 - [ ] **Planilla de accesorios por tramo** igual a la hoja "Cal. Artefactos" del Excel.
 - [ ] **Lámina "Factibilidad" A3:** planta + croquis + rótulo.
 - [x] Croquis de ubicación simple: manzana, calles (4 nombres), distancias a esquina, norte.
-      Datos en *Datos de la obra*; en el Plano de instalación sale solo si están completos.
+      Datos en *Datos de la obra*; en el Plano de instalación va apagado y se prende en Entregar.
 - [ ] Tabla Referencias con numeración de artefactos y "boca taponada".
 
 ## Fase 2 — Flujo simple de 5 pasos
