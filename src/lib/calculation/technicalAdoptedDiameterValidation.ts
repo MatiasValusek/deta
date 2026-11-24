@@ -74,7 +74,8 @@ export function createTechnicalAdoptedDiameterValidation(params: {
       decision,
     ]),
   );
-  const segments = params.result.segments.map((segment) =>
+  const result = params.result;
+  const segments = result.segments.map((segment) =>
     validateSegmentAdoptedDiameter({
       availableFailure:
         availableDiametersResolution.status === "resolved"
@@ -84,6 +85,12 @@ export function createTechnicalAdoptedDiameterValidation(params: {
       decision: decisionBySegmentId.get(segment.segmentId) ?? null,
       equivalentVerification:
         params.equivalentVerificationBySegmentId[segment.segmentId] ?? null,
+      networkDiameter:
+        (result.transitionAwareNetworkSizing?.status === "resolved"
+          ? result.transitionAwareNetworkSizing.finalDiameterBySegmentId[segment.segmentId]
+          : result.networkSizing?.finalDiameterBySegmentId[segment.segmentId]) ??
+        segment.provisionalDiameter ??
+        null,
       provisionalDiameter: segment.provisionalDiameter ?? null,
       segmentId: segment.segmentId,
     }),
@@ -117,6 +124,8 @@ function validateSegmentAdoptedDiameter(params: {
   decision: AdoptedDiameterDecision | null;
   equivalentVerification: TechnicalEquivalentAccessorySegmentVerification | null;
   provisionalDiameter: PipeDiameterReference | null;
+  /** Diámetro final del cálculo de la red, con transiciones. */
+  networkDiameter: PipeDiameterReference | null;
   segmentId: string;
 }): TechnicalAdoptedDiameterSegmentValidation {
   if (params.availableFailure || !params.catalog) {
@@ -135,12 +144,12 @@ function validateSegmentAdoptedDiameter(params: {
   }
 
   // Corrección de seguridad: el requerido nunca queda por debajo del diámetro que dio el
-  // cálculo de la red (el "Diám. tabla" del A3). La verificación de accesorios cuenta solo las
+  // cálculo de la red (el que usa la tabla SIGAS del A3). La verificación de accesorios cuenta solo las
   // piezas del inventario y puede dar uno menor; antes la pantalla y los materiales usaban ese.
   const requiredDiameter = mayorDiametro(
     params.catalog,
     params.equivalentVerification?.requiredDiameter ?? null,
-    params.equivalentVerification?.requiredDiameter ? params.provisionalDiameter : null,
+    params.equivalentVerification?.requiredDiameter ? params.networkDiameter : null,
   );
   const requiredIndex = requiredDiameter
     ? params.catalog.byId.get(requiredDiameter.id)?.index
