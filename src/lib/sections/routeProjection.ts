@@ -1,3 +1,4 @@
+import { tipoCodosDeSubidaEnId } from "@/lib/calculation/codosDeSubida";
 import type {
   PipeDiameterReference,
 } from "@/lib/calculation/pipeSystem";
@@ -912,7 +913,10 @@ function terminalRouteAccessoryPlanPoint(params: {
   item: TechnicalPhysicalAccessory;
   resolvedSegmentById: Map<string, ResolvedRouteSegment>;
 }): Point2D | null {
-  const terminalKind = terminalRouteAccessoryKind(params.item);
+  const codos = [params.item.id, ...params.item.sourceIds]
+    .map(tipoCodosDeSubidaEnId)
+    .find((tipo) => tipo !== null);
+  const terminalKind = codos ?? terminalRouteAccessoryKind(params.item);
 
   if (!terminalKind) {
     return null;
@@ -928,9 +932,11 @@ function terminalRouteAccessoryPlanPoint(params: {
   }
 
   const point =
-    terminalKind === "terminal"
+    terminalKind === "terminal" || terminalKind === "subida"
       ? segment.path[segment.path.length - 1]
-      : terminalValvePlanPoint(segment);
+      : terminalKind === "salida_medidor"
+        ? segment.path[0]
+        : terminalValvePlanPoint(segment);
 
   return point ? { ...point } : null;
 }

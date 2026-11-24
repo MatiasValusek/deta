@@ -36,6 +36,7 @@ import {
   type AdoptedDiameterDecision,
   type ProfessionalDiameterAdoptionResult,
 } from "@/lib/calculation/professionalDiameterAdoption";
+import { agregarCodosDeSubida } from "@/lib/calculation/codosDeSubida";
 import type { TechnicalRouteAccessoryResolution } from "@/lib/calculation/technicalRouteAccessories";
 import type { DiameterTransitionDecision } from "@/lib/calculation/diameterTransitionProposals";
 import {
@@ -235,6 +236,8 @@ const ROUTE_LENGTH_EPSILON = 0.000001;
 
 export function calculateTechnicalTree(params: {
   adoptedDiameterDecisions?: AdoptedDiameterDecision[];
+  /** Codos de subidas y de salida del medidor (por defecto, sí). */
+  codosDeSubida?: boolean;
   diameterTransitionDecisions?: DiameterTransitionDecision[];
   equipment: WorkbenchEquipment[];
   minSegmentLengthSource: number;
@@ -244,6 +247,17 @@ export function calculateTechnicalTree(params: {
   projectGas?: ProjectGasConfig | null;
   scaleMetersPerSourceUnit: number | null;
 }): TechnicalCalculationResult {
+  // Codos de subidas y de salida del medidor: en obra van aunque no haya alturas cargadas.
+  // Se apagan solo en pruebas del motor que miden otra cosa con números exactos.
+  if (params.codosDeSubida !== false) {
+    params = {
+      ...params,
+      network: agregarCodosDeSubida({
+        ...params,
+        pipeSystemId: params.pipeSystem?.identity.id ?? "",
+      }),
+    };
+  }
   const pipeSystem = params.pipeSystem ?? UNCONFIGURED_PIPE_SYSTEM;
   const projectGas = projectGasConfigOrDefault(params.projectGas);
   const demandNormalizations = normalizeEquipmentDemands(

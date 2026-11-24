@@ -553,6 +553,7 @@ function calculateCrossDependencyFixture() {
     }),
   ];
   const result = calculateTechnicalTree({
+    codosDeSubida: false, // esta prueba mide otra parte del motor
     equipment,
     minSegmentLengthSource: 0.000001,
     network,
@@ -675,6 +676,7 @@ function calculateFixture(params: {
   };
 
   return calculateTechnicalTree({
+    codosDeSubida: false, // esta prueba mide otra parte del motor
     equipment,
     minSegmentLengthSource: 0.000001,
     network,

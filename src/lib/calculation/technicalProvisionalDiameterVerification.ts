@@ -102,6 +102,7 @@ function calculateFourApplianceFixture(): TechnicalCalculationResult {
   };
 
   return calculateTechnicalTree({
+    codosDeSubida: false, // esta prueba mide otra parte del motor
     equipment,
     minSegmentLengthSource: 0.000001,
     network,

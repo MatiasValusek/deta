@@ -16,6 +16,8 @@ import type { ManualRouteNetwork, RouteSegment, RouteSegmentAccessory } from "@/
  * - Al 4: 4 codos en C-M, te a 90° en C, 2 codos y llave.
  * Cada te se carga en el tramo por donde sale el gas (a través o a 90°), así cada recorrido
  * suma la te que le corresponde. La cupla de reducción la pone el motor si baja el diámetro.
+ * Los 4 codos de C-M (salida del medidor) y los 2 de cada bajada los pone la app sola
+ * (codosDeSubida.ts); acá no se cargan para no contarlos dos veces.
  */
 
 /** Tabla de cálculo del plano presentado, para comparar. */
@@ -118,13 +120,13 @@ export const CANERIA_PRUEBA: ManualRouteNetwork = {
     { equipmentId: "pr-caldera", id: "n-4", kind: "appliance", origin: "manual" },
   ],
   segments: [
-    tramo("C-M", "n-medidor", "n-c", [codos("C-M", 4)]),
+    tramo("C-M", "n-medidor", "n-c", []),
     tramo("B-C", "n-c", "n-b", [te("B-C", "n-c", "a-traves")]),
     tramo("A-B", "n-b", "n-a", [te("A-B", "n-b", "a-traves"), codos("A-B", 5)]),
     tramo("1-A", "n-a", "n-1", [te("1-A", "n-a", "a-90"), llave("1-A")]),
     tramo("2-A", "n-a", "n-2", [te("2-A", "n-a", "a-90"), llave("2-A")]),
-    tramo("B-3", "n-b", "n-3", [te("B-3", "n-b", "a-90"), codos("B-3", 2), llave("B-3")]),
-    tramo("C-4", "n-c", "n-4", [te("C-4", "n-c", "a-90"), codos("C-4", 2), llave("C-4")]),
+    tramo("B-3", "n-b", "n-3", [te("B-3", "n-b", "a-90"), llave("B-3")]),
+    tramo("C-4", "n-c", "n-4", [te("C-4", "n-c", "a-90"), llave("C-4")]),
   ],
 };
 

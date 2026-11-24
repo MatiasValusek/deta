@@ -1,3 +1,4 @@
+import { agregarCodosDeSubida, tipoCodosDeSubida } from "@/lib/calculation/codosDeSubida";
 import type {
   PipeDiameterReference,
   PipeDiameterTransitionTraversalKind,
@@ -163,7 +164,10 @@ export function createTechnicalPhysicalAccessoryInventory(params: {
     network: params.network,
   });
   const routeAccessoryGeometryByKey = createRouteAccessoryGeometryIndex({
-    network: params.network,
+    // La misma cañería que usó el cálculo, con los codos de subida agregados.
+    network: params.network
+      ? agregarCodosDeSubida({ equipment: params.equipment ?? [], network: params.network })
+      : undefined,
     routeNodeGeometryById,
   });
 
@@ -710,6 +714,17 @@ function inferRouteSegmentAccessoryGeometry(params: {
   routeNodeGeometryById: Map<string, RouteAccessoryGeometry>;
   segment: RouteSegment;
 }): RouteAccessoryGeometry | null {
+  const codosDeSubida = tipoCodosDeSubida(params.accessory.id);
+
+  if (codosDeSubida) {
+    // Los codos de subida van en el extremo del tramo: el artefacto o el medidor.
+    const kind = codosDeSubida === "subida" ? "appliance" : "supply";
+    const extremo = [params.segment.fromNodeId, params.segment.toNodeId].find(
+      (nodeId) => params.nodeById.get(nodeId)?.kind === kind,
+    );
+    return extremo ? params.routeNodeGeometryById.get(extremo) ?? null : null;
+  }
+
   const parsedNodeId = parseAutomaticRouteAccessoryNodeId(params.accessory.id);
   const parsedNode =
     parsedNodeId &&

@@ -88,6 +88,7 @@ function terminalConnectionFixture() {
   assertEqual(JSON.stringify(secondUpdate.network), JSON.stringify(firstUpdate.network));
 
   const initialResult = calculateTechnicalTree({
+    codosDeSubida: false, // esta prueba mide otra parte del motor
     equipment,
     minSegmentLengthSource: EPSILON,
     network: firstUpdate.network,
@@ -136,6 +137,7 @@ function terminalConnectionFixture() {
     threadedHalfInch.catalogCode,
   );
   const result = calculateTechnicalTree({
+    codosDeSubida: false, // esta prueba mide otra parte del motor
     equipment,
     minSegmentLengthSource: EPSILON,
     network: reapplied.network,

@@ -1,3 +1,4 @@
+import { tipoCodosDeSubida } from "@/lib/calculation/codosDeSubida";
 import { resolucionesFinales } from "@/lib/calculation/resolucionesFinales";
 import type { PipeDiameterReference } from "@/lib/calculation/pipeSystem";
 import type { TechnicalCalculationSheet } from "@/lib/calculation/technicalCalculationSheet";
@@ -17,6 +18,8 @@ export const FILAS_PLANILLA = [
   "Unión doble mixta",
   "Codo normal 90°",
   "Codo normal 45°",
+  "Codos de subida",
+  "Codos de salida del medidor",
   "Codo a 90° c/RH",
   "Te normal flujo a 90°",
   "Te normal flujo a través",
@@ -106,7 +109,7 @@ export function crearPlanillaTramos(params: {
     const transiciones = ruta ? reduccionesPorRuta[ruta]?.contributions ?? [] : [];
     const items: ItemPlanilla[] = [
       ...accesorios.map((a) => ({
-        ...clasificarAccesorio(a.catalogCode ?? a.catalogFamilyId ?? ""),
+        ...clasificarContribucion(a),
         diametro: mm(a.diameter),
         cantidad: a.quantity,
         metros: a.totalEquivalentLengthMeters ?? 0,
@@ -210,4 +213,16 @@ function formatear(valor: number, decimales = 2) {
     maximumFractionDigits: decimales,
     minimumFractionDigits: decimales,
   });
+}
+
+/** Los codos de subida y de salida del medidor van en su propia fila, para que se vean. */
+function clasificarContribucion(a: {
+  accessoryId: string;
+  catalogCode?: string;
+  catalogFamilyId?: string;
+}): { fila: FilaPlanilla; medida: string } {
+  const tipo = tipoCodosDeSubida(a.accessoryId);
+  if (tipo === "subida") return { fila: "Codos de subida", medida: "" };
+  if (tipo === "salida_medidor") return { fila: "Codos de salida del medidor", medida: "" };
+  return clasificarAccesorio(a.catalogCode ?? a.catalogFamilyId ?? "");
 }

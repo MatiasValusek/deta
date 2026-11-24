@@ -1,7 +1,9 @@
+import { agregarCodosDeSubida, tipoCodosDeSubida } from "@/lib/calculation/codosDeSubida";
 import { SIGAS_PIPE_SYSTEM } from "@/lib/calculation/pipeSystems/sigas";
 import { DEFAULT_PROJECT_GAS_CONFIG } from "@/lib/calculation/projectGas";
 import { createTechnicalCalculationSheet } from "@/lib/calculation/technicalCalculationSheet";
 import { calculateTechnicalTree } from "@/lib/calculation/technicalTree";
+import type { WorkbenchEquipment } from "@/lib/equipment/types";
 import {
   ADOPTADOS_PRUEBA,
   ARTEFACTOS_PRUEBA,
@@ -15,12 +17,28 @@ type Resultado = { name: string; status: "passed" };
  * Comparación con la tabla del plano presentado. Diferencias conocidas, que no son errores:
  * - B-3 por tabla: la app da 20 y el plano 25. Con 0,699 m³/h, el caño de 20 alcanza en la
  *   fila de 16 m (1,399 m³/h) y en la de 18 m (1,319 m³/h): el 25 no sale de la tabla.
- * - Longitud equivalente: donde baja el diámetro, la app cuenta te de reducción con la medida
- *   real de cada tramo; la gasista contó te normal + cupla y todo en 32. Por eso los recorridos
- *   al 1 y al 2 dan 0,14 m menos y el del 3 da 1,40 m menos. El del 4 da igual.
+ * - Longitud equivalente: la app pone sola 4 codos a la salida del medidor y 2 en cada
+ *   bajada. Los recorridos al 1 y al 2 quedan 1,57 m por encima de la gasista (ella no contó
+ *   codos en esas bajadas) y el del 4 da igual.
+ * - B-3 queda 1,40 m por debajo: la app cuenta te de reducción 32×25 y los codos y la llave
+ *   en 25; la gasista contó te normal + cupla y todo en 32. PENDIENTE de decisión
+ *   (ver PLAN.md): hasta entonces B-3 es la única excepción a la regla de seguridad.
  */
-const TOLERANCIA_M = 0.2;
-const TOLERANCIA_B3_M = 1.5;
+const TOLERANCIA_M = 0.005;
+const PENDIENTE_B3_M = 1.41;
+
+function calcular(equipment: WorkbenchEquipment[]) {
+  const result = calculateTechnicalTree({
+    adoptedDiameterDecisions: ADOPTADOS_PRUEBA,
+    equipment,
+    minSegmentLengthSource: 0.0001,
+    network: CANERIA_PRUEBA,
+    pipeSystem: SIGAS_PIPE_SYSTEM,
+    projectGas: DEFAULT_PROJECT_GAS_CONFIG,
+    scaleMetersPerSourceUnit: 0.001,
+  });
+  return { hoja: createTechnicalCalculationSheet({ equipment, result }), result };
+}
 
 export function runObraPruebaTresDerivacionesVerifications() {
   const results: Resultado[] = [];
@@ -29,23 +47,21 @@ export function runObraPruebaTresDerivacionesVerifications() {
     results.push({ name, status: "passed" });
   };
 
-  const result = calculateTechnicalTree({
-    adoptedDiameterDecisions: ADOPTADOS_PRUEBA,
-    equipment: ARTEFACTOS_PRUEBA,
-    minSegmentLengthSource: 0.0001,
-    network: CANERIA_PRUEBA,
-    pipeSystem: SIGAS_PIPE_SYSTEM,
-    projectGas: DEFAULT_PROJECT_GAS_CONFIG,
-    scaleMetersPerSourceUnit: 0.001,
-  });
-  const hoja = createTechnicalCalculationSheet({ equipment: ARTEFACTOS_PRUEBA, result });
+  const { hoja, result } = calcular(ARTEFACTOS_PRUEBA);
   const filas = Object.entries(CALCULO_PRESENTADO).map(([tramo, real]) => ({
     app: hoja.rows.find((fila) => fila.segmentId === tramo),
     real,
     tramo,
   }));
   const mm = (valor: { externalDiameterMillimeters?: number } | null | undefined) =>
-    valor?.externalDiameterMillimeters;
+    valor?.externalDiameterMillimeters ?? 0;
+  const equivalente = (fila: (typeof filas)[number]["app"]) =>
+    (fila?.finalCalculationLengthMeters ?? 0) - (fila?.initialRouteLengthMeters ?? 0);
+  const codos = (segmentId: string, tipo: "subida" | "salida_medidor") =>
+    result.segments
+      .find((segment) => segment.segmentId === segmentId)
+      ?.accessories.filter((accessory) => tipoCodosDeSubida(accessory.id) === tipo)
+      .reduce((total, accessory) => total + accessory.quantity, 0) ?? 0;
 
   check("calcula sin pendientes", () => result.status === "valid" && hoja.status === "resolved");
   check("los largos reales y los consumos son los del plano", () =>
@@ -63,11 +79,76 @@ export function runObraPruebaTresDerivacionesVerifications() {
       mm(app?.calculatedDiameter) === (tramo === "B-3" ? 20 : real.tabla),
     ),
   );
-  check("las longitudes totales quedan cerca del plano", () =>
-    filas.every(({ app, real, tramo }) =>
-      Math.abs((app?.finalCalculationLengthMeters ?? 0) - real.total) <=
-      (tramo === "B-3" ? TOLERANCIA_B3_M : TOLERANCIA_M),
-    ),
+  check("sin alturas cargadas: 4 codos a la salida del medidor y 2 en cada bajada", () =>
+    codos("C-M", "salida_medidor") === 4 &&
+    ["1-A", "2-A", "B-3", "C-4"].every((tramo) => codos(tramo, "subida") === 2) &&
+    ["B-C", "A-B"].every((tramo) => codos(tramo, "subida") === 0),
+  );
+  check(
+    "seguridad: ningún tramo queda con diámetro ni longitud equivalente menor que la gasista",
+    () =>
+      filas.every(
+        ({ app, real, tramo }) =>
+          mm(app?.effectiveDiameter) >= real.adoptado &&
+          equivalente(app) >=
+            real.equivalente - (tramo === "B-3" ? PENDIENTE_B3_M : TOLERANCIA_M),
+      ),
+  );
+
+  // Con alturas confirmadas por el gasista, la bajada al anafe se cuenta por las alturas:
+  // si llega al mismo nivel que la cañería, no lleva codos de bajada (no se cuentan dos veces).
+  const conAlturas = ARTEFACTOS_PRUEBA.map((item) =>
+    item.id === "pr-anafe" && item.terminalConfig
+      ? {
+          ...item,
+          terminalConfig: {
+            ...item.terminalConfig,
+            connectionHeightMeters: 0,
+            heightSource: "professional_edit" as const,
+            heightStatus: "confirmed" as const,
+            verticalDropMeters: 0,
+          },
+        }
+      : item,
+  );
+  const alturas = calcular(conAlturas).result;
+  check("con alturas cargadas se usan esas en lugar de los codos fijos", () =>
+    !alturas.segments
+      .find((segment) => segment.segmentId === "1-A")
+      ?.accessories.some((accessory) => tipoCodosDeSubida(accessory.id) === "subida"),
+  );
+
+  // Si la conexión al artefacto ya trae su codo con rosca hembra, ese es uno de los 2.
+  const conCodoFinal = agregarCodosDeSubida({
+    equipment: ARTEFACTOS_PRUEBA,
+    network: {
+      ...CANERIA_PRUEBA,
+      segments: CANERIA_PRUEBA.segments.map((segment) =>
+        segment.id === "C-4"
+          ? {
+              ...segment,
+              accessories: [
+                ...(segment.accessories ?? []),
+                {
+                  catalogFamilyId: "codo-90-rosca-hembra",
+                  equivalentLengthMetersPerUnit: null,
+                  equivalentLengthSource: "pipe_system" as const,
+                  id: "route-terminal:pr-caldera:terminal",
+                  quantity: 1,
+                  segmentId: "C-4",
+                  type: "elbow" as const,
+                },
+              ],
+            }
+          : segment,
+      ),
+    },
+  });
+  check("el codo con rosca hembra del artefacto cuenta como uno de los 2", () =>
+    (conCodoFinal.segments
+      .find((segment) => segment.id === "C-4")
+      ?.accessories?.find((accessory) => tipoCodosDeSubida(accessory.id) === "subida")
+      ?.quantity ?? 0) === 1,
   );
 
   return results;

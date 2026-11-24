@@ -122,12 +122,38 @@ como los contó la gasista):
 - Longitud total: diferencia de 0,14 m en los recorridos al 1, al 2 y al 4. En el recorrido
   al 3 (B-3) la app da 14,91 m y el plano 16,31 m: 1,40 m menos. Donde baja el diámetro, la
   app cuenta te de reducción con la medida real. La gasista contó te normal y cupla, todo en 32.
-- **Codos de subidas y bajadas: la app no los cuenta.** Solo pone codos donde la traza dobla
+- **Codos de subidas y bajadas: la app no los contaba** (corregido, ver abajo). Solo pone codos donde la traza dobla
   en planta. En los extremos (medidor y artefactos) no agrega nada, y las alturas cargadas
   solo se usan para dibujar, no para el cálculo. En la prueba los codos están cargados a mano.
   Con la propuesta automática, B-3 y C-M son rectos en planta y quedarían con 0 codos (la
   gasista contó 2 y 4). La longitud equivalente queda corta, que es el lado inseguro.
-  Pendiente: decidir cuántos codos contar por defecto en cada subida y en la salida del medidor.
+
+**Decisión: codos de subidas y bajadas (corrección de seguridad, autorizada en el motor).**
+- 4 codos a 90° en el primer tramo, a la salida del medidor.
+- 2 codos por cada subida o bajada a un artefacto, también en boca taponada, con el
+  diámetro del tramo que llega. Si la conexión al artefacto ya trae su codo con rosca
+  hembra (lo pone la app al conectar), ese cuenta como uno de los 2 y se agrega 1 normal.
+- Si ese extremo tiene alturas confirmadas por el gasista, se cuentan 2 codos por cada
+  cambio de nivel del tramo en lugar de los fijos. No se cuentan dos veces.
+- En la planilla por tramo figuran como filas propias: "Codos de subida" y "Codos de salida
+  del medidor". Se ubican en la isométrica y en los cortes, en el extremo del tramo.
+- Cantidad editable en Modo experto: el motor respeta la pieza si el tramo ya la trae con su
+  id (`codos-subida:<tramo>`, `codos-salida-medidor:<tramo>`). **Falta la pantalla.**
+- Código: `calculation/codosDeSubida.ts`. Las pruebas viejas del motor que miden otras
+  cosas con números exactos los apagan (`codosDeSubida: false`).
+- Test de seguridad en la obra de prueba: ningún tramo con diámetro adoptado ni longitud
+  equivalente menor que la planilla de la gasista. Resultado: los recorridos al 1 y al 2
+  quedan 1,57 m por encima (ella no contó codos en esas bajadas), el del 4 da igual.
+  **B-3 sigue 1,40 m por debajo** y es la única excepción del test, pendiente de decisión.
+
+**B-3, de dónde salen los 1,40 m** (recorrido medidor → C → B → 3):
+- Te: la app cuenta te de reducción 32×25 a 90° (0,819 m). La gasista contó te normal 32 a
+  90° + cupla 32-25 (0,928 + 0,525 = 1,453 m). Diferencia: 0,63 m.
+- Codos y llave del tramo B-3: la app los cuenta en 25 (el diámetro del tramo). La gasista
+  los contó en 32. Los 2 codos dan 0,67 m de diferencia (1,712 contra 2,382) y la llave el resto.
+- Propuesta (sin aplicar): por defecto, te normal + cupla en lugar de te de reducción.
+  Cubre 0,63 m. Para los 0,77 m restantes hay que decidir si los accesorios del tramo que
+  baja de diámetro se cuentan con el diámetro mayor, como hizo la gasista.
 
 ### Decisiones tras la Fase 0 (2026-11-20)
 - Los paneles ocultos (diagnóstico, preparación del plano, obstáculos) quedan para

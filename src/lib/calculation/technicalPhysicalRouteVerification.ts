@@ -173,6 +173,7 @@ function terminalBranchPhysicalRouteFixture() {
 
   const accessoryProposals = terminalBranchAccessoryProposals();
   const result = calculateTechnicalTree({
+    codosDeSubida: false, // esta prueba mide otra parte del motor
     equipment,
     minSegmentLengthSource: EPSILON,
     network,
