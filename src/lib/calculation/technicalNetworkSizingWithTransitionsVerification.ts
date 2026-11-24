@@ -285,7 +285,7 @@ export function runTechnicalTransitionAwareNetworkSizingVerifications() {
     );
 
     assertEqual(tee?.decision?.origin, "app_default");
-    assertEqual(tee?.decision?.catalogFamilyId, "te-reduc-central");
+    assertEqual(tee?.decision?.catalogFamilyId, "te-normal-mas-cupla");
   });
 
   verify(results, "Caso K - compound transition", () => {

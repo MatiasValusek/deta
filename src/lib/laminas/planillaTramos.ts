@@ -122,7 +122,9 @@ export function crearPlanillaTramos(params: {
           const abajo = mm(t.downstreamDiameter);
           return {
             fila: clase.fila === "Otros" ? ("Cupla de reducción" as const) : clase.fila,
-            medida: clase.medida || (arriba && abajo ? `${Math.max(arriba, abajo)}-${Math.min(arriba, abajo)}` : ""),
+            medida: clase.fila.startsWith("Te normal")
+              ? ""
+              : clase.medida || (arriba && abajo ? `${Math.max(arriba, abajo)}-${Math.min(arriba, abajo)}` : ""),
             diametro: arriba && abajo ? Math.max(arriba, abajo) : arriba ?? abajo,
             cantidad: 1,
             metros: t.equivalentLengthMeters ?? 0,

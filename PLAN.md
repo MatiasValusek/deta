@@ -107,7 +107,7 @@ Lo más valioso. Usa lo que el motor ya calcula.
 
 ### Diámetro adoptado y comparación con un plano presentado (2026-11-24)
 **Decisión del diámetro adoptado.** Por defecto, el diámetro adoptado es el mínimo que da
-la tabla SIGAS. La app resuelve sola las reducciones (te de reducción en derivaciones,
+la tabla SIGAS. La app resuelve sola las reducciones (te normal + cupla en derivaciones,
 cupla de reducción en línea) para que ningún tramo suba de diámetro por no tener confirmada
 una pieza. El gasista puede agrandar el diámetro adoptado de un tramo (por ejemplo, para
 dejar prevista una ampliación). Ese diámetro mayor es el que se usa en accesorios,
@@ -138,22 +138,34 @@ como los contó la gasista):
 - En la planilla por tramo figuran como filas propias: "Codos de subida" y "Codos de salida
   del medidor". Se ubican en la isométrica y en los cortes, en el extremo del tramo.
 - Cantidad editable en Modo experto: el motor respeta la pieza si el tramo ya la trae con su
-  id (`codos-subida:<tramo>`, `codos-salida-medidor:<tramo>`). **Falta la pantalla.**
+  id (`codos-subida:<tramo>`, `codos-salida-medidor:<tramo>`). Falta la pantalla (ver pendientes).
 - Código: `calculation/codosDeSubida.ts`. Las pruebas viejas del motor que miden otras
   cosas con números exactos los apagan (`codosDeSubida: false`).
 - Test de seguridad en la obra de prueba: ningún tramo con diámetro adoptado ni longitud
   equivalente menor que la planilla de la gasista. Resultado: los recorridos al 1 y al 2
-  quedan 1,57 m por encima (ella no contó codos en esas bajadas), el del 4 da igual.
-  **B-3 sigue 1,40 m por debajo** y es la única excepción del test, pendiente de decisión.
+  quedan 1,72 m por encima (ella no contó codos en esas bajadas) y el del 4 da igual.
+  En B-3 se controla el diámetro (ver abajo).
 
-**B-3, de dónde salen los 1,40 m** (recorrido medidor → C → B → 3):
-- Te: la app cuenta te de reducción 32×25 a 90° (0,819 m). La gasista contó te normal 32 a
-  90° + cupla 32-25 (0,928 + 0,525 = 1,453 m). Diferencia: 0,63 m.
-- Codos y llave del tramo B-3: la app los cuenta en 25 (el diámetro del tramo). La gasista
-  los contó en 32. Los 2 codos dan 0,67 m de diferencia (1,712 contra 2,382) y la llave el resto.
-- Propuesta (sin aplicar): por defecto, te normal + cupla en lugar de te de reducción.
-  Cubre 0,63 m. Para los 0,77 m restantes hay que decidir si los accesorios del tramo que
-  baja de diámetro se cuentan con el diámetro mayor, como hizo la gasista.
+**Decisión: derivaciones con reducción (2026-11-24).**
+- Por defecto, la app cuenta **te normal + cupla de reducción**: la te con la medida de la
+  entrada (a 90° o a través según el recorrido) y, si el recorrido baja de medida, la cupla.
+  Da más longitud equivalente que la te de reducción central. La te de reducción se puede
+  elegir en Modo experto (decisión del gasista sobre la derivación).
+- **No** se cuentan los accesorios de un tramo con el diámetro mayor: no es coherente con el
+  cálculo del tramo y agranda cañerías sin necesidad.
+
+**B-3: la diferencia es de método, no de seguridad.**
+- Con te normal + cupla (0,928 + 0,525 m), B-3 queda 0,77 m por debajo de la gasista:
+  8,39 m de longitud equivalente contra 9,16. La diferencia sale de que la app cuenta
+  los 2 codos y la llave del tramo en 25, que es su medida, y la gasista los contó en 32.
+- Con la longitud de la gasista (15,54 + 0,77 = 16,31 m) y 0,699 m³/h, la tabla SIGAS da
+  20 mm (fila de 18 m), igual que con la de la app (fila de 16 m). El adoptado sigue en 25.
+- El test controla en B-3 que el diámetro no sea menor, y que con la longitud de la gasista
+  no cambie el diámetro. Ya no hay excepciones.
+
+**Pendiente de Modo experto (pantalla):**
+- Cambiar la cantidad de codos de subida y de salida del medidor por tramo.
+- Elegir te de reducción central en lugar de te normal + cupla en una derivación.
 
 ### Decisiones tras la Fase 0 (2026-11-20)
 - Los paneles ocultos (diagnóstico, preparación del plano, obstáculos) quedan para

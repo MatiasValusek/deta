@@ -8,6 +8,7 @@ import type {
 } from "@/lib/calculation/pipeSystem";
 import {
   applyDiameterTransitionDecisions,
+  FAMILIA_TE_NORMAL_MAS_CUPLA,
   type DiameterTransitionDecision,
   type DiameterTransitionKind,
   type DiameterTransitionProposal,
@@ -632,6 +633,14 @@ const FAMILIA_REDUCCION_EN_LINEA = "cupla-reduccion-hh";
 function createBranchTransitionContributions(
   params: Parameters<typeof createBranchTransitionContribution>[0],
 ): TechnicalRouteTransitionContribution[] {
+  if (
+    params.includeBranchTransitions &&
+    params.transition.decision?.status === "confirmed" &&
+    params.transition.decision.catalogFamilyId === FAMILIA_TE_NORMAL_MAS_CUPLA
+  ) {
+    return teNormalMasCupla(params);
+  }
+
   const diametroDe = (segmentId: string) =>
     resolveDiameter(params.diameterBySegmentId, segmentId) ??
     segmentDiameter(params.transition, segmentId);
@@ -680,6 +689,15 @@ function createBranchTransitionContributions(
     return [te];
   }
 
+  return [te, cuplaDeReduccion(params, entrada, salida)];
+}
+
+/** Cupla de reducción entre dos medidas, como aporte del recorrido. */
+function cuplaDeReduccion(
+  params: Parameters<typeof createBranchTransitionContribution>[0],
+  entrada: PipeDiameterReference,
+  salida: PipeDiameterReference,
+): TechnicalRouteTransitionContribution {
   const cupla = params.pipeSystem.resolveDiameterTransitionEquivalentLength({
     downstreamDiameter: salida,
     junction: {
@@ -695,30 +713,96 @@ function createBranchTransitionContributions(
     },
     upstreamDiameter: entrada,
   });
-  const reduccion: TechnicalRouteTransitionContribution =
-    cupla.status === "resolved"
+
+  return cupla.status === "resolved"
+    ? {
+        ...params.base,
+        catalogCode: cupla.value.catalogCode,
+        catalogFamilyId: cupla.value.catalogFamilyId,
+        equivalentLengthMeters: cupla.value.equivalentLengthMeters,
+        equivalentLengthResolution: cupla,
+        source: "pipe_system",
+        status: "resolved",
+        transitionKind: "simple_reduction",
+        variant: cupla.value.variant,
+      }
+    : {
+        ...params.base,
+        catalogFamilyId: FAMILIA_REDUCCION_EN_LINEA,
+        equivalentLengthResolution: cupla,
+        reason: cupla.reason,
+        source: "pipe_system",
+        status: cupla.status,
+        transitionKind: "simple_reduction",
+      };
+}
+
+/**
+ * Derivación con te normal + cupla (por defecto): la te va con la medida de la entrada, a 90°
+ * o a través según el recorrido, y si el recorrido baja de medida se suma la cupla.
+ */
+function teNormalMasCupla(
+  params: Parameters<typeof createBranchTransitionContribution>[0],
+): TechnicalRouteTransitionContribution[] {
+  const entrada = params.upstreamDiameter;
+  const salida = params.base.downstreamDiameter;
+  const traversalKind = params.upstreamSegmentId
+    ? classifyBranchTraversalKind({
+        downstreamSegmentId: params.downstreamSegmentId,
+        equipment: params.equipment,
+        network: params.network,
+        transition: params.transition,
+        upstreamSegmentId: params.upstreamSegmentId,
+      })
+    : null;
+
+  if (!entrada || !salida || !traversalKind) {
+    return [
+      unresolvedContribution({
+        ...params.base,
+        catalogFamilyId: FAMILIA_TE_NORMAL_MAS_CUPLA,
+        reason: "Faltan diámetros o sentido del recorrido para contar la te y la cupla.",
+        source: "pipe_system",
+      }),
+    ];
+  }
+
+  const familiaTe =
+    traversalKind === "through" ? "te-normal-flujo-a-traves" : "te-normal-flujo-a-90";
+  const te = params.pipeSystem.resolveAccessoryEquivalentLength({
+    accessory: { catalogFamilyId: familiaTe, id: `${params.transition.id}:te`, quantity: 1, type: "tee" },
+    pipe: { diameter: entrada },
+    segment: {
+      accumulatedFlow: null,
+      accumulatedFlowUnit: null,
+      drawingLength: 0,
+      id: params.upstreamSegmentId ?? params.downstreamSegmentId,
+      physicalLengthMeters: null,
+    },
+  });
+  const aporteTe: TechnicalRouteTransitionContribution =
+    te.status === "resolved"
       ? {
           ...params.base,
-          catalogCode: cupla.value.catalogCode,
-          catalogFamilyId: cupla.value.catalogFamilyId,
-          equivalentLengthMeters: cupla.value.equivalentLengthMeters,
-          equivalentLengthResolution: cupla,
+          catalogFamilyId: familiaTe,
+          downstreamDiameter: entrada,
+          equivalentLengthMeters: te.value,
+          equivalentLengthResolution: null,
           source: "pipe_system",
           status: "resolved",
-          transitionKind: "simple_reduction",
-          variant: cupla.value.variant,
+          traversalKind,
         }
-      : {
+      : unresolvedContribution({
           ...params.base,
-          catalogFamilyId: FAMILIA_REDUCCION_EN_LINEA,
-          equivalentLengthResolution: cupla,
-          reason: cupla.reason,
+          catalogFamilyId: familiaTe,
+          reason: te.reason,
           source: "pipe_system",
-          status: cupla.status,
-          transitionKind: "simple_reduction",
-        };
+          traversalKind,
+        });
+  const baja =
+    (salida.externalDiameterMillimeters ?? 0) < (entrada.externalDiameterMillimeters ?? 0);
 
-  return [te, reduccion];
+  return baja ? [aporteTe, cuplaDeReduccion(params, entrada, salida)] : [aporteTe];
 }
 
 function createBranchTransitionContribution(params: {

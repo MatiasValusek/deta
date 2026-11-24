@@ -172,7 +172,7 @@ export function runTechnicalRouteBranchTransitionVerifications() {
     assertEqual(resolution.equivalentLengthMeters, 0);
   });
 
-  verify(results, "Caso H - tee sin decision se resuelve sola con te de reduccion", () => {
+  verify(results, "Caso H - tee sin decision se resuelve sola con te normal + cupla", () => {
     const fixture = teeFixture({
       diameters: { s1: 32, s2: 32, s3: 25 },
     });
@@ -191,10 +191,12 @@ export function runTechnicalRouteBranchTransitionVerifications() {
 
     assertEqual(proposal.decision?.origin, "app_default");
     assertEqual(resolution.status, "resolved");
-    assertEqual(resolution.contributions[0]?.catalogFamilyId, "te-reduc-central");
+    // Te normal 32 a 90° (0,928) + cupla 32-25 (0,525), como la cuenta el gasista.
+    assertEqual(resolution.contributions[0]?.catalogFamilyId, "te-normal-flujo-a-90");
+    assertEqual(resolution.contributions[1]?.catalogCode, "cupla-reduccion-hh-32-a-25-mm");
     assert(
-      (resolution.equivalentLengthMeters ?? 0) > 0,
-      "La te de reduccion suma longitud equivalente.",
+      Math.abs((resolution.equivalentLengthMeters ?? 0) - 1.453) < 0.001,
+      "Te normal + cupla suman 1,453 m.",
     );
   });
 

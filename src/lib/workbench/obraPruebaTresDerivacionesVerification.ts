@@ -18,14 +18,16 @@ type Resultado = { name: string; status: "passed" };
  * - B-3 por tabla: la app da 20 y el plano 25. Con 0,699 m³/h, el caño de 20 alcanza en la
  *   fila de 16 m (1,399 m³/h) y en la de 18 m (1,319 m³/h): el 25 no sale de la tabla.
  * - Longitud equivalente: la app pone sola 4 codos a la salida del medidor y 2 en cada
- *   bajada. Los recorridos al 1 y al 2 quedan 1,57 m por encima de la gasista (ella no contó
- *   codos en esas bajadas) y el del 4 da igual.
- * - B-3 queda 1,40 m por debajo: la app cuenta te de reducción 32×25 y los codos y la llave
- *   en 25; la gasista contó te normal + cupla y todo en 32. PENDIENTE de decisión
- *   (ver PLAN.md): hasta entonces B-3 es la única excepción a la regla de seguridad.
+ *   bajada, y en las derivaciones que bajan de medida cuenta te normal + cupla. Los recorridos
+ *   al 1 y al 2 quedan 1,72 m por encima de la gasista (ella no contó codos en esas bajadas)
+ *   y el del 4 da igual.
+ * - B-3 queda 0,77 m por debajo por método, no por seguridad: la app cuenta los codos y la
+ *   llave del tramo en 25, que es su medida; la gasista los contó en 32. Con la longitud de
+ *   ella la tabla da el mismo diámetro (20 en la fila de 18 m), así que en B-3 se controla
+ *   el diámetro en lugar de la longitud.
  */
 const TOLERANCIA_M = 0.005;
-const PENDIENTE_B3_M = 1.41;
+const DIFERENCIA_DE_METODO_B3_M = 0.77;
 
 function calcular(equipment: WorkbenchEquipment[]) {
   const result = calculateTechnicalTree({
@@ -90,10 +92,33 @@ export function runObraPruebaTresDerivacionesVerifications() {
       filas.every(
         ({ app, real, tramo }) =>
           mm(app?.effectiveDiameter) >= real.adoptado &&
-          equivalente(app) >=
-            real.equivalente - (tramo === "B-3" ? PENDIENTE_B3_M : TOLERANCIA_M),
+          (tramo === "B-3" || equivalente(app) >= real.equivalente - TOLERANCIA_M),
       ),
   );
+
+  // B-3: con la longitud de la gasista (la de la app + 0,77 m) el diámetro no puede dar
+  // mayor que el que da la app ni que el adoptado.
+  const b3 = filas.find(({ tramo }) => tramo === "B-3")?.app;
+  const diametroB3 = (largo: number) => {
+    const sizing = SIGAS_PIPE_SYSTEM.sizeSegment({
+      accessoryEquivalentLengthMeters: null,
+      accumulatedFlow: b3?.flowM3h ?? null,
+      accumulatedFlowUnit: "m3_h",
+      calculationLengthMeters: largo,
+      physicalLengthMeters: b3?.physicalLengthMeters ?? null,
+      segmentId: "B-3",
+    });
+    return sizing.status === "resolved" ? mm(sizing.value.selectedDiameter) : Infinity;
+  };
+  check("B-3: la diferencia con la gasista es de método, no cambia el diámetro", () => {
+    const largoApp = b3?.finalCalculationLengthMeters ?? 0;
+    const largoGasista = largoApp + DIFERENCIA_DE_METODO_B3_M;
+    return (
+      Math.abs(largoGasista - CALCULO_PRESENTADO["B-3"].total) < 0.01 &&
+      diametroB3(largoGasista) === mm(b3?.calculatedDiameter) &&
+      diametroB3(largoGasista) <= mm(b3?.effectiveDiameter)
+    );
+  });
 
   // Con alturas confirmadas por el gasista, la bajada al anafe se cuenta por las alturas:
   // si llega al mismo nivel que la cañería, no lleva codos de bajada (no se cuentan dos veces).

@@ -60,12 +60,18 @@ export type DiameterTransitionDecisionStatus =
 export type DiameterTransitionDecisionOrigin = "app_default" | "user_confirmed";
 
 /**
+ * Derivación con reducción armada como la cuenta el gasista: te normal con la medida de la
+ * entrada y cupla de reducción hacia la medida que sigue. Da más longitud equivalente que la
+ * te de reducción central (lado seguro). La te de reducción se puede elegir en Modo experto.
+ */
+export const FAMILIA_TE_NORMAL_MAS_CUPLA = "te-normal-mas-cupla";
+
+/**
  * Pieza que la app pone sola cuando el diámetro baja (SIGAS, único sistema hoy):
- * te de reducción central en las derivaciones (sirve a 90° y a través) y
- * cupla de reducción en el tramo que sigue derecho.
+ * te normal + cupla en las derivaciones y cupla de reducción en el tramo que sigue derecho.
  */
 const FAMILIA_POR_DEFECTO: Partial<Record<DiameterTransitionKind, string>> = {
-  branch_transition: "te-reduc-central",
+  branch_transition: FAMILIA_TE_NORMAL_MAS_CUPLA,
   simple_reduction: "cupla-reduccion-hh",
 };
 const ESTADOS_A_RESOLVER_SOLOS: ReadonlySet<DiameterTransitionState> = new Set([

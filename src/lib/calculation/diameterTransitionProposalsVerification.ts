@@ -119,7 +119,7 @@ export function runDiameterTransitionProposalVerifications() {
     assertEqual(proposal.kind, "branch_transition");
     assertEqual(proposal.state, "confirmed");
     assertEqual(proposal.decision?.origin, "app_default");
-    assertEqual(proposal.selectedCatalogFamilyId, "te-reduc-central");
+    assertEqual(proposal.selectedCatalogFamilyId, "te-normal-mas-cupla");
     assertEqual(proposal.upstreamSegmentId, "s1");
     assertEqual(proposal.downstreamDiameters.length, 2);
   });
