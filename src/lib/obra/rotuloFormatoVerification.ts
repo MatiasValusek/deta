@@ -20,6 +20,10 @@ const contenido: RotuloContenido = crearRotulo(
     entreCalle2: "Calle Tres",
     localidad: LARGO,
     partido: LARGO,
+    calleContrafrente: "",
+    distanciaEsquina1: "",
+    distanciaEsquina2: "",
+    norteGrados: "",
   },
   { nombre: LARGO, matricula: "00000", categoria: "1" },
 );

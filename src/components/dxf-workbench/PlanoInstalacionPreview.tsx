@@ -11,7 +11,11 @@ import type { NormalizedDrawing } from "@/lib/geometry/types";
 import { diametrosPorTramo } from "@/lib/laminas/isometricaPdf";
 import { crearPlanoInstalacionPdf } from "@/lib/laminas/planoInstalacionPdf";
 import { crearTablasPlano } from "@/lib/laminas/tablasPlano";
-import { avisosDatosFaltantes, crearRotulo } from "@/lib/obra/obraData";
+import {
+  avisosDatosFaltantes,
+  crearDatosCroquis,
+  crearRotulo,
+} from "@/lib/obra/obraData";
 import {
   leerObraSnapshot,
   leerObraSnapshotServidor,
@@ -115,9 +119,11 @@ export function PlanoInstalacionPreview({
     setGenerando(true);
 
     try {
+      // El croquis es opcional en esta lámina: sale solo si sus datos están completos.
+      const croquis = crearDatosCroquis(obra) ?? undefined;
       const bytes = await crearPlanoInstalacionPdf(
         crearRotulo(obra, instalador),
-        {},
+        { conCroquis: Boolean(croquis) },
         tablas,
         {
           capasVisibles: visibleLayers,
@@ -131,6 +137,7 @@ export function PlanoInstalacionPreview({
           numeracion: tablas.numeracion,
           vista: axonometricView,
         },
+        croquis,
       );
       const copia = new Uint8Array(bytes.byteLength);
       copia.set(bytes);

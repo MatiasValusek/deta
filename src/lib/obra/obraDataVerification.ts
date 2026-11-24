@@ -23,6 +23,10 @@ const OBRA_FICTICIA: DatosObra = {
   entreCalle2: "Calle Tres",
   localidad: "Localidad Ejemplo",
   partido: "Partido Ejemplo",
+  calleContrafrente: "Calle Cuatro",
+  distanciaEsquina1: "30,50",
+  distanciaEsquina2: "56",
+  norteGrados: "315",
 };
 const INSTALADOR_FICTICIO: DatosInstalador = {
   nombre: "Instalador de Prueba",

@@ -1,5 +1,5 @@
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
-import type { RotuloContenido } from "@/lib/obra/obraData";
+import type { DatosCroquis, RotuloContenido } from "@/lib/obra/obraData";
 import { MM_POR_PT, ROTULO_LINEA_PT } from "@/lib/obra/rotuloFormato";
 import { dibujarRotuloPdf } from "@/lib/obra/rotuloPdf";
 import {
@@ -9,6 +9,7 @@ import {
   type OpcionesLamina,
   type RecuadroId,
 } from "./planoInstalacionArmado";
+import { dibujarCroquisPdf } from "./croquisPdf";
 import { dibujarGabinetePdf } from "./gabinetePdf";
 import { dibujarIsometricaPdf, type DatosIsometrica } from "./isometricaPdf";
 import { dibujarPlantaPdf, type DatosPlanta } from "./plantaPdf";
@@ -22,13 +23,14 @@ const MARGEN_TITULO_MM = 3;
 const ZONAS_TABLA: RecuadroId[] = ["referencias", "materiales", "calculo"];
 const mmAPt = (mm: number) => mm / MM_POR_PT;
 
-/** Lámina A3: marco, rótulo, gabinete, y planta, isométrica y tablas si las hay. */
+/** Lámina A3: marco, rótulo, gabinete, y planta, isométrica, croquis y tablas si los hay. */
 export async function crearPlanoInstalacionPdf(
   rotulo: RotuloContenido,
   opciones: OpcionesLamina = {},
   tablas?: TablasPlano,
   planta?: DatosPlanta,
   isometrica?: DatosIsometrica,
+  croquis?: DatosCroquis,
 ) {
   const doc = await PDFDocument.create();
   const page = doc.addPage([mmAPt(A3_MM.ancho), mmAPt(A3_MM.alto)]);
@@ -60,6 +62,11 @@ export async function crearPlanoInstalacionPdf(
       if (planta) {
         dibujarPlantaPdf({ datos: planta, fuente: fuenteTabla, page, zona: recuadro });
         continue;
+      }
+    } else if (recuadro.id === "croquis") {
+      rectangulo(recuadro);
+      if (croquis) {
+        dibujarCroquisPdf({ datos: croquis, fuente: fuenteTabla, page, zona: recuadro });
       }
     } else if (recuadro.id === "gabinete") {
       // Como en los planos reales: dibujo suelto con el título abajo, sin recuadro.

@@ -6,6 +6,14 @@ export type DatosObra = {
   entreCalle2: string;
   localidad: string;
   partido: string;
+  /** Croquis de ubicación: la calle de atrás de la manzana. */
+  calleContrafrente: string;
+  /** Metros desde el terreno hasta la esquina con la primera entre calle. */
+  distanciaEsquina1: string;
+  /** Metros desde el terreno hasta la esquina con la segunda entre calle. */
+  distanciaEsquina2: string;
+  /** Hacia dónde queda el norte en el croquis, en grados (0 = arriba, 90 = derecha). */
+  norteGrados: string;
 };
 
 export type CategoriaInstalador = "" | "1" | "2" | "3";
@@ -37,6 +45,10 @@ export const OBRA_VACIA: DatosObra = {
   entreCalle2: "",
   localidad: "",
   partido: "",
+  calleContrafrente: "",
+  distanciaEsquina1: "",
+  distanciaEsquina2: "",
+  norteGrados: "",
 };
 
 export const INSTALADOR_VACIO: DatosInstalador = {
@@ -72,6 +84,10 @@ export function normalizarObra(valor: unknown): DatosObra {
     entreCalle2: comoTexto(datos.entreCalle2),
     localidad: comoTexto(datos.localidad),
     partido: comoTexto(datos.partido),
+    calleContrafrente: comoTexto(datos.calleContrafrente),
+    distanciaEsquina1: comoTexto(datos.distanciaEsquina1),
+    distanciaEsquina2: comoTexto(datos.distanciaEsquina2),
+    norteGrados: comoTexto(datos.norteGrados),
   };
 }
 
@@ -101,6 +117,68 @@ export function avisosDatosFaltantes(
     ...AVISOS_OBRA.filter(([campo]) => obra[campo].trim() === ""),
     ...AVISOS_INSTALADOR.filter(([campo]) => instalador[campo].trim() === ""),
   ].map(([, aviso]) => aviso);
+}
+
+export type DatosCroquis = {
+  frente: string;
+  izquierda: string;
+  derecha: string;
+  atras: string;
+  /** Metros hasta la esquina izquierda (primera entre calle) y derecha (segunda). */
+  distanciaIzquierda: number;
+  distanciaDerecha: number;
+  norteGrados: number;
+};
+
+const AVISOS_CROQUIS: Array<[keyof DatosObra, string]> = [
+  ["calle", "Falta la calle. Escribila en Datos de la obra."],
+  ["entreCalle1", "Falta la primera entre calle. Escribila en Datos de la obra."],
+  ["entreCalle2", "Falta la segunda entre calle. Escribila en Datos de la obra."],
+  ["calleContrafrente", "Falta la calle de atrás para el croquis. Escribila en Datos de la obra."],
+  ["distanciaEsquina1", "Faltan los metros hasta la primera esquina. Escribilos en Datos de la obra."],
+  ["distanciaEsquina2", "Faltan los metros hasta la segunda esquina. Escribilos en Datos de la obra."],
+  ["norteGrados", "Falta indicar dónde queda el norte. Elegilo en Datos de la obra."],
+];
+
+/** Lee un número escrito como "83,05" o "83.05". */
+export function leerMetros(valor: string) {
+  const numero = Number(valor.trim().replace(",", "."));
+  return valor.trim() !== "" && Number.isFinite(numero) && numero >= 0 ? numero : null;
+}
+
+export function avisosCroquis(obra: DatosObra) {
+  const avisos = AVISOS_CROQUIS.filter(([campo]) => obra[campo].trim() === "").map(
+    ([, aviso]) => aviso,
+  );
+
+  for (const campo of ["distanciaEsquina1", "distanciaEsquina2"] as const) {
+    if (obra[campo].trim() !== "" && leerMetros(obra[campo]) === null) {
+      avisos.push("Los metros hasta la esquina tienen que ser un número, por ejemplo 25,40.");
+    }
+  }
+
+  return [...new Set(avisos)];
+}
+
+/** Datos listos para dibujar el croquis, o null si falta algo (ver avisosCroquis). */
+export function crearDatosCroquis(obra: DatosObra): DatosCroquis | null {
+  const distanciaIzquierda = leerMetros(obra.distanciaEsquina1);
+  const distanciaDerecha = leerMetros(obra.distanciaEsquina2);
+  const norteGrados = Number(obra.norteGrados);
+
+  if (avisosCroquis(obra).length > 0 || distanciaIzquierda === null || distanciaDerecha === null) {
+    return null;
+  }
+
+  return {
+    frente: obra.calle.trim(),
+    izquierda: obra.entreCalle1.trim(),
+    derecha: obra.entreCalle2.trim(),
+    atras: obra.calleContrafrente.trim(),
+    distanciaIzquierda,
+    distanciaDerecha,
+    norteGrados: Number.isFinite(norteGrados) ? norteGrados : 0,
+  };
 }
 
 export function crearRotulo(

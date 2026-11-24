@@ -14,6 +14,7 @@ import {
   leerObraSnapshotServidor,
   suscribirObra,
 } from "@/lib/obra/obraStore";
+import { CamposCroquis } from "./CamposCroquis";
 import { Rotulo } from "./Rotulo";
 
 const CAMPOS_OBRA: Array<{
@@ -96,6 +97,8 @@ export function DatosObraBoton() {
                 </Campo>
               ))}
             </fieldset>
+
+            <CamposCroquis obra={obra} />
 
             <fieldset className="grid grid-cols-2 gap-3">
               <legend className="mb-1 text-sm font-semibold">

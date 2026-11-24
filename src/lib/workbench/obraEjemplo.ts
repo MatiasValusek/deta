@@ -29,6 +29,10 @@ export const OBRA_EJEMPLO: DatosObra = {
   entreCalle2: "Calle Dos",
   localidad: "Pueblo Ejemplo",
   partido: "Partido Ejemplo",
+  calleContrafrente: "Calle Tres",
+  distanciaEsquina1: "30,50",
+  distanciaEsquina2: "56,20",
+  norteGrados: "315",
 };
 
 export const INSTALADOR_EJEMPLO: DatosInstalador = {

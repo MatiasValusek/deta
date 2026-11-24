@@ -29,10 +29,12 @@ Lo más valioso. Usa lo que el motor ya calcula.
   - [x] La planta DXF conserva y representa TEXT, MTEXT, cotas con bloque gráfico,
         tipos de línea y espesores heredados por capa o bloque.
   - [ ] Completar cotas sin bloque gráfico, bloques anidados y formato MTEXT avanzado.
-  - [ ] Completar isométrica, gabinete y corte opcional antes de cerrar la lámina.
+  - [x] Isométrica y gabinete 50×40×30.
+  - [ ] Corte opcional.
 - [ ] **Planilla de accesorios por tramo** igual a la hoja "Cal. Artefactos" del Excel.
 - [ ] **Lámina "Factibilidad" A3:** planta + croquis + rótulo.
-- [ ] Croquis de ubicación simple: manzana, calles (4 nombres), distancias a esquina, norte.
+- [x] Croquis de ubicación simple: manzana, calles (4 nombres), distancias a esquina, norte.
+      Datos en *Datos de la obra*; en el Plano de instalación sale solo si están completos.
 - [ ] Tabla Referencias con numeración de artefactos y "boca taponada".
 
 ## Fase 2 — Flujo simple de 5 pasos
@@ -72,7 +74,6 @@ Lo más valioso. Usa lo que el motor ya calcula.
   representar una Planta cargada desde PDF sin rasterizarla ni perder escala.
 - **Duda pendiente:** el estado actual no guarda qué artefactos son bocas taponadas. La tabla
   no puede marcarlas hasta definir ese dato en la Fase 2, sin cambiar el cálculo.
-- Isométrica, gabinete y corte siguen sin implementar, por decisión de alcance de esta tarea.
 
 ### Fidelidad de arquitectura DXF en la lámina A3 (2026-11-21)
 - La pérdida estaba repartida entre dos puntos: el importador descartaba TEXT, MTEXT y
