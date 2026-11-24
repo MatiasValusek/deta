@@ -91,6 +91,7 @@ import type { NormalizedDrawing } from "@/lib/geometry/types";
 import type {
   SigasAccessoryExactSelectionDecision,
 } from "@/lib/calculation/pipeSystems/sigas/sigasAccessoryExactSelection";
+import { FactibilidadPreview } from "./FactibilidadPreview";
 import { PlanillaTramosPreview } from "./PlanillaTramosPreview";
 import { PlanoInstalacionPreview } from "./PlanoInstalacionPreview";
 
@@ -501,6 +502,11 @@ export function CalculationPanel({
 
       {isDeliverMode ? (
         <>
+          <FactibilidadPreview
+            drawing={planDrawing}
+            equipment={equipment}
+            visibleLayers={planVisibleLayers}
+          />
           <PlanoInstalacionPreview
             axonometricView={axonometricView}
             calculationSheet={calculationSheet}
