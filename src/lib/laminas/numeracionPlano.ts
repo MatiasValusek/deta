@@ -1,3 +1,4 @@
+import type { TechnicalCalculationResult } from "@/lib/calculation/technicalTree";
 import type { ManualRouteNetwork } from "@/lib/routing/types";
 
 export type TramoNumerable = {
@@ -101,4 +102,20 @@ function distanciasDesdeMedidor(
 function letra(indice: number): string {
   const actual = String.fromCharCode(65 + (indice % 26));
   return indice < 26 ? actual : `${letra(Math.floor(indice / 26) - 1)}${actual}`;
+}
+
+/** Numeración de la lámina a partir del resultado del cálculo (la misma en todas las hojas). */
+export function numerarDesdeResultado(
+  network: ManualRouteNetwork,
+  result: TechnicalCalculationResult | null,
+): NumeracionPlano {
+  return numerarPlano(
+    network,
+    (result?.segments ?? []).map((tramo) => ({
+      segmentId: tramo.segmentId,
+      fromNodeId: tramo.fromNodeId,
+      toNodeId: tramo.toNodeId,
+      physicalLengthMeters: tramo.segmentPhysicalLengthMeters,
+    })),
+  );
 }

@@ -31,7 +31,8 @@ Lo más valioso. Usa lo que el motor ya calcula.
   - [ ] Completar cotas sin bloque gráfico, bloques anidados y formato MTEXT avanzado.
   - [x] Isométrica y gabinete 50×40×30.
   - [ ] Corte opcional.
-- [ ] **Planilla de accesorios por tramo** igual a la hoja "Cal. Artefactos" del Excel.
+- [x] **Planilla de accesorios por tramo** igual a la hoja "Cal. Artefactos" del Excel.
+      Vista desde Entregar (A4, 3 tramos por hoja). Lee los accesorios que ya sumó el cálculo.
 - [ ] **Lámina "Factibilidad" A3:** planta + croquis + rótulo.
 - [x] Croquis de ubicación simple: manzana, calles (4 nombres), distancias a esquina, norte.
       Datos en *Datos de la obra*; en el Plano de instalación va apagado y se prende en Entregar.

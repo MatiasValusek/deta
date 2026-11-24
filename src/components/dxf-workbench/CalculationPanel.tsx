@@ -91,6 +91,7 @@ import type { NormalizedDrawing } from "@/lib/geometry/types";
 import type {
   SigasAccessoryExactSelectionDecision,
 } from "@/lib/calculation/pipeSystems/sigas/sigasAccessoryExactSelection";
+import { PlanillaTramosPreview } from "./PlanillaTramosPreview";
 import { PlanoInstalacionPreview } from "./PlanoInstalacionPreview";
 
 type CalculationPanelMode = "calculate" | "deliver";
@@ -499,18 +500,27 @@ export function CalculationPanel({
       ) : null}
 
       {isDeliverMode ? (
-        <PlanoInstalacionPreview
-          axonometricView={axonometricView}
-          calculationSheet={calculationSheet}
-          drawing={planDrawing}
-          equipment={equipment}
-          materialTakeoff={materialTakeoff}
-          network={routeNetwork}
-          projectGas={DEFAULT_PROJECT_GAS_CONFIG}
-          result={result}
-          revisionLista={canExportDocuments}
-          visibleLayers={planVisibleLayers}
-        />
+        <>
+          <PlanoInstalacionPreview
+            axonometricView={axonometricView}
+            calculationSheet={calculationSheet}
+            drawing={planDrawing}
+            equipment={equipment}
+            materialTakeoff={materialTakeoff}
+            network={routeNetwork}
+            projectGas={DEFAULT_PROJECT_GAS_CONFIG}
+            result={result}
+            revisionLista={canExportDocuments}
+            visibleLayers={planVisibleLayers}
+          />
+          <PlanillaTramosPreview
+            calculationSheet={calculationSheet}
+            network={routeNetwork}
+            result={result}
+            revisionLista={canExportDocuments}
+            routeTransitionResolutions={routeTransitionResolutions}
+          />
+        </>
       ) : null}
 
       {result ? (

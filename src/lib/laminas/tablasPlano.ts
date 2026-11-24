@@ -7,7 +7,7 @@ import type { TechnicalCalculationResult } from "@/lib/calculation/technicalTree
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
 import { equipmentTypeLabel } from "@/lib/equipment/types";
 import type { ManualRouteNetwork } from "@/lib/routing/types";
-import { numerarPlano, type NumeracionPlano } from "./numeracionPlano";
+import { numerarDesdeResultado, type NumeracionPlano } from "./numeracionPlano";
 
 export type ColumnaTabla = {
   titulo: string;
@@ -48,15 +48,7 @@ export function crearTablasPlano(params: {
   result: TechnicalCalculationResult | null;
 }): TablasPlano {
   const avisos: string[] = [];
-  const numeracion = numerarPlano(
-    params.network,
-    (params.result?.segments ?? []).map((tramo) => ({
-      segmentId: tramo.segmentId,
-      fromNodeId: tramo.fromNodeId,
-      toNodeId: tramo.toNodeId,
-      physicalLengthMeters: tramo.segmentPhysicalLengthMeters,
-    })),
-  );
+  const numeracion = numerarDesdeResultado(params.network, params.result);
 
   return {
     referencias: crearReferencias(params, numeracion, avisos),
