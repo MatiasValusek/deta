@@ -1,5 +1,6 @@
 "use client";
 
+import { resolucionesFinales } from "@/lib/calculation/resolucionesFinales";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { buildArchitecturalRouteContext } from "@/lib/architecture/routeContext";
 import { createConfirmedCalibration, createPointPair } from "@/lib/calibration/calibration";
@@ -1315,12 +1316,10 @@ export function DxfWorkbench() {
       return {};
     }
 
-    if (
-      technicalCalculationResult.transitionAwareNetworkSizing?.status ===
-      "resolved"
-    ) {
-      return technicalCalculationResult.transitionAwareNetworkSizing
-        .routeTransitionResolutions;
+    const finales = resolucionesFinales(technicalCalculationResult);
+
+    if (finales) {
+      return finales.reducciones;
     }
 
     const routeAccessoryResolutions =

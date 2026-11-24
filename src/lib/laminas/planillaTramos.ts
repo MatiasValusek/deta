@@ -1,3 +1,4 @@
+import { resolucionesFinales } from "@/lib/calculation/resolucionesFinales";
 import type { PipeDiameterReference } from "@/lib/calculation/pipeSystem";
 import type { TechnicalCalculationSheet } from "@/lib/calculation/technicalCalculationSheet";
 import type { TechnicalRouteTransitionResolution } from "@/lib/calculation/technicalRouteTransitions";
@@ -93,17 +94,16 @@ export function crearPlanillaTramos(params: {
   routeTransitionResolutions?: Record<string, TechnicalRouteTransitionResolution>;
 }): PlanillaTramos {
   const segmentos = new Map(params.result?.segments.map((s) => [s.segmentId, s]) ?? []);
-  // Los accesorios que usó el cálculo final (con las medidas adoptadas y sin tes repetidas).
-  const accesoriosPorRuta =
-    params.result?.transitionAwareNetworkSizing?.routeAccessoryResolutions ??
-    params.result?.routeAccessoryResolutions ??
-    {};
+  // Lo que usó el cálculo final: medidas adoptadas (agrandadas o por tabla), sin tes repetidas.
+  const finales = resolucionesFinales(params.result);
+  const accesoriosPorRuta = finales?.accesorios ?? params.result?.routeAccessoryResolutions ?? {};
+  const reduccionesPorRuta = finales?.reducciones ?? params.routeTransitionResolutions ?? {};
   const avisos: string[] = [];
   const tramos = params.calculationSheet.rows.map((fila): TramoPlanilla => {
     const nombre = params.numeracion.tramos.get(fila.segmentId) ?? fila.tramo;
     const ruta = segmentos.get(fila.segmentId)?.governingRoute?.routeId;
     const accesorios = ruta ? accesoriosPorRuta[ruta]?.contributions ?? [] : [];
-    const transiciones = ruta ? params.routeTransitionResolutions?.[ruta]?.contributions ?? [] : [];
+    const transiciones = ruta ? reduccionesPorRuta[ruta]?.contributions ?? [] : [];
     const items: ItemPlanilla[] = [
       ...accesorios.map((a) => ({
         ...clasificarAccesorio(a.catalogCode ?? a.catalogFamilyId ?? ""),
