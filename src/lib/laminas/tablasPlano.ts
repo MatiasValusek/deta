@@ -73,7 +73,7 @@ function materialDePieza(item: { accessoryKind: TechnicalMaterialAccessoryKind; 
   return MATERIAL_POR_PIEZA[item.accessoryKind] ?? "OTROS ACCESORIOS";
 }
 
-/** Bocas taponadas: las marcadas, o las que dicen "boca taponada" en sus notas. */
+/** Bocas taponadas: las marcadas en Artefactos, o las que dicen "boca taponada" en sus notas. */
 export function bocasTaponadasDe(
   equipment: WorkbenchEquipment[],
   marcadas?: ReadonlySet<string>,
@@ -82,7 +82,7 @@ export function bocasTaponadasDe(
     marcadas ??
     new Set(
       equipment
-        .filter((item) => /boca\s+taponada/i.test(item.notes ?? ""))
+        .filter((item) => item.bocaTaponada === true || /boca\s+taponada/i.test(item.notes ?? ""))
         .map((item) => item.id),
     )
   );

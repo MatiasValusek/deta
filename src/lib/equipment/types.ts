@@ -77,6 +77,8 @@ export type WorkbenchEquipment = {
   demandValue?: number;
   demandUnit?: DemandUnit;
   notes?: string;
+  /** Boca taponada: suma consumo, lleva tapón y sale así en Referencias. */
+  bocaTaponada?: boolean;
   source: "manual";
 };
 

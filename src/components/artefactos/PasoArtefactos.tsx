@@ -100,7 +100,12 @@ export function PasoArtefactos(props: {
                   onClick={() => props.onSeleccionar(item.id)}
                 >
                   <Numero texto={props.numeros.get(item.id) ?? "?"} />
-                  <span className="min-w-0 flex-1 truncate">{item.role === "supply" ? "Medidor" : item.name}</span>
+                  <span className="min-w-0 flex-1 truncate">
+                    {item.role === "supply" ? "Medidor" : item.name}
+                    {item.bocaTaponada ? (
+                      <span className="ml-1 text-xs text-[var(--muted)]">· boca taponada</span>
+                    ) : null}
+                  </span>
                   {item.role === "appliance" ? (
                     <span className={`shrink-0 text-xs ${item.demandValue === undefined ? "text-[#7a4b00]" : "text-[var(--muted)]"}`}>
                       {item.demandValue === undefined ? "Falta el consumo" : formatEquipmentDemand(item)}

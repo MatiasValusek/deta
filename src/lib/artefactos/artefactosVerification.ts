@@ -111,6 +111,22 @@ export function runArtefactosVerifications() {
     }
   });
 
+  verify("boca taponada marcada: sale en Referencias, lleva tapón y el consumo se suma igual", () => {
+    const casa = OBRAS_DE_PRUEBA.find((obra) => obra.nombre === "casa desde cero");
+    if (!casa) throw new Error("Falta la casa desde cero");
+    const antes = calcularObraDePrueba(casa);
+    const marcada = calcularObraDePrueba({
+      ...casa,
+      equipment: casa.equipment.map((item) => (item.id === "ca-cocina" ? { ...item, bocaTaponada: true } : item)),
+    });
+    const fila = marcada.tablas.referencias.filas.findIndex((celdas) => celdas[1] === "COCINA");
+    assertEqual(marcada.tablas.referencias.notasDerecha?.notas[fila], "BOCA TAPONADA");
+    assertEqual(marcada.tablas.materiales.filas.filter((celdas) => celdas[0] === "TAPÓN").length, 1);
+    assertEqual(JSON.stringify(marcada.tablas.calculo.filas), JSON.stringify(antes.tablas.calculo.filas));
+    const total = (t: typeof antes) => t.tablas.referencias.filas.at(-1)?.join("|");
+    assertEqual(total(marcada), total(antes));
+  });
+
   return results;
 }
 

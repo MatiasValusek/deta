@@ -45,6 +45,24 @@ export function TarjetaArtefacto(props: {
         />
       )}
 
+      {esMedidor ? null : (
+        <label className="mt-3 flex items-start gap-2 text-sm">
+          <input
+            checked={artefacto.bocaTaponada === true}
+            className="mt-0.5"
+            name="boca-taponada"
+            type="checkbox"
+            onChange={(evento) => props.onCambiar({ bocaTaponada: evento.target.checked })}
+          />
+          <span>
+            Boca taponada
+            <span className="block text-xs text-[var(--muted)]">
+              Queda la boca con tapón para conectar después. Suma su consumo y sale en Referencias.
+            </span>
+          </span>
+        </label>
+      )}
+
       {props.moviendo ? (
         <p className="mt-3 rounded bg-[#eef6f5] px-2 py-1.5 text-xs">Tocá en el plano el lugar nuevo.</p>
       ) : (
