@@ -18,10 +18,18 @@ import {
   type HojaId,
   type PasoId,
 } from "@/lib/revisar/avisosRevisar";
-import { crearHoja, nombreArchivo, prepararHojas, resumenObra, type DatosHojas } from "@/lib/revisar/hojas";
+import {
+  crearHoja,
+  nombreArchivo,
+  nombreArchivoExcel,
+  prepararHojas,
+  resumenObra,
+  type DatosHojas,
+} from "@/lib/revisar/hojas";
 import type { AccessoryProposal } from "@/lib/routing/routeAccessoryProposals";
 import type { ManualRouteNetwork } from "@/lib/routing/types";
 import { armarResultadosObra } from "@/lib/workbench/calculoObra";
+import { ExportarExcel } from "./ExportarExcel";
 import { MiniaturaHoja } from "./MiniaturaHoja";
 
 const HOJAS: HojaId[] = ["factibilidad", "plano", "planilla"];
@@ -244,6 +252,12 @@ export function RevisarYDescargar(props: {
             />
             Agregar el croquis de ubicación al Plano de instalación (achica las tablas)
           </label>
+
+          <ExportarExcel
+            calculationSheet={resultados.calculationSheet}
+            materialTakeoff={resultados.materialTakeoff}
+            nombreArchivo={nombreArchivoExcel(obra)}
+          />
 
           <div className="mt-6">
             <AgrandarDiametroPanel

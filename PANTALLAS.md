@@ -133,6 +133,7 @@ Las bajadas a cada artefacto las pone la app: 0 clics. Si una bajada tiene que e
 - **"Agrandar para ampliación futura"** visible en esta pantalla, no en Modo experto: en la tabla de tramos,
   cada tramo tiene su medida y se puede agrandar (ver abajo);
 - un botón grande: **Descargar las 3 hojas**.
+- debajo de las hojas, chico: "Exportar materiales (Excel)" (cálculo y materiales en una planilla).
 
 Los avisos no son decisiones técnicas: hablan de datos que faltan para una hoja ("Falta la calle de atrás
 para el croquis") o de algo del dibujo ("El caño a la caldera cruza otro caño"). Ninguno pide elegir piezas.
@@ -180,7 +181,6 @@ muestra una sección más, al final y plegada:
 | Cambiar una pieza: te de reducción en vez de te normal + cupla, codo con rosca hembra, sacar o agregar una pieza | Revisar accesorios / Calcular |
 | Tabla de cálculo completa (con todas las columnas) | Calcular |
 | Isométrica de pantalla ("Axo") | Recorrido / Calcular |
-| Exportar Excel | Entregar |
 
 **Se borra de las pantallas** (no va ni a Modo experto):
 - "Exportar PDF" viejo (no es presentable, muestra códigos internos);

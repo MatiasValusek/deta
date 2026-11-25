@@ -106,9 +106,18 @@ export function nombreArchivo(hoja: HojaId, obra: DatosObra) {
     planilla: "Planilla de cálculo",
     plano: "Plano de instalación",
   };
+  return `${nombres[hoja]}${sufijoDireccion(obra)}.pdf`;
+}
+
+/** "Materiales - Calle 123.xlsx": cálculo y materiales en Excel. */
+export function nombreArchivoExcel(obra: DatosObra) {
+  return `Materiales${sufijoDireccion(obra)}.xlsx`;
+}
+
+function sufijoDireccion(obra: DatosObra) {
   const direccion = [obra.calle.trim(), obra.numero.trim()].filter(Boolean).join(" ");
   const limpio = direccion.replace(/[\\/:*?"<>|]+/g, "").trim();
-  return `${nombres[hoja]}${limpio ? ` - ${limpio}` : ""}.pdf`;
+  return limpio ? ` - ${limpio}` : "";
 }
 
 /** "4 artefactos · 3,76 m³/h · 8 tramos · caño de 20 a 32". */
