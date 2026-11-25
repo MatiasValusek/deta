@@ -229,12 +229,12 @@ export function runTechnicalMaterialTakeoffVerifications() {
     assertEqual(takeoff.pendingSummary.transitionCount, 1);
   });
 
-  verify(results, "Caso 10 - accesorio sin confirmar queda pendiente", () => {
+  verify(results, "Caso 10 - nodo sin resolver queda pendiente", () => {
     const takeoff = createTakeoff({
       accessoryProposals: [
         accessoryProposal({
           id: "proposal-1",
-          kind: "elbow",
+          kind: "unsupported",
           state: "needs_review",
         }),
       ],
@@ -244,6 +244,19 @@ export function runTechnicalMaterialTakeoffVerifications() {
 
     assertEqual(takeoff.accessoryItems.length, 0);
     assertEqual(takeoff.pendingSummary.accessoryCount, 1);
+  });
+
+  verify(results, "Caso 10b - codo o te sin confirmar no deja pendiente (lo pone la app)", () => {
+    const takeoff = createTakeoff({
+      accessoryProposals: [
+        accessoryProposal({ id: "proposal-1", kind: "elbow", state: "needs_review" }),
+        accessoryProposal({ id: "proposal-2", kind: "tee", state: "proposed" }),
+      ],
+      diameters: { s1: D20 },
+      lengths: { s1: 10 },
+    });
+
+    assertEqual(takeoff.pendingSummary.accessoryCount, 0);
   });
 
   verify(results, "Caso 11 - diametro efectivo no validado queda pendiente", () => {

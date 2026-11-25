@@ -217,6 +217,14 @@ export function agregarTesYCodos(params: {
   };
 }
 
+/**
+ * Tes y codos propuestos en un nodo: los pone la app sola (agregarTesYCodos), así que no se
+ * piden confirmar ni rechazar y no dejan los materiales "incompletos". Si el gasista igual
+ * confirma uno, cuenta el suyo y la app no agrega otro.
+ */
+export const laAppPoneLaPieza = (propuesta: { kind: string }) =>
+  propuesta.kind === "tee" || propuesta.kind === "elbow";
+
 /** Nodo de una te o un codo de la app, leído del id de la pieza (también ids compuestos). */
 export function nodoDePieza(pieza: { id: string; sourceIds?: string[] }): string | null {
   for (const id of [pieza.id, ...(pieza.sourceIds ?? [])]) {

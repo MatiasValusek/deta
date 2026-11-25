@@ -12,6 +12,7 @@ import type {
   DiameterTransitionProposal,
 } from "@/lib/calculation/diameterTransitionProposals";
 import type { AccessoryProposal } from "@/lib/routing/routeAccessoryProposals";
+import { laAppPoneLaPieza } from "@/lib/calculation/tesYCodos";
 import type {
   RouteAccessoryType,
 } from "@/lib/routing/types";
@@ -522,7 +523,11 @@ function addPendingAccessoryProposals(
       continue;
     }
 
-    if (proposal.kind === "straight" || proposal.kind === "terminal") {
+    if (
+      proposal.kind === "straight" ||
+      proposal.kind === "terminal" ||
+      laAppPoneLaPieza(proposal)
+    ) {
       continue;
     }
 

@@ -183,7 +183,7 @@ export function runCoordinatedInstallationDraftVerifications() {
 
   verify(
     results,
-    "02E-B resuelve codo y tres tees sobre el borrador 4/8/3",
+    "02E-B acepta sin confirmar y resuelve codo y tres tees sobre el borrador 4/8/3",
     () => {
       const snapshot = accessoryBlockedSnapshot();
       const original = JSON.stringify(snapshot);
@@ -210,14 +210,15 @@ export function runCoordinatedInstallationDraftVerifications() {
         0,
       );
       assertEqual(routeAccessoryCount(draft.proposalDraftNetwork), 0);
-      const blockedAcceptance = acceptCoordinatedInstallationDraft({
+      // Las tes y el codo los pone la app: se acepta sin confirmarlos.
+      const acceptanceWithoutConfirming = acceptCoordinatedInstallationDraft({
         draft,
         snapshot,
       });
-      assertEqual(blockedAcceptance.ok, false);
-      if (!blockedAcceptance.ok) {
-        assertEqual(blockedAcceptance.code, "proposal_incomplete");
-      }
+      assert(
+        acceptanceWithoutConfirming.ok,
+        acceptanceWithoutConfirming.ok ? "" : acceptanceWithoutConfirming.message,
+      );
 
       const groupedTeeReview = initialReview.reviews.find(
         (review) =>
@@ -258,7 +259,8 @@ export function runCoordinatedInstallationDraftVerifications() {
         ).length,
         1,
       );
-      assertEqual(draft.evaluation.status, "incomplete");
+      // El codo sin confirmar no deja la propuesta incompleta: lo pone la app.
+      assertEqual(draft.evaluation.status, "complete");
       const elbow = elbowReviewState.proposals.find(
         (item) => item.kind === "elbow" && item.state !== "confirmed",
       );

@@ -3,14 +3,15 @@ import { SIGAS_PIPE_SYSTEM } from "@/lib/calculation/pipeSystems/sigas";
 import { DEFAULT_PROJECT_GAS_CONFIG } from "@/lib/calculation/projectGas";
 import { createTechnicalCalculationSheet } from "@/lib/calculation/technicalCalculationSheet";
 import { calculateTechnicalTree } from "@/lib/calculation/technicalTree";
-import { agregarTesYCodos, codoDeQuiebreId } from "@/lib/calculation/tesYCodos";
+import { agregarTesYCodos, codoDeQuiebreId, laAppPoneLaPieza } from "@/lib/calculation/tesYCodos";
+import { detectRouteAccessoryProposals } from "@/lib/routing/routeAccessoryProposals";
 import { diametrosPorTramo, dibujarIsometricaPdf } from "@/lib/laminas/isometricaPdf";
 import { armarPlanoInstalacion } from "@/lib/laminas/planoInstalacionArmado";
 import { dibujarPlantaPdf } from "@/lib/laminas/plantaPdf";
 import { MM_POR_PT } from "@/lib/obra/rotuloFormato";
 import type { ManualRouteNetwork } from "@/lib/routing/types";
 import { armarResultadosObra, LARGO_MINIMO_TRAMO } from "./calculoObra";
-import { ARTEFACTOS_CASA, CANERIA_CASA } from "./obraCasaDesdeCero";
+import { ARTEFACTOS_CASA, CANERIA_CASA, ESCALA_CASA_M_POR_UNIDAD } from "./obraCasaDesdeCero";
 import { calcularObraDePrueba, OBRAS_DE_PRUEBA } from "./obrasDePrueba";
 
 type Resultado = { name: string; status: "passed" };
@@ -229,6 +230,27 @@ export async function runTesYCodosVerifications() {
   );
   check("con codos cargados a mano en el tramo, la app no agrega otro en esa esquina", () =>
     piezasDe("elbow").length === 1 || `${piezasDe("elbow").length} codos`,
+  );
+
+  // La pantalla no pide confirmar las tes y codos que propone: los pone la app.
+  const propuestas = detectRouteAccessoryProposals({
+    equipment: ARTEFACTOS_CASA,
+    network: CANERIA_CASA,
+    scaleMetersPerSourceUnit: ESCALA_CASA_M_POR_UNIDAD,
+  });
+  const porConfirmar = propuestas.filter((propuesta) => propuesta.state === "proposed" || propuesta.state === "needs_review");
+  check("en la casa hay tes y codos propuestos sin confirmar", () =>
+    (porConfirmar.some((propuesta) => propuesta.kind === "tee") &&
+      porConfirmar.some((propuesta) => propuesta.kind === "elbow")) ||
+    porConfirmar.map((propuesta) => propuesta.kind).join(", "),
+  );
+  check("las tes y codos propuestos los pone la app (no se piden confirmar)", () =>
+    porConfirmar.filter((propuesta) => propuesta.kind === "tee" || propuesta.kind === "elbow").every(laAppPoneLaPieza),
+  );
+  const conPropuestas = armarResultadosObra({ ...casa, accessoryProposals: propuestas, result: calculoCasa.result });
+  check("con las propuestas sin confirmar, los materiales no quedan incompletos", () =>
+    conPropuestas.materialTakeoff.pendingItems.length === 0 ||
+    conPropuestas.materialTakeoff.pendingItems.map((item) => item.label).join("; "),
   );
 
   return results;

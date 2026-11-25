@@ -51,6 +51,7 @@ import type {
 import {
   type TechnicalMaterialTakeoff,
 } from "@/lib/calculation/technicalMaterialTakeoff";
+import { laAppPoneLaPieza } from "@/lib/calculation/tesYCodos";
 import {
   technicalPhysicalAccessoryKindLabel,
   type TechnicalPhysicalAccessory,
@@ -1787,7 +1788,8 @@ function isActionableAccessoryProposal(proposal: AccessoryProposal) {
     proposal.state !== "confirmed" &&
     proposal.state !== "rejected" &&
     proposal.kind !== "straight" &&
-    proposal.kind !== "terminal"
+    proposal.kind !== "terminal" &&
+    !laAppPoneLaPieza(proposal)
   );
 }
 
