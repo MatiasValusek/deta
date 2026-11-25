@@ -66,7 +66,7 @@ export function siguientePaso(
     return {
       habilitado: estado.planoListo,
       hacia: "equipment",
-      motivo: "Falta el plano o la escala. Subí el archivo y marcá una medida que conozcas.",
+      motivo: "Falta el plano o la escala. Subí el archivo; si no trae la escala, marcá una medida que conozcas.",
     };
   }
   if (etapa === "equipment") {

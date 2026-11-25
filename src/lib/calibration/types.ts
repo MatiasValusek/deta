@@ -15,6 +15,8 @@ export type ConfirmedCalibration = {
   distanceMillimeters: number;
   sourceDistance: number;
   millimetersPerSourceUnit: number;
+  /** "archivo": la escala salió de las unidades del DXF, no de dos puntos marcados. */
+  origen?: "archivo";
 };
 
 export type PendingCalibration = {

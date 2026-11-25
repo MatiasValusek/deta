@@ -324,7 +324,15 @@ import { PdfViewer } from "./PdfViewer";
 import { RouteContextCard } from "./RouteContextCard";
 import { RouteIntentContextCard } from "./RouteIntentContextCard";
 import { RoutePanel } from "./RoutePanel";
-import { ObraEjemploBoton } from "./ObraEjemploBoton";
+import { EscalaDelPlano } from "@/components/plano/EscalaDelPlano";
+import { estadoDeEscalaInicial } from "@/components/plano/escalaInicial";
+import { SubirPlano } from "@/components/plano/SubirPlano";
+import {
+  AVISO_PDF_NO_GUARDADO,
+  borrarPdfsGuardados,
+  guardarPdfDelPlano,
+  reabrirPdfsGuardados,
+} from "@/lib/plano/pdfGuardado";
 import { ReviewPanel, type ReviewTechnicalViewItem } from "./ReviewPanel";
 import {
   RightPanelSections,
@@ -570,11 +578,19 @@ export function DxfWorkbench() {
           tone: "warning",
         });
       } else if (restoredProject.hasPdfPlaceholders) {
-        setPersistenceNotice({
-          message:
-            "Los PDF locales quedan como referencia y deben volver a cargarse para ver la pagina original.",
-          tone: "warning",
-        });
+        // El PDF del plano se guarda aparte (IndexedDB): se reabre solo.
+        const ids = restoredProject.bases.filter((base) => base.sourceType === "pdf").map((base) => base.id);
+        void reabrirPdfsGuardados(ids).then((abiertos) =>
+          setBases((current) =>
+            current.map((base) => {
+              if (!abiertos.has(base.id)) return base;
+              const pdf = abiertos.get(base.id);
+              return pdf
+                ? { ...base, error: null, pdfDocument: pdf, pdfModel: pdf.model }
+                : { ...base, error: AVISO_PDF_NO_GUARDADO };
+            }),
+          ),
+        );
       }
     } else if (result.status === "invalid") {
       clearPersistedWorkbenchProject();
@@ -2608,6 +2624,7 @@ export function DxfWorkbench() {
 
     const result = clearPersistedWorkbenchProject();
     borrarObra();
+    void borrarPdfsGuardados();
 
     setBases([]);
     setActiveBaseId(null);
@@ -7373,6 +7390,45 @@ export function DxfWorkbench() {
     }).includes(section.id),
   );
 
+  // Paneles del Plano de antes (cortes, quitar el plano): en el paso Plano van plegados.
+  const opcionesDelPlano = (
+    <>
+      <PlanStagePanel
+        isImporting={isImporting}
+        planBase={planBase}
+        readiness={planStageReadiness}
+        sectionBases={orderedBases.filter((base) => base.type === "section")}
+        sectionPlanLinks={sectionPlanLinks}
+        onAddPlan={() => planInputRef.current?.click()}
+        onAddSection={() => sectionInputRef.current?.click()}
+        onContinue={handlePlanStageContinue}
+        onOpenScale={handleOpenPlanStageScale}
+        onSectionAction={handlePlanStageSectionAction}
+      />
+      {activeBase ? (
+        <PlanContextPanel
+          activeBase={activeBase}
+          activeRegistrationSummary={activeRegistrationSummary}
+          activeSectionLink={activeSectionLink}
+          hasSectionLinkDraft={Boolean(sectionLinkDraft)}
+          hasSectionRegistrationDraft={Boolean(sectionRegistrationDraft)}
+          isImporting={isImporting}
+          planReady={Boolean(planBase)}
+          onFitActiveView={handleFitActiveView}
+          onOpenScale={handleOpenPlanStageScale}
+          onRemoveActiveBase={handleRemoveActiveBase}
+          onRemoveSectionRegistration={handleRemoveSectionRegistration}
+          onReplaceActiveBase={() => replaceInputRef.current?.click()}
+          onStartSectionLink={handleStartSectionLink}
+          onStartSectionRegistration={handleStartSectionRegistration}
+          onUnlinkSection={handleUnlinkSection}
+          onViewSectionLinkInPlan={handleViewSectionLinkInPlan}
+          onViewSectionRegistration={handleViewSectionRegistration}
+        />
+      ) : null}
+    </>
+  );
+
   return (
     <main className="flex h-screen overflow-hidden flex-col bg-[var(--background)] text-[var(--foreground)]">
       <header className="shrink-0 border-b border-[var(--line)] bg-white px-5 py-3">
@@ -7548,9 +7604,9 @@ export function DxfWorkbench() {
           ) : null}
           <div className="relative min-h-0 flex-1">
           {!hasAnyBase ? (
-            <EmptyPlanStart
-              isImporting={isImporting}
-              onAddPlan={() => planInputRef.current?.click()}
+            <SubirPlano
+              importando={isImporting}
+              onSubir={() => planInputRef.current?.click()}
             />
           ) : (
           <>
@@ -7940,44 +7996,27 @@ export function DxfWorkbench() {
 
         {hasAnyBase ? (
         <aside className="flex min-h-0 flex-col overflow-hidden border-l border-[var(--line)] bg-white">
-          {activeWorkflowStage === "plan" && activeRightPanelSection !== "scale" ? (
+          {activeWorkflowStage === "plan" && activeBase?.type === "plan" ? (
           <div className="min-h-0 flex-1 overflow-auto">
-            <PlanStagePanel
-              isImporting={isImporting}
-              planBase={planBase}
-              readiness={planStageReadiness}
-              sectionBases={orderedBases.filter((base) => base.type === "section")}
-              sectionPlanLinks={sectionPlanLinks}
-              onAddPlan={() => planInputRef.current?.click()}
-              onAddSection={() => sectionInputRef.current?.click()}
-              onContinue={handlePlanStageContinue}
-              onOpenScale={handleOpenPlanStageScale}
-              onSectionAction={handlePlanStageSectionAction}
+            <EscalaDelPlano
+              drawing={activeBase.drawing}
+              masOpciones={opcionesDelPlano}
+              nombreArchivo={activeBase.originalFileName}
+              paginaPdf={activeBase.pdfModel?.pages[activePdfPageNumber - 1] ?? null}
+              state={activeCalibration}
+              onCambiarPlano={() => planInputRef.current?.click()}
+              onCancelar={handleCancelCalibrationTool}
+              onConfirmar={handleConfirmCalibration}
+              onCorregir={() => handleCalibrationMode("calibrate")}
+              onDistancia={handleDistanceChange}
             />
-            {activeBase ? (
-              <PlanContextPanel
-                activeBase={activeBase}
-                activeRegistrationSummary={activeRegistrationSummary}
-                activeSectionLink={activeSectionLink}
-                hasSectionLinkDraft={Boolean(sectionLinkDraft)}
-                hasSectionRegistrationDraft={Boolean(sectionRegistrationDraft)}
-                isImporting={isImporting}
-                planReady={Boolean(planBase)}
-                onFitActiveView={handleFitActiveView}
-                onOpenScale={handleOpenPlanStageScale}
-                onRemoveActiveBase={handleRemoveActiveBase}
-                onRemoveSectionRegistration={handleRemoveSectionRegistration}
-                onReplaceActiveBase={() => replaceInputRef.current?.click()}
-                onStartSectionLink={handleStartSectionLink}
-                onStartSectionRegistration={handleStartSectionRegistration}
-                onUnlinkSection={handleUnlinkSection}
-                onViewSectionLinkInPlan={handleViewSectionLinkInPlan}
-                onViewSectionRegistration={handleViewSectionRegistration}
-              />
-            ) : null}
+          </div>
+          ) : activeWorkflowStage === "plan" && activeRightPanelSection !== "scale" ? (
+          <div className="min-h-0 flex-1 overflow-auto">
+            {opcionesDelPlano}
           </div>
           ) : null}
-          {activeWorkflowStage === "plan" && activeRightPanelSection === "scale" ? (
+          {activeWorkflowStage === "plan" && activeBase?.type === "plan" ? null : activeWorkflowStage === "plan" && activeRightPanelSection === "scale" ? (
           <div className="min-h-0 flex-1 overflow-auto">
             {rightPanelSections.find((section) => section.id === "scale")?.content}
           </div>
@@ -7994,34 +8033,6 @@ export function DxfWorkbench() {
         ) : null}
       </section>
     </main>
-  );
-}
-
-function EmptyPlanStart({
-  isImporting,
-  onAddPlan,
-}: {
-  isImporting: boolean;
-  onAddPlan: () => void;
-}) {
-  return (
-    <div className="flex h-full min-h-[360px] items-center justify-center bg-[#eef0ec] px-6 py-10">
-      <div className="w-full max-w-sm text-center">
-        <h2 className="text-2xl font-semibold tracking-normal">
-          Comenzá cargando la Planta
-        </h2>
-        <p className="mt-2 text-sm text-[var(--muted)]">DXF o PDF</p>
-        <button
-          className="mt-6 w-full rounded border border-[var(--accent)] bg-[var(--accent)] px-4 py-3 text-sm font-semibold text-white hover:bg-[var(--accent-strong)] disabled:cursor-not-allowed disabled:border-[var(--line)] disabled:bg-white disabled:text-[var(--muted)]"
-          disabled={isImporting}
-          type="button"
-          onClick={onAddPlan}
-        >
-          Cargar Planta
-        </button>
-        <ObraEjemploBoton disabled={isImporting} />
-      </div>
-    </div>
   );
 }
 
@@ -8530,6 +8541,7 @@ async function createBaseFromFile(params: {
   }
 
   const pdfDocument = await importPdfDocument(params.file);
+  await guardarPdfDelPlano(params.id, params.file);
 
   return createInitialBase({
     ...params,
@@ -8584,7 +8596,7 @@ function createInitialBase(params: {
     routeAccessoryProposalDecisions: [],
     routeNetwork: createEmptyRouteNetwork(),
     showRoute: true,
-    calibration: createInitialCalibrationState(),
+    calibration: estadoDeEscalaInicial(params.drawing),
     visual: {
       activePdfPageNumber: 1,
       dxfFitNonce: params.sourceType === "dxf" ? 1 : 0,
@@ -8705,10 +8717,7 @@ function restorePersistedWorkbenchBase(
     pdfDocument: null,
     pdfModel: base.sourceType === "pdf" ? base.pdfModel : null,
     visibleLayers: base.visibleLayers,
-    error:
-      base.sourceType === "pdf"
-        ? "PDF restaurado desde el proyecto local. Vuelva a cargar el archivo si necesita ver la pagina original."
-        : null,
+    error: null,
     semanticViewMode: base.semanticViewMode,
     selectionMode: "pan",
     selectedEntityIds: [],
@@ -11347,7 +11356,7 @@ function createInitialCalibrationState(): SourceCalibrationState {
       status: "pending",
       points: [],
       distanceOriginal: "",
-      unit: "mm",
+      unit: "m",
     },
     measurementPoints: [],
     error: null,
@@ -11358,7 +11367,8 @@ function createOverlayData(state: SourceCalibrationState): SourceOverlayData {
   const calibrationPoints =
     state.toolMode === "calibrate"
       ? state.draft.points
-      : state.calibration
+      : // La escala tomada del archivo no tiene puntos marcados por el gasista: no se dibuja.
+        state.calibration && state.calibration.origen !== "archivo"
         ? [state.calibration.points.start, state.calibration.points.end]
         : [];
 
@@ -11411,7 +11421,8 @@ function baseHasUserWork(base: WorkbenchBase) {
     base.routeAccessoryProposalDecisions.length > 0 ||
     base.routeNetwork.nodes.length > 0 ||
     base.routeNetwork.segments.length > 0 ||
-    base.calibration.calibration !== null ||
+    // La escala tomada del archivo no la hizo el gasista: cambiar el plano no la pierde.
+    (base.calibration.calibration !== null && base.calibration.calibration.origen !== "archivo") ||
     base.calibration.draft.points.length > 0 ||
     base.calibration.draft.distanceOriginal.trim().length > 0 ||
     base.calibration.measurementPoints.length > 0
@@ -11433,45 +11444,45 @@ function replacementConfirmationForBase(
 
   if (baseHasUserWork(base)) {
     messages.push(
-      `Reemplazar ${base.name} perdera su preparacion, obstaculos y escala.`,
+      `Al cambiar ${base.type === "plan" ? "el plano" : base.name} se pierden la escala marcada y los ajustes hechos sobre ${base.type === "plan" ? "él" : "ese archivo"}.`,
     );
   }
 
   if (base.type === "plan" && linkCount > 0) {
     messages.push(
-      `${linkCount} vinculo${linkCount === 1 ? "" : "s"} con Cortes se eliminara${linkCount === 1 ? "" : "n"} junto con sus correspondencias.`,
+      `Se borra${linkCount === 1 ? "" : "n"} ${linkCount === 1 ? "la ubicación de 1 corte" : `las ubicaciones de ${linkCount} cortes`} en la planta.`,
     );
   }
 
   if (equipmentCount > 0) {
     messages.push(
-      `${equipmentCount} equipo${equipmentCount === 1 ? "" : "s"} se eliminara${equipmentCount === 1 ? "" : "n"} porque sus coordenadas pertenecen al archivo actual.`,
+      `Se borra${equipmentCount === 1 ? "" : "n"} ${equipmentCount} ${equipmentCount === 1 ? "artefacto ubicado" : "artefactos ubicados"} en este plano.`,
     );
   }
 
   if (routeSegmentCount > 0) {
     messages.push(
-      `${routeSegmentCount} tramo${routeSegmentCount === 1 ? "" : "s"} de trazado se eliminara${routeSegmentCount === 1 ? "" : "n"} porque sus coordenadas pertenecen al archivo actual.`,
+      `Se borra${routeSegmentCount === 1 ? "" : "n"} ${routeSegmentCount} ${routeSegmentCount === 1 ? "tramo" : "tramos"} de cañería.`,
     );
   }
 
   if (routeIntentCount > 0) {
     messages.push(
-      `${routeIntentCount} conexion${routeIntentCount === 1 ? "" : "es"} manual${routeIntentCount === 1 ? "" : "es"} se eliminara${routeIntentCount === 1 ? "" : "n"} porque pertenece${routeIntentCount === 1 ? "" : "n"} al archivo actual.`,
+      `Se borra${routeIntentCount === 1 ? "" : "n"} ${routeIntentCount} ${routeIntentCount === 1 ? "conexión marcada" : "conexiones marcadas"} a mano.`,
     );
   }
 
   if (base.type === "section" && linkCount > 0) {
-    messages.push("El vinculo con Planta se mantendra.");
+    messages.push("La ubicación del corte en la planta se mantiene.");
   }
 
   if (base.type === "section" && registrationCount > 0) {
     messages.push(
-      "La correspondencia se eliminara porque sus coordenadas pertenecen al archivo anterior.",
+      "Se borra la alineación del corte con la planta.",
     );
   }
 
-  return messages.length > 0 ? `${messages.join(" ")} Continuar?` : null;
+  return messages.length > 0 ? `${messages.join(" ")} ¿Seguir?` : null;
 }
 
 function removalConfirmationForBase(

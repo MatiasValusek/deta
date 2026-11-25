@@ -50,6 +50,20 @@ Lo más valioso. Usa lo que el motor ya calcula.
       "Cambiar"). Nada frena "Siguiente". "Nueva obra" (antes "Restablecer") vuelve a este paso
       y conserva el instalador. Partido sugerido según la localidad ya usada
       (`lib/obra/partidosUsados.ts`). Una obra nueva abre acá; una empezada, en el Plano.
+- [x] **Plano: escala del archivo** (`lib/plano/escalaDelArchivo.ts`, `components/plano/`).
+      Un DXF con `$INSUNITS` (mm, cm, m, dm, pulgadas, pies) toma la escala solo si la casa da
+      entre 3 y 200 m de lado; muestra "La casa mide 10,00 × 8,00 m" para confirmar con los
+      ojos. Si no se puede (PDF, DXF sin unidades o con la unidad equivocada) abre "Marcá una
+      medida que conozcas": dos puntos y la medida en **metros**. "La medida no es correcta"
+      lleva al mismo marcado. Cortes y paneles de antes quedan plegados en "Cortes y más
+      opciones". El PDF se guarda en el navegador (IndexedDB, `lib/plano/pdfGuardado.ts`) y se
+      reabre solo al volver; antes había que subirlo otra vez.
+- [ ] **PDF en Artefactos y en el A3** (encontrado al probar con PDF, 2026-11-25): la escala
+      anda (un A4 a 1:100 da 29,70 × 21,00 m), pero en Artefactos no se puede ubicar ningún
+      artefacto: la app busca una pared en el dibujo del DXF y un PDF no le da paredes ("No
+      encontré una pared válida"). El medidor sí se ubica. Además, la planta del A3 se dibuja
+      desde el DXF (`plantaPdf.ts`), así que con PDF tampoco saldría. Decidir en el paso
+      Artefactos: ubicar sin pared en PDF y poner la página del PDF de fondo en la planta del A3.
 - [ ] Resolución automática de accesorios, transiciones y familias (opción compatible por defecto).
 - [ ] "Modo experto" que agrupe: decisiones de accesorios/transiciones, cortes y alturas,
       anclaje a paredes, propuesta automática de recorrido.
@@ -75,6 +89,24 @@ Lo más valioso. Usa lo que el motor ya calcula.
 ---
 
 ## Notas
+
+### Clics de la casa desde cero (2026-11-25, contados en el navegador)
+Misma casa de 10 × 8 m (DXF en mm), medidor y 4 artefactos, hasta descargar las 3 hojas.
+Escribir no cuenta; una lista desplegable cuenta 2 (abrir y elegir).
+
+| Paso | Con el instalador guardado | Primera vez |
+|---|---:|---:|
+| Datos de la obra (Nueva obra + Aceptar / categoría 2, croquis 1, norte 2, Siguiente 1) | 6 | 6 |
+| Plano (Elegir archivo, elegir el archivo, Siguiente) | 3 | 3 |
+| Artefactos (pantalla de antes: medidor 3, cocina 4, otros 3 × 6, Siguiente 1) | 26 | 26 |
+| Cañería (Generar recorrido, Aceptar recorrido, Siguiente) | 3 | 3 |
+| Revisar y descargar (Descargar las 3 hojas) | 1 | 1 |
+| **Total** | **39** | **39** |
+
+La primera vez la app abre directo en Datos de la obra (no hay Nueva obra ni confirmación),
+pero suma la categoría del instalador. Sin el croquis y las entre calles las hojas no salen
+(van en el rótulo y la factibilidad). Si el plano no trae la escala: +3 (2 puntos + Confirmar).
+Lo que falta para la meta de 20 está en Artefactos (26 contra 10 de `PANTALLAS.md`).
 
 ### Estado al 2026-11-24 (fin de sesión)
 **Hecho hoy** (detalle en "Diámetro adoptado y comparación con un plano presentado"):

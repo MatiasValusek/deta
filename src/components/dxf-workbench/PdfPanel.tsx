@@ -25,7 +25,7 @@ export function PdfPanel({
             <dl className="grid grid-cols-[90px_minmax(0,1fr)] gap-x-3 gap-y-1">
               <dt className="text-[var(--muted)]">Archivo</dt>
               <dd className="truncate">{pdf.fileName}</dd>
-              <dt className="text-[var(--muted)]">Paginas</dt>
+              <dt className="text-[var(--muted)]">Páginas</dt>
               <dd>{pdf.pageCount}</dd>
             </dl>
 
