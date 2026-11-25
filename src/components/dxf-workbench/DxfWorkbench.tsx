@@ -332,6 +332,9 @@ import { PasoCaneria } from "@/components/caneria/PasoCaneria";
 import { usePasoCaneria } from "@/components/caneria/usePasoCaneria";
 import { CorreccionCaneria } from "@/components/caneria/CorreccionCaneria";
 import { useCorreccionCaneria } from "@/components/caneria/useCorreccionCaneria";
+import { medidasDeTramos } from "@/lib/caneria/medidasDeTramos";
+import { armarResultadosObra } from "@/lib/workbench/calculoObra";
+import { prepararHojas, resumenObra } from "@/lib/revisar/hojas";
 import { estadoDeEscalaInicial } from "@/components/plano/escalaInicial";
 import { SubirPlano } from "@/components/plano/SubirPlano";
 import {
@@ -1953,6 +1956,43 @@ export function DxfWorkbench() {
     guardar: pasoCaneria.guardar,
   });
   const corrigiendoCaneria = pasoCaneria.corrigiendo;
+  // Nombre y diámetro de cada tramo sobre el plano, con el mismo cálculo que las hojas.
+  const medidasEnElPlano = useMemo(() => {
+    if (activeWorkflowStage !== "route" || pasoCaneria.ajena || !technicalCalculationResult) return undefined;
+    const resultados = armarResultadosObra({
+      accessoryProposals: routeAccessoryProposals,
+      adoptedDiameterDecisions: planBase?.adoptedDiameterDecisions ?? [],
+      diameterTransitionProposals,
+      equipment: planEquipment,
+      network: routeNetwork,
+      result: technicalCalculationResult,
+      routeTransitionResolutions,
+      scaleMetersPerSourceUnit: planScaleMetersPerSourceUnit,
+    });
+    const { tablas } = prepararHojas({
+      equipment: planEquipment,
+      network: routeNetwork,
+      result: technicalCalculationResult,
+      resultados,
+      routeTransitionResolutions,
+    });
+    return { etiquetas: medidasDeTramos(tablas, technicalCalculationResult), resumen: resumenObra({
+      equipment: planEquipment,
+      filasCalculo: tablas.calculo.filas,
+      filasReferencias: tablas.referencias.filas,
+    }) };
+  }, [
+    activeWorkflowStage,
+    diameterTransitionProposals,
+    pasoCaneria.ajena,
+    planBase?.adoptedDiameterDecisions,
+    planEquipment,
+    planScaleMetersPerSourceUnit,
+    routeAccessoryProposals,
+    routeNetwork,
+    routeTransitionResolutions,
+    technicalCalculationResult,
+  ]);
   // Un toque en el plano: ubica un artefacto o marca el caño principal, según el paso.
   const tocarPlanoDelPaso = pasoCaneria.marcando
     ? pasoCaneria.tocarPlano
@@ -7895,6 +7935,7 @@ export function DxfWorkbench() {
                 routeIntentConnections={activeRouteIntentConnections}
                 routeIntentDraft={activeRouteIntentDraftOverlay}
                 routeNetwork={activeRouteNetwork}
+                routeSegmentLabels={medidasEnElPlano?.etiquetas}
                 routeProposal={visibleRouteProposalOverlay}
                 routeProposalOutdated={isRouteProposalOutdated}
                 routeToolMode={routeToolMode}
@@ -7987,6 +8028,7 @@ export function DxfWorkbench() {
                 routeIntentConnections={activeRouteIntentConnections}
                 routeIntentDraft={activeRouteIntentDraftOverlay}
                 routeNetwork={activeRouteNetwork}
+                routeSegmentLabels={medidasEnElPlano?.etiquetas}
                 routeProposal={visibleRouteProposalOverlay}
                 routeProposalOutdated={isRouteProposalOutdated}
                 routeToolMode={routeToolMode}
@@ -8089,6 +8131,13 @@ export function DxfWorkbench() {
               hayMedidor={supplyCount === 1}
               masOpciones={rightPanelSections.find((section) => section.id === "route")?.content}
               puntos={pasoCaneria.puntos.length}
+              resumen={
+                medidasEnElPlano && pasoCaneria.avisos.length === 0 ? (
+                  <p className="rounded border border-[#cfe3d6] bg-[#f3faf5] px-3 py-2 text-[#2f6b46]">
+                    ✓ {medidasEnElPlano.resumen}. Tes, codos y llaves los pone la app.
+                  </p>
+                ) : undefined
+              }
               onCorregir={pasoCaneria.corregir}
               onDeshacer={pasoCaneria.deshacer}
               onEmpezarDeNuevo={() => {

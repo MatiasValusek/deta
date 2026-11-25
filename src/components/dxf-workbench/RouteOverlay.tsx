@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { EtiquetasDeTramos } from "@/components/caneria/EtiquetasDeTramos";
 import type { Point2D } from "@/lib/geometry/types";
 import { pointZMeters } from "@/lib/geometry/height";
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
@@ -35,6 +36,8 @@ type RouteOverlayProps = {
   intentConnections: RouteIntentConnection[];
   intentDraft: RouteIntentDraft | null;
   network: ManualRouteNetwork;
+  /** Nombre y diámetro de cada tramo ("C-M Ø32"), para el paso Cañería. */
+  segmentLabels?: ReadonlyMap<string, string>;
   proposal: AutomaticRouteProposal | null;
   proposalOutdated: boolean;
   routeEditTolerance: number;
@@ -65,6 +68,7 @@ type RouteDragState = {
 type RouteSegmentVisualRole = "derivation" | "pass" | "terminal" | "vertical";
 
 export function RouteOverlay({
+  segmentLabels,
   draft,
   equipment,
   highlightedSegmentIds,
@@ -306,6 +310,9 @@ export function RouteOverlay({
             ) : null;
           })
         : null}
+      {showRoute && segmentLabels ? (
+        <EtiquetasDeTramos etiquetas={segmentLabels} segments={resolvedSegments} sourceToScreen={sourceToScreen} />
+      ) : null}
       {showRoute ? (
         <RouteIntentLayer
           connections={intentConnections}

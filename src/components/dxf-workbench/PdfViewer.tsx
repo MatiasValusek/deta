@@ -81,6 +81,7 @@ type PdfViewerProps = {
   routeIntentConnections: RouteIntentConnection[];
   routeIntentDraft: RouteIntentDraft | null;
   routeNetwork: ManualRouteNetwork;
+  routeSegmentLabels?: ReadonlyMap<string, string>;
   routeToolMode: RouteToolMode;
   savedView: PdfViewTransform | null;
   selectedEquipmentId: string | null;
@@ -203,6 +204,7 @@ export function PdfViewer({
   routeIntentConnections,
   routeIntentDraft,
   routeNetwork,
+  routeSegmentLabels,
   routeToolMode,
   savedView,
   selectedEquipmentId,
@@ -894,6 +896,7 @@ export function PdfViewer({
                 intentConnections={routeIntentConnections}
                 intentDraft={routeIntentDraft}
                 network={routeNetwork}
+                segmentLabels={routeSegmentLabels}
                 proposal={routeProposal}
                 proposalOutdated={routeProposalOutdated}
                 routeEditTolerance={ROUTE_POINTER_TOLERANCE_PX / view.scale}

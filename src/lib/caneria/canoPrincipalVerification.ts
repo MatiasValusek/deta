@@ -3,6 +3,7 @@ import type { Point2D } from "@/lib/geometry/types";
 import { resolveRouteSegments, getConnectedApplianceEquipmentIds } from "@/lib/routing/network";
 import { ARTEFACTOS_CASA, ESCALA_CASA_M_POR_UNIDAD } from "@/lib/workbench/obraCasaDesdeCero";
 import { calcularObraDePrueba } from "@/lib/workbench/obrasDePrueba";
+import { medidasDeTramos } from "./medidasDeTramos";
 import { armarRed, enEscuadra, leerTraza, limpiarPuntos, TRAZA_VACIA, type TrazaCanoPrincipal } from "./canoPrincipal";
 
 type Resultado = { name: string; status: "passed" };
@@ -72,6 +73,23 @@ export function runCanoPrincipalVerifications() {
       tablas.materiales.filas.filter((f) => f[0] === material).reduce((total, f) => total + Number(f[2]), 0);
     igual(cantidad("TE"), 3);
     igual(cantidad("LLAVE DE PASO"), 5);
+  });
+
+  verify("cada tramo muestra en el plano su nombre y el diámetro adoptado de la tabla SIGAS", () => {
+    const { network } = armar(TRAZA_CASA);
+    const { result, tablas } = calcularObraDePrueba({
+      adoptedDiameterDecisions: [],
+      equipment: ARTEFACTOS_CASA,
+      network,
+      nombre: "casa desde cero",
+      scaleMetersPerSourceUnit: ESCALA_CASA_M_POR_UNIDAD,
+    });
+    const etiquetas = medidasDeTramos(tablas, result);
+    igual(etiquetas.size, network.segments.length);
+    const delMedidor = network.segments.find((s) => s.fromNodeId === "cp:m")!.id;
+    const fila = tablas.calculo.filas.find((f) => f[0] === "C-M")!;
+    igual(etiquetas.get(delMedidor), `C-M Ø${fila.at(-1)}`);
+    igual(medidasDeTramos(tablas, null).size, 0);
   });
 
   verify("lo marcado se vuelve a leer de la red guardada", () => {
