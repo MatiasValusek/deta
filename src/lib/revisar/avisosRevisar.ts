@@ -47,6 +47,8 @@ export function avisosParaDescargar(params: {
   conCroquisEnPlano: boolean;
   drawing: NormalizedDrawing | null;
   equipment: WorkbenchEquipment[];
+  /** El plano es un PDF y su página está lista para ir de fondo. */
+  hayPlanoPdf?: boolean;
   instalador: DatosInstalador;
   materialesPendientes: number;
   network: ManualRouteNetwork;
@@ -71,8 +73,8 @@ export function avisosParaDescargar(params: {
     agregar(texto, "datos", params.conCroquisEnPlano ? ["factibilidad", "plano"] : ["factibilidad"]);
   }
 
-  if (!params.drawing || params.drawing.entities.length === 0) {
-    agregar("Falta el plano de la casa. Tocá Plano y subí el archivo DXF.", "plano", ["factibilidad", "plano"]);
+  if (!params.hayPlanoPdf && (!params.drawing || params.drawing.entities.length === 0)) {
+    agregar("Falta el plano de la casa. Tocá Plano y subí el archivo (DXF o PDF).", "plano", ["factibilidad", "plano"]);
   }
   if (!params.equipment.some((item) => item.role === "supply")) {
     agregar("Falta ubicar el medidor. Tocá Artefactos, elegí Medidor y marcalo en el plano.", "artefactos", TODAS);

@@ -1930,6 +1930,16 @@ export function DxfWorkbench() {
       updateBase(planBase.id, (base) => ({ ...base, equipment, selectedEquipmentId: seleccionadoId, showEquipment: true })),
   });
   const modoUbicarArtefacto: EquipmentPlacementMode = pasoArtefactos.ubicando ? "placing" : equipmentPlacementMode;
+  // Plano en PDF: su página va de fondo en la planta de las láminas A3.
+  const planoPdfDocument = planBase?.sourceType === "pdf" ? planBase.pdfDocument : null;
+  const planoPdfPagina = planBase?.visual.activePdfPageNumber ?? 1;
+  const planoPdfParaHojas = useMemo(
+    () =>
+      planoPdfDocument
+        ? { leer: () => planoPdfDocument.proxy.getData().catch(() => null), pagina: planoPdfPagina }
+        : null,
+    [planoPdfDocument, planoPdfPagina],
+  );
   const isRouteReviewVisible =
     activeWorkflowStage === "route" && canReviewConfirmedRoute;
   const isCoordinatedProposalVisualizationVisible = Boolean(
@@ -7509,6 +7519,7 @@ export function DxfWorkbench() {
           drawing={planBase?.sourceType === "dxf" ? planBase.drawing : null}
           equipment={planEquipment}
           network={routeNetwork}
+          planoPdf={planoPdfParaHojas}
           result={technicalCalculationResult}
           routeTransitionResolutions={routeTransitionResolutions}
           scaleMetersPerSourceUnit={calibrationScaleMetersPerSourceUnit(planBase)}

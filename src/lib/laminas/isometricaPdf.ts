@@ -31,6 +31,8 @@ export type DatosIsometrica = {
    * nivel con una subida vertical en cada artefacto, como en los planos presentados.
    */
   alturasCargadas?: boolean;
+  /** Plano en PDF: la Y del plano va hacia abajo, así que el Norte es Y−. */
+  yHaciaAbajo?: boolean;
 };
 
 type Punto = TechnicalAxonometricProjectedPoint;
@@ -146,10 +148,11 @@ function metrosPorUnidad(vista: TechnicalAxonometricView) {
 export function geometriaIsometrica(
   vista: TechnicalAxonometricView,
   alturasCargadas = false,
+  yHaciaAbajo = false,
 ): { tramos: TramoIsometrica[]; nodos: NodoIsometrica[] } {
   const escala = metrosPorUnidad(vista);
   const proyectar = (p: Point2D, z: number) =>
-    proyectarIsometrica(p.x * escala, p.y * escala, alturasCargadas ? z : 0);
+    proyectarIsometrica(p.x * escala, (yHaciaAbajo ? -p.y : p.y) * escala, alturasCargadas ? z : 0);
   const extremos = new Map<string, Punto>();
   const tramos = vista.segments
     .map((tramo) => {
@@ -189,7 +192,7 @@ export function dibujarIsometricaPdf(params: {
   const { datos, fuente, page } = params;
   const zona = { ...params.zona, y1: params.zona.y1 + MARGEN_TITULO_MM };
   const conSubidas = !datos.alturasCargadas;
-  const { tramos: recorridos, nodos } = geometriaIsometrica(datos.vista, datos.alturasCargadas);
+  const { tramos: recorridos, nodos } = geometriaIsometrica(datos.vista, datos.alturasCargadas, datos.yHaciaAbajo);
   const puntos = [...recorridos.flatMap((tramo) => tramo.puntos), ...nodos.map((nodo) => nodo.punto)];
 
   if (recorridos.length === 0 || puntos.length === 0) {

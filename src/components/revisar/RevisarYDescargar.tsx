@@ -9,6 +9,7 @@ import type { TechnicalRouteTransitionResolution } from "@/lib/calculation/techn
 import type { TechnicalCalculationResult } from "@/lib/calculation/technicalTree";
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
 import type { NormalizedDrawing } from "@/lib/geometry/types";
+import type { FondoPdf } from "@/lib/laminas/fondoPdf";
 import { leerObraSnapshot, leerObraSnapshotServidor, suscribirObra } from "@/lib/obra/obraStore";
 import {
   avisosParaDescargar,
@@ -45,6 +46,8 @@ export function RevisarYDescargar(props: {
   drawing: NormalizedDrawing | null;
   equipment: WorkbenchEquipment[];
   network: ManualRouteNetwork;
+  /** Plano en PDF: cómo leer el archivo y qué página va de fondo en las láminas. */
+  planoPdf?: { leer: () => Promise<Uint8Array | null>; pagina: number } | null;
   result: TechnicalCalculationResult | null;
   routeTransitionResolutions: Record<string, TechnicalRouteTransitionResolution>;
   scaleMetersPerSourceUnit: number | null;
@@ -58,6 +61,24 @@ export function RevisarYDescargar(props: {
   const [vista, setVista] = useState<{ hoja: HojaId; url: string } | null>(null);
   const [descargando, setDescargando] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fondoPdf, setFondoPdf] = useState<FondoPdf | null>(null);
+  const planoPdf = props.planoPdf ?? null;
+
+  // El PDF del plano se lee una vez para ponerlo de fondo en las dos láminas A3.
+  useEffect(() => {
+    let cancelado = false;
+    if (!planoPdf) {
+      setFondoPdf(null);
+      return;
+    }
+    planoPdf.leer().then((bytes) => {
+      if (!cancelado) setFondoPdf(bytes ? { bytes, pagina: planoPdf.pagina } : null);
+    });
+    return () => {
+      cancelado = true;
+    };
+    // Se vuelve a leer si cambia el plano o la página (viene memorizado desde el área de trabajo).
+  }, [planoPdf]);
 
   // El mismo cálculo que usan las pruebas (workbench/calculoObra.ts).
   const resultados = useMemo(
@@ -88,6 +109,7 @@ export function RevisarYDescargar(props: {
       conCroquisEnPlano,
       drawing: props.drawing,
       equipment: props.equipment,
+      fondoPdf,
       instalador,
       network: props.network,
       obra,
@@ -98,6 +120,7 @@ export function RevisarYDescargar(props: {
     }),
     [
       conCroquisEnPlano,
+      fondoPdf,
       instalador,
       obra,
       props.drawing,
@@ -118,6 +141,7 @@ export function RevisarYDescargar(props: {
         conCroquisEnPlano,
         drawing: props.drawing,
         equipment: props.equipment,
+        hayPlanoPdf: Boolean(fondoPdf),
         instalador,
         materialesPendientes: resultados.materialTakeoff.pendingSummary.total,
         network: props.network,
@@ -126,6 +150,7 @@ export function RevisarYDescargar(props: {
       }),
     [
       conCroquisEnPlano,
+      fondoPdf,
       instalador,
       obra,
       planilla.avisos,

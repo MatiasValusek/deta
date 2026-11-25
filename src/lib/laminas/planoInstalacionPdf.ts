@@ -11,6 +11,7 @@ import {
 } from "./planoInstalacionArmado";
 import { dibujarCroquisPdf } from "./croquisPdf";
 import { dibujarGabinetePdf } from "./gabinetePdf";
+import { incrustarFondoPdf } from "./fondoPdf";
 import { dibujarIsometricaPdf, type DatosIsometrica } from "./isometricaPdf";
 import { dibujarPlantaPdf, type DatosPlanta } from "./plantaPdf";
 import { dibujarTablasPdf } from "./tablasPdf";
@@ -37,6 +38,7 @@ export async function crearPlanoInstalacionPdf(
   // Reemplazo en negrita de Arial Black: la fuente original no se puede distribuir.
   const fuente = await doc.embedFont(StandardFonts.HelveticaBold);
   const fuenteTabla = await doc.embedFont(StandardFonts.Helvetica);
+  const fondo = planta?.fondoPdf ? await incrustarFondoPdf(doc, planta.fondoPdf) : null;
   const yPdf = (mm: number) => page.getHeight() - mmAPt(mm);
   const rectangulo = (r: { x1: number; y1: number; x2: number; y2: number }) =>
     page.drawRectangle({
@@ -60,7 +62,7 @@ export async function crearPlanoInstalacionPdf(
     // Como en los planos reales, la planta va sin recuadro propio.
     if (recuadro.id === "planta") {
       if (planta) {
-        dibujarPlantaPdf({ datos: planta, fuente: fuenteTabla, page, zona: recuadro });
+        dibujarPlantaPdf({ datos: planta, fondo, fuente: fuenteTabla, page, zona: recuadro });
         continue;
       }
     } else if (recuadro.id === "croquis") {

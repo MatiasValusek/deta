@@ -4,6 +4,7 @@ import type { TechnicalCalculationResult } from "@/lib/calculation/technicalTree
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
 import type { NormalizedDrawing } from "@/lib/geometry/types";
 import { crearFactibilidadPdf, plantaFactibilidad } from "@/lib/laminas/factibilidadPdf";
+import type { FondoPdf } from "@/lib/laminas/fondoPdf";
 import { diametrosPorTramo, hayAlturasCargadas } from "@/lib/laminas/isometricaPdf";
 import { numerarDesdeResultado } from "@/lib/laminas/numeracionPlano";
 import { crearPlanillaTramos } from "@/lib/laminas/planillaTramos";
@@ -29,6 +30,8 @@ export type DatosHojas = {
   conCroquisEnPlano: boolean;
   drawing: NormalizedDrawing | null;
   equipment: WorkbenchEquipment[];
+  /** Plano en PDF: su página va de fondo en la planta de las dos láminas A3. */
+  fondoPdf?: FondoPdf | null;
   instalador: DatosInstalador;
   network: ManualRouteNetwork;
   obra: DatosObra;
@@ -39,7 +42,7 @@ export type DatosHojas = {
 };
 
 /** Tablas del Plano de instalación y planilla por tramo, sin dibujar todavía. */
-export function prepararHojas(datos: Omit<DatosHojas, "conCroquisEnPlano" | "instalador" | "obra" | "visibleLayers" | "drawing">) {
+export function prepararHojas(datos: Omit<DatosHojas, "conCroquisEnPlano" | "instalador" | "obra" | "visibleLayers" | "drawing" | "fondoPdf">) {
   const tablas = crearTablasPlano({
     calculationSheet: datos.resultados.calculationSheet,
     equipment: datos.equipment,
@@ -67,7 +70,12 @@ export async function crearHoja(hoja: HojaId, datos: DatosHojas): Promise<Uint8A
     if (!croquis) throw new Error("Faltan datos del croquis");
     return crearFactibilidadPdf(
       rotulo,
-      plantaFactibilidad({ capasVisibles: datos.visibleLayers, drawing: datos.drawing, equipment: datos.equipment }),
+      plantaFactibilidad({
+        capasVisibles: datos.visibleLayers,
+        drawing: datos.drawing,
+        equipment: datos.equipment,
+        ...(datos.fondoPdf ? { fondoPdf: datos.fondoPdf } : {}),
+      }),
       croquis,
     );
   }
@@ -76,7 +84,7 @@ export async function crearHoja(hoja: HojaId, datos: DatosHojas): Promise<Uint8A
     return crearPlanillaTramosPdf(planilla, rotulo);
   }
 
-  if (!datos.drawing) throw new Error("Falta el plano");
+  if (!datos.drawing && !datos.fondoPdf) throw new Error("Falta el plano");
   const croquis = datos.conCroquisEnPlano ? (crearDatosCroquis(datos.obra) ?? undefined) : undefined;
   return crearPlanoInstalacionPdf(
     rotulo,
@@ -86,6 +94,7 @@ export async function crearHoja(hoja: HojaId, datos: DatosHojas): Promise<Uint8A
       capasVisibles: datos.visibleLayers,
       drawing: datos.drawing,
       equipment: datos.equipment,
+      ...(datos.fondoPdf ? { fondoPdf: datos.fondoPdf } : {}),
       network: datos.network,
       numeracion: tablas.numeracion,
     },
@@ -94,6 +103,7 @@ export async function crearHoja(hoja: HojaId, datos: DatosHojas): Promise<Uint8A
       diametros: diametrosPorTramo(tablas.numeracion, tablas.calculo.filas),
       numeracion: tablas.numeracion,
       vista: datos.resultados.axonometricView,
+      yHaciaAbajo: Boolean(datos.fondoPdf),
     },
     croquis,
   );

@@ -7,6 +7,7 @@ import { dibujarRotuloPdf } from "@/lib/obra/rotuloPdf";
 import type { ManualRouteNetwork } from "@/lib/routing/types";
 import { dibujarCroquisPdf } from "./croquisPdf";
 import { A3_MM, MARCO_LAMINA } from "./planoInstalacionArmado";
+import { incrustarFondoPdf, type FondoPdf } from "./fondoPdf";
 import { dibujarPlantaPdf, type DatosPlanta } from "./plantaPdf";
 
 /*
@@ -53,6 +54,7 @@ export function plantaFactibilidad(params: {
   capasVisibles?: Record<string, boolean>;
   drawing: NormalizedDrawing | null;
   equipment: WorkbenchEquipment[];
+  fondoPdf?: FondoPdf;
 }): DatosPlanta {
   const medidor = params.equipment.find((item) => item.role === "supply");
   const network: ManualRouteNetwork = { nodes: [], segments: [] };
@@ -61,6 +63,7 @@ export function plantaFactibilidad(params: {
     capasVisibles: params.capasVisibles,
     drawing: params.drawing,
     equipment: medidor ? [medidor] : [],
+    ...(params.fondoPdf ? { fondoPdf: params.fondoPdf } : {}),
     network,
     numeracion: { nodos: new Map(), tramos: new Map() },
   };
@@ -76,6 +79,7 @@ export async function crearFactibilidadPdf(
   // Reemplazo en negrita de Arial Black: la fuente original no se puede distribuir.
   const fuente = await doc.embedFont(StandardFonts.HelveticaBold);
   const fuenteTexto = await doc.embedFont(StandardFonts.Helvetica);
+  const fondo = planta.fondoPdf ? await incrustarFondoPdf(doc, planta.fondoPdf) : null;
   const yPdf = (mm: number) => page.getHeight() - mmAPt(mm);
   const rectangulo = (r: { x1: number; y1: number; x2: number; y2: number }) =>
     page.drawRectangle({
@@ -114,7 +118,7 @@ export async function crearFactibilidadPdf(
   for (const zona of armarFactibilidad()) {
     if (zona.id === "planta") {
       // Como en la factibilidad real, la planta va sin recuadro ni título.
-      const aHoja = dibujarPlantaPdf({ datos: planta, fuente: fuenteTexto, page, zona });
+      const aHoja = dibujarPlantaPdf({ datos: planta, fondo, fuente: fuenteTexto, page, zona });
       const medidor = planta.equipment.find((item) => item.role === "supply");
       if (aHoja && medidor) {
         dibujarMedidor(aHoja(medidor.connectionPoint));

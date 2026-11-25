@@ -131,6 +131,24 @@ export async function runIsometricaVerifications() {
     return este.x * norte.y - este.y * norte.x < 0 && norte.y < 0;
   });
 
+  check("plano en PDF (Y hacia abajo): la isométrica sale igual que con el mismo plano en DXF", () => {
+    const espejo = (p: { x: number; y: number }) => ({ ...p, y: -p.y });
+    const enPdf = {
+      ...VISTA_EJEMPLO,
+      nodes: VISTA_EJEMPLO.nodes.map((n) =>
+        n.point ? { ...n, point: { ...n.point, source: espejo(n.point.source) } } : n,
+      ),
+      segments: VISTA_EJEMPLO.segments.map((s) => ({
+        ...s,
+        path: s.path.map((p) => ({ ...p, planPoint: espejo(p.planPoint) })),
+      })),
+    };
+    const cerca = (a: unknown, b: unknown) =>
+      JSON.stringify(a, (_k, v) => (typeof v === "number" ? Math.round(v * 1e6) / 1e6 + 0 : v)) ===
+      JSON.stringify(b, (_k, v) => (typeof v === "number" ? Math.round(v * 1e6) / 1e6 + 0 : v));
+    return cerca(geometriaIsometrica(enPdf, false, true), geometriaIsometrica(VISTA_EJEMPLO));
+  });
+
   check("sin alturas cargadas la traza queda a un mismo nivel", () => {
     const conAlturas = {
       ...VISTA_EJEMPLO,

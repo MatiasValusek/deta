@@ -24,6 +24,7 @@ import {
   routeSegmentPlanLegs,
 } from "@/lib/routing/network";
 import type { ManualRouteNetwork } from "@/lib/routing/types";
+import { dibujarFondoPdf, type FondoIncrustado, type FondoPdf } from "./fondoPdf";
 import type { NumeracionPlano } from "./numeracionPlano";
 import { dibujarSimboloLlave, LARGO_LLAVE_MM } from "./simboloLlave";
 import { cuadrado, elegirLugar, linea, lugaresAlrededor, Ocupado } from "./ubicarTextos";
@@ -32,6 +33,8 @@ export type DatosPlanta = {
   capasVisibles?: Record<string, boolean>;
   drawing: NormalizedDrawing | null;
   equipment: WorkbenchEquipment[];
+  /** Plano en PDF: la página va de fondo (los puntos vienen con Y hacia abajo). */
+  fondoPdf?: FondoPdf;
   network: ManualRouteNetwork;
   numeracion: NumeracionPlano;
 };
@@ -65,6 +68,7 @@ function crearAjusteAZona(
   limites: Bounds,
   zona: ZonaPlanta,
   margenMm = MARGEN_MM,
+  yHaciaAbajo = false,
 ) {
   const anchoFuente = Math.max(limites.maxX - limites.minX, 1e-9);
   const altoFuente = Math.max(limites.maxY - limites.minY, 1e-9);
@@ -78,7 +82,7 @@ function crearAjusteAZona(
     escala,
     punto: (punto: Point2D): Point2D => ({
       x: offsetX + (punto.x - limites.minX) * escala,
-      y: offsetY + (limites.maxY - punto.y) * escala,
+      y: offsetY + (yHaciaAbajo ? punto.y - limites.minY : limites.maxY - punto.y) * escala,
     }),
   };
 }
@@ -86,11 +90,13 @@ function crearAjusteAZona(
 /** Dibuja la planta y devuelve cómo pasar del plano a mm de hoja (null si no hay nada). */
 export function dibujarPlantaPdf(params: {
   datos: DatosPlanta;
+  /** La página del PDF ya incrustada en la lámina (ver fondoPdf.ts). */
+  fondo?: FondoIncrustado | null;
   fuente: PDFFont;
   page: PDFPage;
   zona: ZonaPlanta;
 }) {
-  const { datos, fuente, page, zona } = params;
+  const { datos, fondo, fuente, page, zona } = params;
   const equipoPorId = new Map(datos.equipment.map((item) => [item.id, item]));
   const tramos = resolveRouteSegments(datos.network, datos.equipment);
   const piernas = tramos.flatMap((tramo) => routeSegmentPlanLegs(tramo));
@@ -109,13 +115,19 @@ export function dibujarPlantaPdf(params: {
       ...(texto.alignmentPoint ? [texto.alignmentPoint] : []),
     ]),
     ...piernas.flatMap((pierna) => [pierna.from, pierna.to]),
+    ...(fondo
+      ? [
+          { x: 0, y: 0 },
+          { x: fondo.ancho, y: fondo.alto },
+        ]
+      : []),
   ];
 
   if (puntos.length === 0) {
     return null;
   }
 
-  const ajuste = crearAjusteAZona(limitesDe(puntos), zona);
+  const ajuste = crearAjusteAZona(limitesDe(puntos), zona, MARGEN_MM, Boolean(fondo));
   const aHoja = ajuste.punto;
   const yPdf = (mm: number) => page.getHeight() - mmAPt(mm);
   const aPdf = (punto: Point2D) => {
@@ -126,6 +138,10 @@ export function dibujarPlantaPdf(params: {
   // La letra se nombra por su clave en los recursos de la hoja (F1, F2…), no por
   // "Helvetica": con el nombre suelto otros visores no la encuentran y no muestran el texto.
   const claveFuente = page.node.newFontDictionary(fuente.name, fuente.ref);
+
+  if (fondo) {
+    dibujarFondoPdf(page, fondo, aPdf);
+  }
 
   for (const entidad of entidades) {
     if (entidad.kind === "text") {
