@@ -10,7 +10,8 @@ import type { ManualRouteNetwork, RouteNode, RouteSegment } from "@/lib/routing/
  * leer y corregir al reabrir la obra, sin cambiar el formato del guardado:
  * - "cp:m" es el medidor; "cp:d:N", las derivaciones sobre el caño principal; "cp:a:<id>", cada artefacto.
  * - "cp:p:N" son los tramos del caño principal; sus quiebres van como vértices del tramo.
- * - "cp:b:<id>" es la bajada que pone la app; "cp:bm:<id>", una bajada trazada a mano.
+ * - "cp:b:<id>" es la bajada que pone la app; "cp:bs:<id>", una a la que el gasista le movió el punto
+ *   de salida; "cp:bm:<id>", una trazada a mano. Solo esas dos guardan su salida al releer.
  */
 
 export type TrazaCanoPrincipal = {
@@ -26,7 +27,10 @@ export const TRAZA_VACIA: TrazaCanoPrincipal = { bajadasAMano: {}, puntos: [], s
 
 export const ID_MEDIDOR = "cp:m";
 export const idArtefacto = (equipmentId: string) => `cp:a:${equipmentId}`;
-export const idBajada = (equipmentId: string, aMano = false) => `cp:${aMano ? "bm" : "b"}:${equipmentId}`;
+export type TipoDeBajada = "automatica" | "salidaMovida" | "aMano";
+const PREFIJO_BAJADA: Record<TipoDeBajada, string> = { aMano: "bm", automatica: "b", salidaMovida: "bs" };
+export const idBajada = (equipmentId: string, tipo: TipoDeBajada = "automatica") =>
+  `cp:${PREFIJO_BAJADA[tipo]}:${equipmentId}`;
 export const esTramoPrincipal = (segmentId: string) => segmentId.startsWith("cp:p:");
 
 /** Medio metro: una derivación no puede quedar pegada al medidor. */
@@ -115,7 +119,7 @@ export function armarRed(params: {
     const vertices = aMano ?? bajadaEnEscuadra(derivacion.punto, plano(salida.artefacto.connectionPoint), linea, salida.tramo);
     segments.push({
       fromNodeId: derivacion.id,
-      id: idBajada(salida.artefacto.id, Boolean(aMano)),
+      id: idBajada(salida.artefacto.id, aMano ? "aMano" : params.traza.salidas[salida.artefacto.id] ? "salidaMovida" : "automatica"),
       origin: "manual",
       toNodeId: idArtefacto(salida.artefacto.id),
       ...(vertices.length > 0 ? { vertices } : {}),
@@ -150,10 +154,10 @@ export function leerTraza(network: ManualRouteNetwork, equipment: WorkbenchEquip
   const salidas: Record<string, Point2D> = {};
   const bajadasAMano: Record<string, Point2D[]> = {};
   for (const tramo of network.segments) {
-    const [, tipo, equipmentId] = /^cp:(bm?):(.+)$/.exec(tramo.id) ?? [];
+    const [, tipo, equipmentId] = /^cp:(b|bs|bm):(.+)$/.exec(tramo.id) ?? [];
     if (!equipmentId) continue;
     const desde = posicion.get(tramo.fromNodeId);
-    if (desde) salidas[equipmentId] = plano(desde);
+    if (desde && tipo !== "b") salidas[equipmentId] = plano(desde);
     if (tipo === "bm") bajadasAMano[equipmentId] = (tramo.vertices ?? []).map(plano);
   }
 

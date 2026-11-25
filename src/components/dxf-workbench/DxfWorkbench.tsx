@@ -328,6 +328,8 @@ import { EscalaDelPlano } from "@/components/plano/EscalaDelPlano";
 import { PasoArtefactos } from "@/components/artefactos/PasoArtefactos";
 import { usePasoArtefactos } from "@/components/artefactos/usePasoArtefactos";
 import { planoParaUbicar } from "@/lib/artefactos/colocarArtefacto";
+import { PasoCaneria } from "@/components/caneria/PasoCaneria";
+import { usePasoCaneria } from "@/components/caneria/usePasoCaneria";
 import { estadoDeEscalaInicial } from "@/components/plano/escalaInicial";
 import { SubirPlano } from "@/components/plano/SubirPlano";
 import {
@@ -1929,7 +1931,24 @@ export function DxfWorkbench() {
       planBase &&
       updateBase(planBase.id, (base) => ({ ...base, equipment, selectedEquipmentId: seleccionadoId, showEquipment: true })),
   });
-  const modoUbicarArtefacto: EquipmentPlacementMode = pasoArtefactos.ubicando ? "placing" : equipmentPlacementMode;
+  // Paso Cañería nuevo (components/caneria): caño principal + bajadas.
+  const pasoCaneria = usePasoCaneria({
+    activo: activeWorkflowStage === "route",
+    baseId: planBase?.id ?? null,
+    equipment: planEquipment,
+    metrosPorUnidad: planScaleMetersPerSourceUnit,
+    network: routeNetwork,
+    pdfPageNumber: planBase?.sourceType === "pdf" ? planBase.visual.activePdfPageNumber : undefined,
+    guardarRed: (network) =>
+      planBase && updateBase(planBase.id, (base) => ({ ...base, routeNetwork: network, showRoute: true })),
+  });
+  // Un toque en el plano: ubica un artefacto o marca el caño principal, según el paso.
+  const tocarPlanoDelPaso = pasoCaneria.marcando
+    ? pasoCaneria.tocarPlano
+    : pasoArtefactos.ubicando
+      ? pasoArtefactos.tocarPlano
+      : null;
+  const modoUbicarArtefacto: EquipmentPlacementMode = tocarPlanoDelPaso ? "placing" : equipmentPlacementMode;
   // Plano en PDF: su página va de fondo en la planta de las láminas A3.
   const planoPdfDocument = planBase?.sourceType === "pdf" ? planBase.pdfDocument : null;
   const planoPdfPagina = planBase?.visual.activePdfPageNumber ?? 1;
@@ -1940,8 +1959,9 @@ export function DxfWorkbench() {
         : null,
     [planoPdfDocument, planoPdfPagina],
   );
+  // Cortes, Axo y el reencuadre son de la pantalla anterior: con el caño principal no se muestran.
   const isRouteReviewVisible =
-    activeWorkflowStage === "route" && canReviewConfirmedRoute;
+    activeWorkflowStage === "route" && canReviewConfirmedRoute && pasoCaneria.ajena;
   const isCoordinatedProposalVisualizationVisible = Boolean(
     activeWorkflowStage === "route" && coordinatedVisualization,
   );
@@ -7858,7 +7878,7 @@ export function DxfWorkbench() {
                 }
                 overlay={activeOverlay}
                 pendingEntityIds={pendingEntityIds}
-                routeDraft={activeRouteDraftOverlay}
+                routeDraft={pasoCaneria.borrador ?? activeRouteDraftOverlay}
                 routeIntentConnections={activeRouteIntentConnections}
                 routeIntentDraft={activeRouteIntentDraftOverlay}
                 routeNetwork={activeRouteNetwork}
@@ -7898,8 +7918,8 @@ export function DxfWorkbench() {
                 onCursorChange={setCursor}
                 onEntityToggle={handleEntityToggle}
                 onEquipmentHover={setHoveredEquipmentId}
-                onEquipmentPoint={pasoArtefactos.ubicando ? pasoArtefactos.tocarPlano : handleEquipmentPoint}
-                onEquipmentPreview={handleEquipmentPreview}
+                onEquipmentPoint={tocarPlanoDelPaso ?? handleEquipmentPoint}
+                onEquipmentPreview={pasoCaneria.marcando ? pasoCaneria.mirar : handleEquipmentPreview}
                 onEquipmentSelect={handleSelectEquipment}
                 onPhysicalRouteElementSelect={handleSelectPhysicalRouteElement}
                 onPhysicalRouteNodeMove={handleMovePhysicalRouteNode}
@@ -7950,7 +7970,7 @@ export function DxfWorkbench() {
                   activeBase ? activeBase.calibration.toolMode !== "idle" : false
                 }
                 overlay={activeOverlay}
-                routeDraft={activeRouteDraftOverlay}
+                routeDraft={pasoCaneria.borrador ?? activeRouteDraftOverlay}
                 routeIntentConnections={activeRouteIntentConnections}
                 routeIntentDraft={activeRouteIntentDraftOverlay}
                 routeNetwork={activeRouteNetwork}
@@ -7985,8 +8005,8 @@ export function DxfWorkbench() {
                 onConstraintSelect={handleSelectConstraint}
                 onCursorChange={setCursor}
                 onEquipmentHover={setHoveredEquipmentId}
-                onEquipmentPoint={pasoArtefactos.ubicando ? pasoArtefactos.tocarPlano : handleEquipmentPoint}
-                onEquipmentPreview={handleEquipmentPreview}
+                onEquipmentPoint={tocarPlanoDelPaso ?? handleEquipmentPoint}
+                onEquipmentPreview={pasoCaneria.marcando ? pasoCaneria.mirar : handleEquipmentPreview}
                 onEquipmentSelect={handleSelectEquipment}
                 onPhysicalRouteElementSelect={handleSelectPhysicalRouteElement}
                 onPhysicalRouteNodeMove={handleMovePhysicalRouteNode}
@@ -8045,6 +8065,26 @@ export function DxfWorkbench() {
           {activeWorkflowStage === "plan" && activeBase?.type === "plan" ? null : activeWorkflowStage === "plan" && activeRightPanelSection === "scale" ? (
           <div className="min-h-0 flex-1 overflow-auto">
             {rightPanelSections.find((section) => section.id === "scale")?.content}
+          </div>
+          ) : activeWorkflowStage === "route" && activeBase?.type === "plan" ? (
+          <div className="min-h-0 flex-1 overflow-auto">
+            <PasoCaneria
+              ajena={pasoCaneria.ajena}
+              avisos={pasoCaneria.avisos}
+              corrigiendo={pasoCaneria.corrigiendo}
+              hayMedidor={supplyCount === 1}
+              masOpciones={rightPanelSections.find((section) => section.id === "route")?.content}
+              puntos={pasoCaneria.puntos.length}
+              onCorregir={pasoCaneria.corregir}
+              onDeshacer={pasoCaneria.deshacer}
+              onEmpezarDeNuevo={() => {
+                setRouteProposal(null);
+                setRouteProposalMode(null);
+                setCoordinatedRouteProposal(null);
+                pasoCaneria.empezarDeNuevo();
+              }}
+              onSeguirMarcando={pasoCaneria.seguirMarcando}
+            />
           </div>
           ) : activeWorkflowStage === "equipment" ? (
           <div className="min-h-0 flex-1 overflow-auto">

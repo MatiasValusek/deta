@@ -80,7 +80,7 @@ export function siguientePaso(
     return {
       habilitado: estado.canieriaLista,
       hacia: "review",
-      motivo: "Falta terminar la cañería: tiene que llegar al medidor y a todos los artefactos, y estar aceptada.",
+      motivo: "Falta la cañería: marcá el caño principal desde el medidor; la app lleva una bajada a cada artefacto.",
     };
   }
   return null;

@@ -80,6 +80,20 @@ export function runCanoPrincipalVerifications() {
     igual(JSON.stringify(armar(traza).network), JSON.stringify(armar(TRAZA_CASA).network));
   });
 
+  verify("tocar de a un punto (y releer la red entre toque y toque) da lo mismo que marcar todo junto", () => {
+    const conEsquina = leerTraza(armar({ ...TRAZA_VACIA, puntos: [ESQUINA] }).network, ARTEFACTOS_CASA);
+    if (!conEsquina) throw new Error("no se pudo leer");
+    igual(Object.keys(conEsquina.salidas).length, 0);
+    const conFin = { ...conEsquina, puntos: [...conEsquina.puntos, FIN] };
+    igual(JSON.stringify(armar(conFin).network), JSON.stringify(armar(TRAZA_CASA).network));
+  });
+
+  verify("una salida movida se recuerda al releer", () => {
+    const movida = { ...TRAZA_CASA, salidas: { "ca-cocina": { x: 5000, y: 4000 } } };
+    const leida = leerTraza(armar(movida).network, ARTEFACTOS_CASA);
+    igual(JSON.stringify(leida?.salidas), JSON.stringify(movida.salidas));
+  });
+
   verify("una red de la pantalla anterior no se toca: se avisa y se puede empezar de nuevo", () => {
     igual(leerTraza({ nodes: [{ id: "n1", kind: "route" }], segments: [{ fromNodeId: "n1", id: "t1", toNodeId: "n1" }] }, ARTEFACTOS_CASA), null);
     igual(JSON.stringify(leerTraza({ nodes: [], segments: [] }, ARTEFACTOS_CASA)), JSON.stringify(TRAZA_VACIA));
