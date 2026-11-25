@@ -90,6 +90,8 @@ Lo más valioso. Usa lo que el motor ya calcula.
       cálculo no cambia.
 - [x] **Tiro de cada artefacto** (`tiro`: natural, balanceado o sin conducto), preparado para las
       ventilaciones. Típico por tipo; se cambia en "Salida de gases". Las ventilaciones no están hechas.
+- [x] **Todo a 90° y forma Directo** (ver Notas, "Todo a 90° y forma Directo"): la app arma el
+      recorrido sola; Perimetral y Por la pared quedan escritos, sin programar.
 - [ ] Definir qué hacer con DWG (aceptarlo o explicar cómo convertir a DXF en un paso).
 
 ## Fase 3 — Prolijidad
@@ -107,6 +109,115 @@ Lo más valioso. Usa lo que el motor ya calcula.
 ---
 
 ## Notas
+
+### Todo a 90° y forma "Directo" (2026-11-25)
+Decidido con el usuario: en obra el caño no se curva (NAG-200, 4.7.1.9) y los codos Sigas son de
+90° y 45°; embutido va vertical, horizontal o paralelo a las paredes (4.7.2.2 a). En Deta, por
+ahora, **solo 90°**.
+
+**Etapa 1 — todo a 90° (hecho):**
+- Caño principal: cada toque queda en escuadra **con el tramo anterior**; si el toque vuelve para
+  atrás sobre el mismo eje, dobla a 90° hacia el lado tocado (`enEscuadra`, `canoPrincipal.ts`).
+- Bajadas en L con regla explícita (`bajadaEnEscuadra`): de las dos L se descarta la que pisa el
+  caño principal; gana la más corta; si empatan, la que va primero por el eje del caño. Arregla un
+  artefacto detrás del medidor, que hacía volver la bajada por encima del caño.
+- Quiebre de 3° a 10°: error de dibujo, se toma como recto (`diameterTransitionProposals.ts`). Si
+  ahí cambia la medida, solo la cupla de reducción (antes quedaba sin pieza y la obra incompleta).
+- Giro con cambio de medida: **codo + cupla de reducción** por defecto, con los valores de la
+  tabla, sin agrandar. El codo del giro es solo el que la app puso en ese nodo (`codosDelGiro`), no
+  los de subida ni los del medidor, y en Materiales va con la medida de su tramo.
+- Obras viejas con tramos en diagonal: no se tocan; Revisar y descargar avisa "Hay tramos en
+  diagonal: en obra van a 90°. Tocá Cañería y marcalos de nuevo en escuadra." con botón a Cañería,
+  sin frenar la descarga (`caneria/tramosEnDiagonal.ts`). Menos de 10° no cuenta como diagonal.
+- `bajadaEnDiagonalVerification.ts` prueba primero la bajada a la estufa a 90° (te a 90° Ø32 +
+  cupla, sin suponer nada: Ø20, 9,89 m de equivalente, 15,99 m de total, sin avisos); la diagonal
+  queda como "obra cargada antes" para la red de seguridad y el aviso nuevo.
+- Las 3 obras de prueba no cambian ningún número. Se actualizaron 4 verificaciones viejas del motor
+  que esperaban el giro con cambio de medida "pendiente de revisar".
+
+**Etapa 2 — forma Directo (hecho):**
+- Arriba de Cañería: Directo · Perimetral · Por la pared (`caneria/FormaDeRecorrido.tsx`). Solo
+  Directo funciona; las otras dos, deshabilitadas con "Próximamente".
+- Directo (`caneria/recorridoDirecto.ts`): si no hay caño principal, la app lo arma sola. Prueba
+  caños horizontales y verticales a la altura de cada artefacto, del medidor y de la mediana, hacia
+  los dos lados, y elige el que suma menos caño sin bajadas cruzadas (empate: menos quiebres, más al
+  medio). Casa desde cero: 23,00 m de caño, contra 24,50 m del trazado a mano de las pruebas. Queda
+  en modo corrección: se arrastra cualquier quiebre o salida y lo arrastrado se guarda; la app no lo
+  vuelve a armar salvo con "Volver a armar el recorrido". "Marcar el caño a mano" vuelve al marcado
+  de antes. Una red de la pantalla anterior no se pisa ("Armar el recorrido de nuevo").
+- Clics de la casa desde cero hasta las 3 hojas, contados en el navegador (Cañería pasa de 3 a 1):
+
+| Paso | DXF | PDF |
+|---|---:|---:|
+| Datos de la obra (Nueva obra + Aceptar, croquis 1, norte 2, Siguiente) | 6 | 6 |
+| Plano (archivo 2, Siguiente; con PDF + 2 puntos y Confirmar) | 3 | 6 |
+| Artefactos (medidor 1, Estufa + 2, Cocina 2, Calefón 2, Siguiente) | 9 | 9 |
+| Cañería (Siguiente: el recorrido lo arma la app) | 1 | 1 |
+| Revisar y descargar | 1 | 1 |
+| **Total** | **20** | **23** |
+
+**Pendiente:**
+- Si después de armar Directo se mueve un artefacto, el caño principal queda donde estaba (solo se
+  rearman las bajadas). No se distingue "armado por la app y sin tocar" de "corregido a mano".
+- Directo arma un caño principal recto con una sola subida desde el medidor; con artefactos muy
+  repartidos (casa en L, dos alas) podría convenir un caño con dos quiebres. No hay paredes en
+  juego: puede cruzar un ambiente cerrado (en la casa de prueba cruza la habitación de arriba).
+- Con PDF la etiqueta de un tramo muy corto (4-C) no se ve: se pisa con el símbolo del artefacto.
+
+### Perimetral y Por la pared (plan, sin programar)
+Referencia de formato: `_material-prueba/referencias/2` (planta, corte e isométrica): el caño corre
+a una altura fija y en cada artefacto sube o baja en vertical hasta la llave de paso. Ninguna de
+las dos formas cambia el motor: se arma una red (caño + bajadas) con alturas y el cálculo cuenta
+largos y codos como hoy.
+
+**Las paredes, con DXF.** Ya hay piezas: `architecture/semantics.ts` reconoce capas de paredes por
+nombre (muro, pared, tabique…), `architecture/routeContext.ts` arma las restricciones del dibujo y
+`artefactos/colocarArtefacto.ts` busca la pared a menos de 0,5 m. Plan:
+1. Tomar los segmentos de las capas de paredes; juntar los paralelos a menos de un espesor típico
+   como las dos caras de un muro y quedarse con la cara de cada ambiente.
+2. Armar los ambientes como polígonos cerrados (con huecos de puertas: un corte de pared de menos de
+   1 m se cierra para el recorrido y se marca como paso posible).
+3. Si el DXF no tiene capas con nombre de pared, usar todas las líneas largas (más de 0,5 m) y
+   avisar: "No encontré las paredes en el plano. Tocá Directo o marcá el caño a mano."
+4. El caño va por una línea paralela a la cara de la pared, corrida la distancia elegida, y pasa de
+   ambiente a ambiente por las puertas o atravesando el muro en ángulo recto.
+
+**Las paredes, con PDF.** Un PDF de hoy es una imagen de fondo: no hay paredes. Dos caminos, a
+decidir: (a) leer los trazos vectoriales del PDF con pdf.js (si el PDF salió de un CAD, las líneas
+están; si es un escaneo, no); (b) que el gasista marque con dos toques la pared por la que va el
+caño, tramo por tramo (como hoy marca el caño principal). Propuesta: (b) primero, porque anda con
+cualquier PDF; (a) después, como ayuda que propone las paredes y el gasista confirma.
+
+**Perimetral (por el piso, cerca de la pared).**
+- Recorrido en planta: del medidor siguiendo la pared hacia cada artefacto, por el lado más corto
+  del ambiente; cada esquina de pared es un codo a 90°.
+- En cada artefacto: el caño sube del piso hasta la llave de paso. La subida es un tramo vertical:
+  largo = altura de la llave − altura del caño; piezas: 2 codos (el del piso que dobla para arriba
+  y el que llega a la llave), que el motor ya cuenta como "Codos de subida". La salida del medidor
+  baja al piso: largo = altura del medidor − altura del caño, con los 4 codos de salida de hoy.
+- Para que el largo vertical entre en la longitud real del tramo, cada bajada lleva alturas
+  (`sections/`, hoy en Modo experto): altura del caño en la derivación y altura de la llave en el
+  artefacto. Con alturas cargadas, el motor ya cuenta 2 codos por cada cambio de nivel en lugar de
+  los fijos (no se cuentan dos veces).
+
+**Por la pared (a una altura).**
+- Igual que Perimetral, pero el caño corre a una altura fija por la pared; en cada artefacto sube
+  o baja hasta la llave (si la llave está a la misma altura, no hay codos de subida).
+- Cuando pasa por una abertura (puerta o ventana) tiene que esquivarla por arriba o por abajo: dos
+  cambios de nivel (4 codos) y el largo vertical. Con DXF se detectan las aberturas por capa
+  (`OPENING_TERMS`); con PDF, el gasista las marca o el caño las cruza y se avisa.
+
+**Cómo se cuenta lo vertical (las dos formas).** Longitud real del tramo = largo en planta + suma
+de los tramos verticales. Piezas: 2 codos a 90° por cada subida o bajada con el diámetro del tramo;
+la llave de paso del artefacto sigue como hoy. En la isométrica y el corte se dibujan las subidas
+(ya existen `sections/routeRiserProposals.ts` y `technicalRouteElevation.ts`).
+
+**Datos que faltan (los decide el usuario; no se ponen valores de norma de memoria):**
+- Distancia del caño a la pared en Perimetral.
+- Altura del caño en Por la pared.
+- Altura de la llave de paso por tipo de artefacto (cocina, calefón, estufa, caldera…).
+- Si usa codos a 45° (cambia el trazado y la tabla de longitud equivalente).
+- Qué versión de NAG-200 pide su distribuidora (en `_material-prueba/` hay dos).
 
 ### Red de seguridad: piezas que el motor no sabe clasificar (2026-11-25)
 Prueba: `lib/caneria/bajadaEnDiagonalVerification.ts` (bajada a la estufa que sale de la te de C en
@@ -127,7 +238,7 @@ diagonal, 45°, y después sube).
   gasista que agrandó sigue viendo "Previsto para ampliación".
 - Ninguna obra de prueba cambia un número (tablas del A3 y planilla iguales). Verificaciones: 74
   grupos, 622, 0 fallas.
-- **Queda afuera:** un cambio de medida en un nodo de 2 tramos que no es recto ni un giro claro (entre
+- ~~**Queda afuera:**~~ (resuelto el 2026-11-25, ver "Todo a 90°") un cambio de medida en un nodo de 2 tramos que no es recto ni un giro claro (entre
   3° y 10°) y un giro con cambio de medida (codo + reducción) siguen sin pieza por defecto. Si
   agrandan un caño, la hoja ya lo dice ("pieza sin contar") y la pantalla avisa; contarlos solos queda
   para decidir. En las obras de prueba no aparecen.
