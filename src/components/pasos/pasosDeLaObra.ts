@@ -3,9 +3,9 @@ import type { MainWorkflowStageId } from "@/lib/workbench/mainWorkflowNavigation
 import type { PasoDeLaBarra } from "./BarraDePasos";
 
 /*
- * Pasos 2 a 5 de la barra sobre las pantallas de hoy. El paso 1 (Datos de la obra) es la
- * ventana de datos. "Calcular" y "Entregar" ya no son pasos: los reemplaza "Revisar y
- * descargar".
+ * Pasos 2 a 5 de la barra sobre las pantallas de hoy. El paso 1 (Datos de la obra) lo dibuja
+ * BotonPasoDatos, que lee los datos guardados. "Calcular" y "Entregar" ya no son pasos:
+ * los reemplaza "Revisar y descargar".
  */
 
 export type EstadoDePasos = {
@@ -14,14 +14,15 @@ export type EstadoDePasos = {
   planoListo: boolean;
 };
 
-const ETAPA_DE_PASO: Record<Exclude<PasoId, "datos">, MainWorkflowStageId> = {
+const ETAPA_DE_PASO: Record<PasoId, MainWorkflowStageId> = {
   artefactos: "equipment",
   caneria: "route",
+  datos: "datos",
   plano: "plan",
   revisar: "review",
 };
 
-export function etapaDePaso(paso: Exclude<PasoId, "datos">) {
+export function etapaDePaso(paso: PasoId) {
   return ETAPA_DE_PASO[paso];
 }
 
@@ -57,6 +58,10 @@ export function siguientePaso(
   etapa: MainWorkflowStageId,
   estado: EstadoDePasos,
 ): { habilitado: boolean; hacia: MainWorkflowStageId; motivo: string } | null {
+  if (etapa === "datos") {
+    // Nada frena: lo que falte lo avisa Revisar y descargar.
+    return { habilitado: true, hacia: "plan", motivo: "" };
+  }
   if (etapa === "plan") {
     return {
       habilitado: estado.planoListo,

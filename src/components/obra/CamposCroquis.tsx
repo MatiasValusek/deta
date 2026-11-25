@@ -25,7 +25,7 @@ export function CamposCroquis({ obra }: { obra: DatosObra }) {
 
   return (
     <fieldset className="grid grid-cols-2 gap-3">
-      <legend className="mb-1 text-sm font-semibold">Croquis de ubicación</legend>
+      <legend className="sr-only">Croquis de ubicación</legend>
       <p className="col-span-2 text-xs text-[var(--muted)]">
         La calle de la obra va abajo; la primera entre calle a la izquierda y la segunda a la
         derecha.

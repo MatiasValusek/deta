@@ -7,10 +7,17 @@ import {
   type DatosInstalador,
   type DatosObra,
 } from "./obraData";
+import {
+  normalizarPartidos,
+  partidoAlCambiarLocalidad,
+  recordarPartido,
+} from "./partidosUsados";
 
 export const OBRA_STORAGE_KEY = "deta.obra.v1";
 // Separado de la obra: el instalador sobrevive cuando se empieza un trabajo nuevo.
 export const INSTALADOR_STORAGE_KEY = "deta.instalador.v1";
+// Partido usado para cada localidad, para sugerirlo en las obras siguientes.
+export const PARTIDOS_STORAGE_KEY = "deta.partidos.v1";
 
 export type ObraSnapshot = {
   obra: DatosObra;
@@ -46,7 +53,16 @@ export function leerObraSnapshotServidor() {
 }
 
 export function actualizarObra(cambios: Partial<DatosObra>) {
-  const obra = { ...leerObraSnapshot().obra, ...cambios };
+  const anterior = leerObraSnapshot().obra;
+  const obra = { ...anterior, ...cambios };
+  if (cambios.localidad !== undefined && cambios.partido === undefined) {
+    obra.partido = partidoAlCambiarLocalidad({
+      localidadAnterior: anterior.localidad,
+      localidadNueva: obra.localidad,
+      partido: anterior.partido,
+      partidos: normalizarPartidos(leerJson(PARTIDOS_STORAGE_KEY)),
+    });
+  }
   publicar({ obra, errorAlGuardar: guardar(OBRA_STORAGE_KEY, obra) });
 }
 
@@ -56,6 +72,14 @@ export function actualizarInstalador(cambios: Partial<DatosInstalador>) {
     instalador,
     errorAlGuardar: guardar(INSTALADOR_STORAGE_KEY, instalador),
   });
+}
+
+/** Recuerda el partido de la localidad de esta obra para sugerirlo en las siguientes. */
+export function recordarPartidoDeLaObra() {
+  const { obra } = leerObraSnapshot();
+  const partidos = normalizarPartidos(leerJson(PARTIDOS_STORAGE_KEY));
+  const nuevos = recordarPartido(partidos, obra.localidad, obra.partido);
+  if (nuevos !== partidos) guardar(PARTIDOS_STORAGE_KEY, nuevos);
 }
 
 /** Borra solo la obra actual. Los datos del instalador se conservan. */

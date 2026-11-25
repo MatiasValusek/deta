@@ -1,4 +1,5 @@
 export type MainWorkflowStageId =
+  | "datos"
   | "plan"
   | "equipment"
   | "route"
@@ -19,6 +20,7 @@ const PANEL_SECTIONS: Record<
   MainWorkflowPanelSectionId[]
 > = {
   calculate: ["calculation"],
+  datos: ["geometry"],
   deliver: ["calculation"],
   equipment: ["equipment"],
   plan: ["scale"],
@@ -31,6 +33,7 @@ const DEFAULT_PANEL: Record<
   MainWorkflowPanelSectionId
 > = {
   calculate: "calculation",
+  datos: "geometry",
   deliver: "calculation",
   equipment: "equipment",
   plan: "geometry",

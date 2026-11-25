@@ -311,7 +311,8 @@ import {
   type SourceCalibrationState,
 } from "./CalibrationPanel";
 import { CalculationPanel } from "./CalculationPanel";
-import { abrirDatosDeLaObra, DatosObraBoton } from "@/components/obra/DatosObraBoton";
+import { BotonPasoDatos } from "@/components/obra/BotonPasoDatos";
+import { PasoDatosObra } from "@/components/obra/PasoDatosObra";
 import { BarraDePasos, BotonSiguiente } from "@/components/pasos/BarraDePasos";
 import { etapaDePaso, pasosDeLaBarra, siguientePaso } from "@/components/pasos/pasosDeLaObra";
 import { RevisarYDescargar } from "@/components/revisar/RevisarYDescargar";
@@ -486,7 +487,7 @@ export function DxfWorkbench() {
   const [activeRightPanelSection, setActiveRightPanelSection] =
     useState<RightPanelSectionId>("geometry");
   const [activeMainStage, setActiveMainStage] =
-    useState<MainWorkflowStageId>("plan");
+    useState<MainWorkflowStageId>("datos");
   const [activeReviewViewId, setActiveReviewViewId] =
     useState<StandardTechnicalReviewViewId>("plan");
   const [highlightedSectionLinkId, setHighlightedSectionLinkId] =
@@ -537,6 +538,8 @@ export function DxfWorkbench() {
     const result = loadPersistedWorkbenchProject();
 
     if (result.status === "loaded") {
+      // Una obra ya empezada abre en el plano; una nueva, en Datos de la obra.
+      if (result.project.bases.length > 0) setActiveMainStage("plan");
       persistedProjectSignatureRef.current = JSON.stringify(result.project);
       const restoredProject = restorePersistedWorkbenchProject(result.project);
       const restoredCoordinatedProposal =
@@ -2593,7 +2596,7 @@ export function DxfWorkbench() {
         coordinatedRouteProposal ||
         hayObraCargada()) &&
       !window.confirm(
-        "Borrar el proyecto local guardado y volver al estado inicial?",
+        "¿Empezar una obra nueva? Se borran el plano, los artefactos y la cañería de la obra actual. Tus datos de instalador quedan guardados.",
       )
     ) {
       return;
@@ -2620,7 +2623,7 @@ export function DxfWorkbench() {
     setRouteProposalMode(null);
     setIsRouteEditing(false);
     setRouteProposalMarginInput(DEFAULT_ROUTE_PROPOSAL_MARGIN_INPUT);
-    setActiveMainStage("plan");
+    setActiveMainStage("datos");
     setActiveRightPanelSection("geometry");
     setHighlightedSectionLinkId(null);
     setHighlightedRegistrationLinkId(null);
@@ -6945,7 +6948,7 @@ export function DxfWorkbench() {
               : "Confirma el recorrido antes de calcular.";
 
   function canOpenWorkflowStage(stage: MainWorkflowStageId) {
-    if (stage === "plan") {
+    if (stage === "plan" || stage === "datos") {
       return true;
     }
 
@@ -7377,7 +7380,12 @@ export function DxfWorkbench() {
           <h1 className="min-w-0 text-xl font-semibold tracking-normal">DETA</h1>
           <BarraDePasos
             activo={activeWorkflowStage}
-            pasoDatos={<DatosObraBoton comoPaso />}
+            pasoDatos={
+              <BotonPasoDatos
+                activo={activeWorkflowStage === "datos"}
+                onClick={() => handleMainWorkflowStageChange("datos")}
+              />
+            }
             pasos={pasosDeLaBarra(estadoDePasos)}
             onElegir={(id) => handleMainWorkflowStageChange(id as MainWorkflowStageId)}
           />
@@ -7387,7 +7395,7 @@ export function DxfWorkbench() {
               type="button"
               onClick={handleResetLocalProject}
             >
-              Restablecer
+              Nueva obra
             </button>
           </div>
         </div>
@@ -7421,6 +7429,7 @@ export function DxfWorkbench() {
         onChange={(event) => handleBaseFileInput(event, "replace-active")}
       />
 
+      {activeWorkflowStage === "datos" ? <PasoDatosObra /> : null}
       {activeWorkflowStage === "review" ? (
         <RevisarYDescargar
           accessoryProposals={routeAccessoryProposals}
@@ -7434,11 +7443,7 @@ export function DxfWorkbench() {
           scaleMetersPerSourceUnit={calibrationScaleMetersPerSourceUnit(planBase)}
           visibleLayers={planBase?.visibleLayers ?? {}}
           onAdoptSegmentDiameter={handleAdoptSegmentDiameter}
-          onIrAPaso={(paso) =>
-            paso === "datos"
-              ? abrirDatosDeLaObra()
-              : handleMainWorkflowStageChange(etapaDePaso(paso))
-          }
+          onIrAPaso={(paso) => handleMainWorkflowStageChange(etapaDePaso(paso))}
         />
       ) : null}
       {siguiente ? (
@@ -7457,7 +7462,7 @@ export function DxfWorkbench() {
       <section
         className={`grid min-h-0 flex-1 gap-0 overflow-hidden ${
           hasAnyBase ? "grid-cols-[280px_minmax(0,1fr)_340px]" : "grid-cols-1"
-        } ${activeWorkflowStage === "review" ? "hidden" : ""}`}
+        } ${activeWorkflowStage === "review" || activeWorkflowStage === "datos" ? "hidden" : ""}`}
       >
         {hasAnyBase ? (
           <aside className="min-h-0 overflow-hidden border-r border-[var(--line)] bg-white">

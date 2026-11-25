@@ -43,8 +43,13 @@ Lo más valioso. Usa lo que el motor ya calcula.
       Barra de 5 pasos con tildes y "Siguiente"; las pantallas de Plano, Artefactos y Cañería
       siguen siendo las de antes. "Revisar y descargar" es nueva (`components/revisar/`):
       3 hojas en miniatura, avisos antes del botón, "Agrandar para ampliación futura" y
-      "Descargar las 3 hojas". Calcular y Entregar ya no son pasos. "Exportar materiales (Excel)" queda en Revisar y
-      descargar como opción secundaria, debajo de las hojas.
+      "Descargar las 3 hojas". Calcular y Entregar ya no son pasos. "Exportar materiales (Excel)"
+      queda en Revisar y descargar como opción secundaria, debajo de las hojas.
+- [x] **Datos de la obra como paso** (`components/obra/PasoDatosObra.tsx`): un formulario en una
+      columna, croquis plegado, datos del instalador cargados una vez (después, una línea con
+      "Cambiar"). Nada frena "Siguiente". "Nueva obra" (antes "Restablecer") vuelve a este paso
+      y conserva el instalador. Partido sugerido según la localidad ya usada
+      (`lib/obra/partidosUsados.ts`). Una obra nueva abre acá; una empezada, en el Plano.
 - [ ] Resolución automática de accesorios, transiciones y familias (opción compatible por defecto).
 - [ ] "Modo experto" que agrupe: decisiones de accesorios/transiciones, cortes y alturas,
       anclaje a paredes, propuesta automática de recorrido.
