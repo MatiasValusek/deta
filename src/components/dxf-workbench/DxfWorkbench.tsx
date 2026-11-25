@@ -325,6 +325,9 @@ import { RouteContextCard } from "./RouteContextCard";
 import { RouteIntentContextCard } from "./RouteIntentContextCard";
 import { RoutePanel } from "./RoutePanel";
 import { EscalaDelPlano } from "@/components/plano/EscalaDelPlano";
+import { PasoArtefactos } from "@/components/artefactos/PasoArtefactos";
+import { usePasoArtefactos } from "@/components/artefactos/usePasoArtefactos";
+import { planoParaUbicar } from "@/lib/artefactos/colocarArtefacto";
 import { estadoDeEscalaInicial } from "@/components/plano/escalaInicial";
 import { SubirPlano } from "@/components/plano/SubirPlano";
 import {
@@ -1915,6 +1918,18 @@ export function DxfWorkbench() {
     canOpenWorkflowStage(activeMainStage)
       ? activeMainStage
       : fallbackWorkflowStage();
+  // Paso Artefactos nuevo (components/artefactos): botones por tipo y un toque en el plano.
+  const planoArtefactos = useMemo(() => planoParaUbicar(planBase), [planBase]);
+  const pasoArtefactos = usePasoArtefactos({
+    activo: activeWorkflowStage === "equipment" && !equipmentDraft,
+    equipment: planEquipment,
+    network: routeNetwork,
+    plano: planoArtefactos,
+    guardar: (equipment, seleccionadoId) =>
+      planBase &&
+      updateBase(planBase.id, (base) => ({ ...base, equipment, selectedEquipmentId: seleccionadoId, showEquipment: true })),
+  });
+  const modoUbicarArtefacto: EquipmentPlacementMode = pasoArtefactos.ubicando ? "placing" : equipmentPlacementMode;
   const isRouteReviewVisible =
     activeWorkflowStage === "route" && canReviewConfirmedRoute;
   const isCoordinatedProposalVisualizationVisible = Boolean(
@@ -7820,7 +7835,7 @@ export function DxfWorkbench() {
                 drawing={drawing}
                 equipment={visibleEquipment}
                 equipmentDraft={activeEquipmentDraftOverlay}
-                equipmentPlacementMode={equipmentPlacementMode}
+                equipmentPlacementMode={modoUbicarArtefacto}
                 fitBounds={reviewPlanFitBounds}
                 fitNonce={activeBase?.visual.dxfFitNonce ?? 0}
                 hoveredEquipmentId={hoveredEquipmentId}
@@ -7872,7 +7887,7 @@ export function DxfWorkbench() {
                 onCursorChange={setCursor}
                 onEntityToggle={handleEntityToggle}
                 onEquipmentHover={setHoveredEquipmentId}
-                onEquipmentPoint={handleEquipmentPoint}
+                onEquipmentPoint={pasoArtefactos.ubicando ? pasoArtefactos.tocarPlano : handleEquipmentPoint}
                 onEquipmentPreview={handleEquipmentPreview}
                 onEquipmentSelect={handleSelectEquipment}
                 onPhysicalRouteElementSelect={handleSelectPhysicalRouteElement}
@@ -7913,7 +7928,7 @@ export function DxfWorkbench() {
                 documentProxy={pdfDocument?.proxy ?? null}
                 equipment={visibleEquipment}
                 equipmentDraft={activeEquipmentDraftOverlay}
-                equipmentPlacementMode={equipmentPlacementMode}
+                equipmentPlacementMode={modoUbicarArtefacto}
                 fitBounds={reviewPlanFitBounds}
                 fitNonce={activeBase?.visual.pdfFitNonce ?? 0}
                 hoveredEquipmentId={hoveredEquipmentId}
@@ -7959,7 +7974,7 @@ export function DxfWorkbench() {
                 onConstraintSelect={handleSelectConstraint}
                 onCursorChange={setCursor}
                 onEquipmentHover={setHoveredEquipmentId}
-                onEquipmentPoint={handleEquipmentPoint}
+                onEquipmentPoint={pasoArtefactos.ubicando ? pasoArtefactos.tocarPlano : handleEquipmentPoint}
                 onEquipmentPreview={handleEquipmentPreview}
                 onEquipmentSelect={handleSelectEquipment}
                 onPhysicalRouteElementSelect={handleSelectPhysicalRouteElement}
@@ -8019,6 +8034,31 @@ export function DxfWorkbench() {
           {activeWorkflowStage === "plan" && activeBase?.type === "plan" ? null : activeWorkflowStage === "plan" && activeRightPanelSection === "scale" ? (
           <div className="min-h-0 flex-1 overflow-auto">
             {rightPanelSections.find((section) => section.id === "scale")?.content}
+          </div>
+          ) : activeWorkflowStage === "equipment" ? (
+          <div className="min-h-0 flex-1 overflow-auto">
+            <PasoArtefactos
+              equipment={planEquipment}
+              herramienta={pasoArtefactos.herramienta}
+              masOpciones={rightPanelSections.find((section) => section.id === "equipment")?.content}
+              masOpcionesAbierto={Boolean(equipmentDraft)}
+              numeros={pasoArtefactos.numeros}
+              seleccionadoId={planBase?.selectedEquipmentId ?? null}
+              onBorrar={handleDeleteSelectedEquipment}
+              onCambiar={(id, cambio) =>
+                planBase &&
+                updateBase(planBase.id, (base) => ({
+                  ...base,
+                  equipment: base.equipment.map((item) => (item.id === id ? { ...item, ...cambio } : item)),
+                }))
+              }
+              onElegir={(tipo) => pasoArtefactos.elegir(tipo.tipo)}
+              onMover={pasoArtefactos.mover}
+              onSeleccionar={(id) => {
+                pasoArtefactos.soltar();
+                selectEquipmentOnPlan(id);
+              }}
+            />
           </div>
           ) : activeWorkflowStage !== "plan" ? (
           <div className="min-h-0 flex-1 overflow-hidden">

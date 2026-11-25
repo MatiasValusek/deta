@@ -661,10 +661,9 @@ function equipmentWallReferenceOffset(params: {
   };
 }
 
+/** Solo la pared que quedó por confirmar; un artefacto ubicado sin pared (PDF) no queda pendiente. */
 function equipmentAnchorIsPending(equipment: WorkbenchEquipment) {
-  return (
-    equipment.role === "appliance" && equipment.wallAnchor?.status !== "anchored"
-  );
+  return equipment.role === "appliance" && equipment.wallAnchor?.status === "pending";
 }
 
 function draftAnchorIsPending(draft: EquipmentDraft) {
