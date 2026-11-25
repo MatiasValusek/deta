@@ -73,8 +73,8 @@ export function usePasoArtefactos(params: {
     numeros,
     /** El plano espera un toque para ubicar o mover. */
     ubicando: activo && herramienta !== null && plano !== null,
-    elegir: (tipo: EquipmentType) =>
-      setHerramienta((actual) => (actual && "tipo" in actual && actual.tipo === tipo ? null : { tipo })),
+    // Tocar el botón ya elegido lo deja elegido: soltarlo de golpe confunde.
+    elegir: (tipo: EquipmentType) => setHerramienta({ tipo }),
     mover: (id: string) => setHerramienta({ moverId: id }),
     soltar: () => setHerramienta(null),
     tocarPlano,

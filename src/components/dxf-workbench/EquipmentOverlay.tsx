@@ -681,7 +681,8 @@ function MarkerLabel({
   const width = Math.min(Math.max(name.length * 6.8 + 18, 72), 190);
 
   return (
-    <g transform="translate(20 -22)">
+    // El cartel no toma toques: si no, tapa el lugar donde va el artefacto de al lado.
+    <g pointerEvents="none" transform="translate(20 -22)">
       <rect
         fill="#ffffff"
         height="22"
