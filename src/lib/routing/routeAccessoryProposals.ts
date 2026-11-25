@@ -611,6 +611,7 @@ export function reconcileRouteAccessoryProposalState(params: {
     network: removeStaleAutomaticAccessories({
       confirmedAccessoryIds,
       network: params.network,
+      proposals: params.proposals,
     }),
   };
 }
@@ -979,17 +980,53 @@ function removeAutomaticAccessoryById(
   return didChange ? { ...network, segments } : network;
 }
 
+/**
+ * Una te o un codo que el gasista confirmó (o cargó con la obra) se respeta al abrirla,
+ * aunque no tenga guardada la decisión, mientras siga teniendo sentido: el nodo existe, el
+ * tramo de la pieza llega a ese nodo, y la app sigue leyendo ese nodo como una derivación
+ * (te) o una esquina (codo). La app solo completa lo que falta.
+ */
+function piezaConfirmadaVigente(
+  network: ManualRouteNetwork,
+  accessory: RouteSegmentAccessory,
+  segmentId: string,
+  tiposPorNodo: Map<string, Set<string>>,
+) {
+  if (accessory.origin !== "user_confirmed") {
+    return false;
+  }
+
+  const partes = accessory.id.slice(AUTOMATIC_ACCESSORY_ID_PREFIX.length).split(":");
+  const tipo = partes.at(-2);
+  const nodeId = partes.slice(0, -2).join(":");
+  const tramos = network.segments.filter(
+    (segment) => segment.fromNodeId === nodeId || segment.toNodeId === nodeId,
+  );
+
+  if (!nodeId || !tramos.some((segment) => segment.id === segmentId)) {
+    return false;
+  }
+
+  return (tipo === "tee" || tipo === "elbow") && Boolean(tiposPorNodo.get(nodeId)?.has(tipo));
+}
+
 function removeStaleAutomaticAccessories(params: {
   confirmedAccessoryIds: Set<string>;
   network: ManualRouteNetwork;
+  proposals: AccessoryProposal[];
 }): ManualRouteNetwork {
   let didChange = false;
+  const tiposPorNodo = new Map<string, Set<string>>();
+  for (const proposal of params.proposals) {
+    tiposPorNodo.set(proposal.nodeId, new Set([...(tiposPorNodo.get(proposal.nodeId) ?? []), proposal.kind]));
+  }
   const segments = params.network.segments.map((segment) => {
     const accessories = segment.accessories ?? [];
     const nextAccessories = accessories.filter(
       (accessory) =>
         !accessory.id.startsWith(AUTOMATIC_ACCESSORY_ID_PREFIX) ||
-        params.confirmedAccessoryIds.has(accessory.id),
+        params.confirmedAccessoryIds.has(accessory.id) ||
+        piezaConfirmadaVigente(params.network, accessory, segment.id, tiposPorNodo),
     );
 
     if (nextAccessories.length === accessories.length) {
