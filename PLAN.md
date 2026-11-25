@@ -68,7 +68,16 @@ Lo más valioso. Usa lo que el motor ya calcula.
 - [ ] Resolución automática de accesorios, transiciones y familias (opción compatible por defecto).
 - [ ] "Modo experto" que agrupe: decisiones de accesorios/transiciones, cortes y alturas,
       anclaje a paredes, propuesta automática de recorrido.
-- [ ] Numeración automática de tramos con letras/números como en los planos reales.
+- [x] Numeración automática de tramos con letras/números como en los planos reales (M, A, B…
+      1, 2…; se ve en el plano del paso Cañería con su diámetro: "C-M Ø32").
+- [x] **Paso Cañería nuevo** (`components/caneria/`, `lib/caneria/`): el gasista toca dónde dobla y
+      dónde termina el caño principal (sale del medidor, en escuadra); la app baja una derivación en
+      ángulo recto a cada artefacto, pone tes, codos y llaves, numera y calcula. La red se guarda en
+      cada toque (Siguiente sin "Terminar" ni "Aceptar"); lo marcado queda dentro de la misma red (ids
+      `cp:`) y se relee al volver. Corregir: arrastrar esquinas, la punta y los puntos de salida,
+      agregar y sacar quiebres, mover un tramo en paralelo, trazar una bajada a mano. Aviso si una
+      bajada cruza otro caño. El trazado automático de antes queda plegado ("pantalla anterior") y
+      una cañería hecha con él no se pisa hasta que el gasista elige marcar el caño principal.
 - [x] **Paso Artefactos nuevo** (`components/artefactos/`, `lib/artefactos/`): un botón por tipo con
       el consumo típico (cocina 9.000, horno 3.000, calefón 20.000, termotanque 6.500, caldera 30.000,
       estufa/calefactor 3.000, secarropas 4.000 kcal/h; Otro sin consumo), un toque en el plano para
@@ -98,6 +107,39 @@ Lo más valioso. Usa lo que el motor ya calcula.
 ---
 
 ## Notas
+
+### Paso Cañería nuevo (2026-11-25, contado en el navegador de punta a punta)
+Casa de 10 × 8 m con medidor, 2 estufas, cocina y calefón (como `obraCasaDesdeCero.ts`), datos
+inventados. El caño principal sube desde el medidor, dobla en una esquina y termina en la otra punta.
+Las dos corridas terminaron con "Todo listo para descargar" y bajaron las 3 hojas.
+
+| Paso | DXF | PDF |
+|---|---:|---:|
+| Datos de la obra (Nueva obra + Aceptar, croquis 1, norte 2, Siguiente) | 6 | 6 |
+| Plano (archivo 2, Siguiente; con PDF + 2 puntos y Confirmar) | 3 | 6 |
+| Artefactos (medidor 1, Estufa + 2, Cocina 2, Calefón 2, Siguiente) | 9 | 9 |
+| Cañería (esquina, fin, Siguiente) | 3 | 3 |
+| Revisar y descargar | 1 | 1 |
+| **Total** | **22** | **25** |
+
+Cañería quedó en 3 clics, los mismos que "Generar recorrido + Aceptar + Siguiente", pero ahora la
+traza es la que marca el gasista (antes la automática sacó el caño por fuera de la casa) y no hay
+nada que aceptar. Para 20: Datos de la obra (6 contra 2 de `PANTALLAS.md`) y la escala del PDF.
+
+**Encontrado y resuelto al probar:**
+- Al completarse la red, la revisión de antes (pestañas Corte/Axo) reencuadraba el plano y el toque
+  siguiente caía en otro lugar. En el paso nuevo no se muestra.
+- Al releer la red, todas las bajadas guardaban su salida como si el gasista la hubiera movido y se
+  perdía el fin del caño. Ahora la bajada dice si su salida se movió (`cp:bs:`) o es a mano (`cp:bm:`).
+- Una bajada con la salida corrida volvía por encima del caño principal; ahora sale en ángulo recto.
+
+**Pendiente:**
+- Con el plano chico en pantalla, algunas etiquetas de tramo se pisan (`4-C` y `B-C`).
+- En la casa de prueba la bajada a la estufa sale justo de la esquina y el cálculo le adopta 32 en
+  lugar de 20 "por longitud equivalente de reducciones". Es el motor (congelado); mirar con un caso
+  real si corresponde.
+- Los marcadores "Z" de alturas de la pantalla anterior siguen sobre la cañería (van a Modo experto).
+- Arrastrar el caño entero no es un arrastre: se toca el tramo y "Mover este tramo en paralelo" (+2).
 
 ### Paso Artefactos nuevo (2026-11-25, contado en el navegador)
 Misma casa de 10 × 8 m, medidor, 2 estufas, cocina y calefón (como `obraCasaDesdeCero.ts`).
