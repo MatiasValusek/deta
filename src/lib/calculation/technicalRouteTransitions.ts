@@ -21,6 +21,7 @@ import type { WorkbenchEquipment } from "@/lib/equipment/types";
 import {
   buildEquipmentIndex,
   resolveRouteNodePosition,
+  resolveRouteSegmentPath,
 } from "@/lib/routing/network";
 import type { ManualRouteNetwork } from "@/lib/routing/types";
 
@@ -1136,9 +1137,32 @@ function incidentVectorAtTransitionNode(params: {
     return null;
   }
 
+  // La dirección del tramo en la te es la de su primer recorrido (hasta su primer quiebre), no la
+  // recta hasta la otra punta: una bajada que sale derecho y después dobla sale "a través".
+  // Igual que routing/incidentGeometry.ts.
+  const segment = params.network.segments.find(
+    (candidate) => candidate.id === params.segmentId,
+  );
+  const nodeIsFrom = segment?.fromNodeId === params.transition.nodeId;
+  const orientedPath = segment
+    ? nodeIsFrom
+      ? resolveRouteSegmentPath(segment, params.transition.position, neighborPosition)
+      : [...resolveRouteSegmentPath(segment, neighborPosition, params.transition.position)].reverse()
+    : [params.transition.position, neighborPosition];
+  const firstPoint =
+    orientedPath
+      .slice(1)
+      .find(
+        (point) =>
+          Math.hypot(
+            point.x - params.transition.position.x,
+            point.y - params.transition.position.y,
+          ) > 0,
+      ) ?? neighborPosition;
+
   return {
-    x: neighborPosition.x - params.transition.position.x,
-    y: neighborPosition.y - params.transition.position.y,
+    x: firstPoint.x - params.transition.position.x,
+    y: firstPoint.y - params.transition.position.y,
   };
 }
 
