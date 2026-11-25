@@ -139,17 +139,28 @@ export function leerTraza(network: ManualRouteNetwork, equipment: WorkbenchEquip
 
   const medidor = equipment.find((item) => item.role === "supply");
   const posicion = new Map(network.nodes.flatMap((n) => (n.position ? [[n.id, n.position] as const] : [])));
-  const puntos: Point2D[] = [];
+  // Quiebres del caño principal; las derivaciones solo cuentan si caen en un quiebre (la de la
+  // punta es el fin del caño).
+  const marcados: Array<{ derivacion: boolean; punto: Point2D }> = [];
   let actual = ID_MEDIDOR;
 
   for (;;) {
     const tramo = network.segments.find((s) => esTramoPrincipal(s.id) && s.fromNodeId === actual);
     if (!tramo) break;
-    puntos.push(...(tramo.vertices ?? []).map(plano));
+    marcados.push(...(tramo.vertices ?? []).map((v) => ({ derivacion: false, punto: plano(v) })));
     const fin = posicion.get(tramo.toNodeId);
-    if (fin) puntos.push(plano(fin));
+    if (fin) marcados.push({ derivacion: true, punto: plano(fin) });
     actual = tramo.toNodeId;
   }
+
+  const inicio = medidor ? plano(medidor.connectionPoint) : marcados[0]?.punto;
+  const puntos = marcados
+    .filter((m, i) => {
+      if (!m.derivacion || i === marcados.length - 1 || !inicio) return true;
+      const antes = i === 0 ? inicio : marcados[i - 1].punto;
+      return !enLineaRecta(antes, m.punto, marcados[i + 1].punto);
+    })
+    .map((m) => m.punto);
 
   const salidas: Record<string, Point2D> = {};
   const bajadasAMano: Record<string, Point2D[]> = {};
@@ -178,19 +189,22 @@ export function enEscuadra(anterior: Point2D, tocado: Point2D): Point2D {
     : { x: anterior.x, y: tocado.y };
 }
 
-/** Saca puntos repetidos y los que quedan en línea recta con sus vecinos (no son quiebres). */
+/**
+ * Saca los puntos repetidos. Un quiebre en línea recta se deja: el gasista lo agrega para
+ * después arrastrarlo, y sin giro no suma codo.
+ */
 export function limpiarPuntos(medidor: Point2D, puntos: Point2D[]): Point2D[] {
   const todos = [plano(medidor), ...puntos.map(plano)];
-  const sinRepetir = todos.filter((p, i) => i === 0 || distancia(p, todos[i - 1]) > 1e-9);
-  const limpios = sinRepetir.filter((p, i) => {
-    if (i === 0 || i === sinRepetir.length - 1) return true;
-    const a = sinRepetir[i - 1];
-    const b = sinRepetir[i + 1];
-    const cruz = (p.x - a.x) * (b.y - p.y) - (p.y - a.y) * (b.x - p.x);
-    const escala = Math.max(distancia(a, p) * distancia(p, b), 1e-12);
-    return Math.abs(cruz) / escala > 1e-6;
-  });
-  return limpios.slice(1);
+  return todos.filter((p, i) => i === 0 || distancia(p, todos[i - 1]) > 1e-9).slice(1);
+}
+
+/** b está en la recta de a a c, sin girar (menos de 10° se toma como recto, igual que los codos). */
+export function enLineaRecta(a: Point2D, b: Point2D, c: Point2D) {
+  const u = { x: b.x - a.x, y: b.y - a.y };
+  const v = { x: c.x - b.x, y: c.y - b.y };
+  const largo = Math.hypot(u.x, u.y) * Math.hypot(v.x, v.y);
+  if (largo < 1e-12) return true;
+  return (u.x * v.x + u.y * v.y) / largo > Math.cos((10 * Math.PI) / 180);
 }
 
 /** Lugar del caño principal más cercano a un punto: a qué distancia del medidor y en qué tramo. */
@@ -229,8 +243,9 @@ function enLinea(linea: Point2D[], largos: number[], t: number) {
 }
 
 /**
- * Bajada de la derivación al artefacto. Si el artefacto queda de frente, va recta; si queda
- * más allá de la punta del caño, sigue la dirección del caño y dobla una vez a 90°.
+ * Bajada de la derivación al artefacto. Si el artefacto queda de frente, va recta. Si queda al
+ * costado del tramo, sale en ángulo recto y dobla una vez (nunca vuelve por encima del caño).
+ * Si queda más allá de la punta, sigue la dirección del caño y dobla una vez a 90°.
  */
 function bajadaEnEscuadra(desde: Point2D, hasta: Point2D, linea: Point2D[], tramo: number): Point2D[] {
   const tolerancia = Math.max(distancia(desde, hasta) * 1e-6, 1e-9);
@@ -238,7 +253,11 @@ function bajadaEnEscuadra(desde: Point2D, hasta: Point2D, linea: Point2D[], tram
   const a = linea[tramo];
   const b = linea[tramo + 1];
   const horizontal = Math.abs(b.x - a.x) >= Math.abs(b.y - a.y);
-  return [horizontal ? { x: hasta.x, y: desde.y } : { x: desde.x, y: hasta.y }];
+  const dentro = (v: number, p: number, q: number) => v >= Math.min(p, q) - tolerancia && v <= Math.max(p, q) + tolerancia;
+  const alCostado = horizontal ? dentro(hasta.x, a.x, b.x) : dentro(hasta.y, a.y, b.y);
+  const sigueElCano = horizontal ? { x: hasta.x, y: desde.y } : { x: desde.x, y: hasta.y };
+  const saleDerecho = horizontal ? { x: desde.x, y: hasta.y } : { x: hasta.x, y: desde.y };
+  return [alCostado ? saleDerecho : sigueElCano];
 }
 
 /** "El caño a la caldera cruza otro caño": bajadas que se cruzan con otro tramo. */

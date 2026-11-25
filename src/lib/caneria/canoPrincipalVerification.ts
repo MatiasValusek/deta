@@ -104,8 +104,8 @@ export function runCanoPrincipalVerifications() {
     igualPunto(enEscuadra({ x: 0, y: 0 }, { x: 5, y: -80 }), { x: 0, y: -80 });
   });
 
-  verify("un punto en línea recta no es un quiebre", () => {
-    igual(limpiarPuntos({ x: 0, y: 0 }, [{ x: 0, y: 50 }, { x: 0, y: 100 }, { x: 100, y: 100 }]).length, 2);
+  verify("un quiebre agregado en un tramo recto se conserva (después se arrastra)", () => {
+    igual(limpiarPuntos({ x: 0, y: 0 }, [{ x: 0, y: 50 }, { x: 0, y: 100 }, { x: 100, y: 100 }]).length, 3);
   });
 
   verify("sin caño principal, avisa qué hacer", () => {
@@ -117,6 +117,8 @@ export function runCanoPrincipalVerifications() {
     const bajada = network.segments.find((s) => s.toNodeId === "cp:a:ca-cocina");
     igualPunto(network.nodes.find((n) => n.id === bajada?.fromNodeId)?.position, { x: 5000, y: 4000 });
     igual(bajada?.vertices?.length, 1);
+    // Sale en ángulo recto del caño y dobla hacia la cocina: no vuelve por encima del caño.
+    igualPunto(bajada?.vertices?.[0], { x: 5000, y: 7700 });
   });
 
   verify("una bajada que cruza otro caño trae aviso", () => {

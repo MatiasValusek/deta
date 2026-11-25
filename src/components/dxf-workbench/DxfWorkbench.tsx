@@ -330,6 +330,8 @@ import { usePasoArtefactos } from "@/components/artefactos/usePasoArtefactos";
 import { planoParaUbicar } from "@/lib/artefactos/colocarArtefacto";
 import { PasoCaneria } from "@/components/caneria/PasoCaneria";
 import { usePasoCaneria } from "@/components/caneria/usePasoCaneria";
+import { CorreccionCaneria } from "@/components/caneria/CorreccionCaneria";
+import { useCorreccionCaneria } from "@/components/caneria/useCorreccionCaneria";
 import { estadoDeEscalaInicial } from "@/components/plano/escalaInicial";
 import { SubirPlano } from "@/components/plano/SubirPlano";
 import {
@@ -1942,10 +1944,21 @@ export function DxfWorkbench() {
     guardarRed: (network) =>
       planBase && updateBase(planBase.id, (base) => ({ ...base, routeNetwork: network, showRoute: true })),
   });
+  const correccionCaneria = useCorreccionCaneria({
+    activa: pasoCaneria.corrigiendo,
+    cursor,
+    equipment: planEquipment,
+    network: routeNetwork,
+    traza: pasoCaneria.traza,
+    guardar: pasoCaneria.guardar,
+  });
+  const corrigiendoCaneria = pasoCaneria.corrigiendo;
   // Un toque en el plano: ubica un artefacto o marca el caño principal, según el paso.
   const tocarPlanoDelPaso = pasoCaneria.marcando
     ? pasoCaneria.tocarPlano
-    : pasoArtefactos.ubicando
+    : correccionCaneria.esperaToque
+      ? correccionCaneria.tocarPlano
+      : pasoArtefactos.ubicando
       ? pasoArtefactos.tocarPlano
       : null;
   const modoUbicarArtefacto: EquipmentPlacementMode = tocarPlanoDelPaso ? "placing" : equipmentPlacementMode;
@@ -7872,7 +7885,7 @@ export function DxfWorkbench() {
                 hoveredEquipmentId={hoveredEquipmentId}
                 highlightedRouteSegmentIds={highlightedRouteSegmentIds}
                 invalidRouteSegmentIds={routeInvalidSegmentIds}
-                isRouteEditing={routePhysicalEditingEnabled}
+                isRouteEditing={routePhysicalEditingEnabled || corrigiendoCaneria}
                 isPointSelectionActive={
                   activeBase ? activeBase.calibration.toolMode !== "idle" : false
                 }
@@ -7889,7 +7902,7 @@ export function DxfWorkbench() {
                 selectedConstraintId={activeBase?.selectedConstraintId ?? null}
                 selectedEquipmentId={activeBase?.selectedEquipmentId ?? null}
                 selectedEntityIds={activeBase?.selectedEntityIds ?? []}
-                selectedRouteEdit={selectedRouteEdit}
+                selectedRouteEdit={corrigiendoCaneria ? correccionCaneria.edicion : selectedRouteEdit}
                 sectionLinkDraft={activeSectionLinkDraftOverlay}
                 sectionLinkMode={sectionLinkMode}
                 sectionLinks={visiblePlanLinks}
@@ -7921,10 +7934,10 @@ export function DxfWorkbench() {
                 onEquipmentPoint={tocarPlanoDelPaso ?? handleEquipmentPoint}
                 onEquipmentPreview={pasoCaneria.marcando ? pasoCaneria.mirar : handleEquipmentPreview}
                 onEquipmentSelect={handleSelectEquipment}
-                onPhysicalRouteElementSelect={handleSelectPhysicalRouteElement}
-                onPhysicalRouteNodeMove={handleMovePhysicalRouteNode}
-                onPhysicalRouteVertexInsert={handleInsertPhysicalRouteVertex}
-                onPhysicalRouteVertexMove={handleMovePhysicalRouteVertex}
+                onPhysicalRouteElementSelect={corrigiendoCaneria ? correccionCaneria.seleccionar : handleSelectPhysicalRouteElement}
+                onPhysicalRouteNodeMove={corrigiendoCaneria ? correccionCaneria.moverNodo : handleMovePhysicalRouteNode}
+                onPhysicalRouteVertexInsert={corrigiendoCaneria ? correccionCaneria.insertarVertice : handleInsertPhysicalRouteVertex}
+                onPhysicalRouteVertexMove={corrigiendoCaneria ? correccionCaneria.moverVertice : handleMovePhysicalRouteVertex}
                 onRectangleSelect={handleRectangleSelect}
                 onRoutePoint={handleRoutePoint}
                 onRoutePreview={handleRoutePreview}
@@ -7965,7 +7978,7 @@ export function DxfWorkbench() {
                 hoveredEquipmentId={hoveredEquipmentId}
                 highlightedRouteSegmentIds={highlightedRouteSegmentIds}
                 invalidRouteSegmentIds={routeInvalidSegmentIds}
-                isRouteEditing={routePhysicalEditingEnabled}
+                isRouteEditing={routePhysicalEditingEnabled || corrigiendoCaneria}
                 isPointSelectionActive={
                   activeBase ? activeBase.calibration.toolMode !== "idle" : false
                 }
@@ -7980,7 +7993,7 @@ export function DxfWorkbench() {
                 savedView={activeBase?.visual.pdfView ?? null}
                 selectedConstraintId={activeBase?.selectedConstraintId ?? null}
                 selectedEquipmentId={activeBase?.selectedEquipmentId ?? null}
-                selectedRouteEdit={selectedRouteEdit}
+                selectedRouteEdit={corrigiendoCaneria ? correccionCaneria.edicion : selectedRouteEdit}
                 sectionLinkDraft={activeSectionLinkDraftOverlay}
                 sectionLinkMode={sectionLinkMode}
                 sectionLinks={visiblePlanLinks}
@@ -8008,10 +8021,10 @@ export function DxfWorkbench() {
                 onEquipmentPoint={tocarPlanoDelPaso ?? handleEquipmentPoint}
                 onEquipmentPreview={pasoCaneria.marcando ? pasoCaneria.mirar : handleEquipmentPreview}
                 onEquipmentSelect={handleSelectEquipment}
-                onPhysicalRouteElementSelect={handleSelectPhysicalRouteElement}
-                onPhysicalRouteNodeMove={handleMovePhysicalRouteNode}
-                onPhysicalRouteVertexInsert={handleInsertPhysicalRouteVertex}
-                onPhysicalRouteVertexMove={handleMovePhysicalRouteVertex}
+                onPhysicalRouteElementSelect={corrigiendoCaneria ? correccionCaneria.seleccionar : handleSelectPhysicalRouteElement}
+                onPhysicalRouteNodeMove={corrigiendoCaneria ? correccionCaneria.moverNodo : handleMovePhysicalRouteNode}
+                onPhysicalRouteVertexInsert={corrigiendoCaneria ? correccionCaneria.insertarVertice : handleInsertPhysicalRouteVertex}
+                onPhysicalRouteVertexMove={corrigiendoCaneria ? correccionCaneria.moverVertice : handleMovePhysicalRouteVertex}
                 onRoutePoint={handleRoutePoint}
                 onRoutePreview={handleRoutePreview}
                 onSectionLinkHover={setHoveredSectionLinkId}
@@ -8071,6 +8084,7 @@ export function DxfWorkbench() {
             <PasoCaneria
               ajena={pasoCaneria.ajena}
               avisos={pasoCaneria.avisos}
+              correccion={<CorreccionCaneria correccion={correccionCaneria} equipment={planEquipment} />}
               corrigiendo={pasoCaneria.corrigiendo}
               hayMedidor={supplyCount === 1}
               masOpciones={rightPanelSections.find((section) => section.id === "route")?.content}
@@ -8083,7 +8097,10 @@ export function DxfWorkbench() {
                 setCoordinatedRouteProposal(null);
                 pasoCaneria.empezarDeNuevo();
               }}
-              onSeguirMarcando={pasoCaneria.seguirMarcando}
+              onSeguirMarcando={() => {
+                correccionCaneria.limpiar();
+                pasoCaneria.seguirMarcando();
+              }}
             />
           </div>
           ) : activeWorkflowStage === "equipment" ? (
