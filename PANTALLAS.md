@@ -22,8 +22,9 @@ Abajo a la derecha, siempre el mismo botón: **Siguiente**.
 **Qué ve:** un solo formulario, en una columna.
 - Propietario, calle y número, entre calles, localidad, partido.
 - Plegado debajo: "Croquis de ubicación (para la factibilidad)": calle de atrás, metros a cada esquina, norte.
-- Datos del instalador (nombre, matrícula, categoría): **se piden una sola vez** y quedan guardados.
-  Las obras siguientes los traen cargados; se ven en una línea con "Cambiar".
+- Datos del gasista (nombre, matrícula, categoría): **se cargan una sola vez** y se reusan en cada obra.
+  Quedan guardados aparte de la obra: "Nueva obra" no los borra. Las obras siguientes los traen cargados
+  y se ven en una línea ("Instalador: … · Mat. …") con "Cambiar". Cambiarlos no toca las obras ya descargadas.
 
 **Qué pedimos (lo mínimo):** propietario, calle y número, localidad. El resto se puede completar después;
 en Revisar avisa qué falta para cada hoja.
@@ -46,10 +47,16 @@ la localidad si ya se usó antes.
   los ojos: "Escala tomada del archivo: la casa mide 10,00 × 8,00 m". Si el plano tiene cotas, las usa.
 - Muestra solo las capas útiles (paredes, textos); las demás quedan ocultas pero no se borran.
 
-**Qué puede corregir:** "La medida no es correcta" → marca dos puntos del plano y escribe la medida en
+**Cuando el archivo no trae la escala clara** (un PDF, o un DXF sin unidades o dibujado en otra unidad,
+por ejemplo en cm o en metros cuando parece mm): la app no adivina. Muestra "Marcá una medida que conozcas"
+y el gasista toca los dos extremos de una distancia conocida (una pared, una cota) y escribe cuánto mide,
+en **metros**. La app muestra el resultado para confirmar con los ojos ("la casa mide 10,00 × 8,00 m").
+
+**Qué puede corregir:** "La medida no es correcta" → el mismo marcado de arriba: dos puntos y la medida en
 **metros** (no en milímetros como hoy). Capas: un botón "Capas" plegado.
 
-**Clics:** 2 (subir + elegir archivo) + 1 (Siguiente) = **3**. Si hay que marcar la escala a mano: +3.
+**Clics:** 2 (subir + elegir archivo) + 1 (Siguiente) = **3**. Si hay que marcar la escala a mano: +3
+(2 puntos + Confirmar; escribir la medida no cuenta).
 
 ### 3. Artefactos
 
@@ -70,7 +77,8 @@ se toca la estufa una vez y se marcan las dos.
 - **"Boca taponada"** (un tilde) — sale en Referencias y lleva tapón en materiales;
 - nombre ("Cocina comedor"), moverlo arrastrando, borrarlo.
 
-**Clics:** medidor 2 + 4 artefactos × 2 = 10, + Siguiente 1 = **11**. Cada boca taponada +1.
+**Clics:** al entrar al paso, **Medidor ya viene elegido** (siempre es lo primero): tocar el plano 1.
+4 artefactos × 2 (botón + plano) = 8, + Siguiente 1 = **10**. Cada boca taponada +1.
 
 ### 4. Cañería
 
@@ -93,7 +101,23 @@ dónde termina. Una línea recta o con quiebres, pegada a una pared.
 - "Trazar a mano este tramo" para un caso raro (pared en el medio): se marcan los puntos.
 - Si algo no cierra, aviso claro: "El caño a la caldera cruza otro caño. Arrastrá el punto de salida".
 
-**Clics:** 1 o 2 toques (fin del caño y, si hace falta, un quiebre) + Siguiente = **2 a 3**.
+**Las piezas no frenan nunca.** Tes, codos y llaves los pone la app y no se piden confirmar ni rechazar.
+Si el gasista cargó a mano un codo o una llave y no tiene posición en el corte, **se cuenta en el cálculo
+y en materiales y listo**: no frena el paso ni la descarga. Solo queda sin dibujar en el corte (Modo experto).
+
+**Clics, recontados con una casa de 2 esquinas** (el caño principal sale del medidor, dobla en las dos
+esquinas y termina en la otra punta). Se cuenta cada punto que marca el gasista:
+
+| Qué toca | Clics |
+|---|---:|
+| Primera esquina | 1 |
+| Segunda esquina | 1 |
+| Fin del caño principal | 1 |
+| Siguiente (cierra el caño, no hace falta "Terminar") | 1 |
+| **Total** | **4** |
+
+Las bajadas a cada artefacto las pone la app: 0 clics. Si una bajada tiene que esquivar una pared,
++1 por cada quiebre que marque a mano. Con una casa recta (sin esquinas): 2 (fin + Siguiente).
 
 ### 5. Revisar y descargar
 
@@ -103,7 +127,15 @@ dónde termina. Una línea recta o con quiebres, pegada a una pared.
   tocando una se ve grande;
 - **avisos** (si hay), cada uno con qué pasa y qué hacer, y un botón que lleva al paso:
   "Falta la calle de atrás para el croquis. Tocá *Datos de la obra*.";
+- **avisos en lenguaje simple, arriba del botón de descarga** (nunca después): primero se leen, después
+  se descarga. Cada aviso dice qué pasa y qué hacer, sin códigos ni palabras técnicas. Si no hay avisos,
+  se ve "Todo listo para descargar";
+- **"Agrandar para ampliación futura"** visible en esta pantalla, no en Modo experto: en la tabla de tramos,
+  cada tramo tiene su medida y se puede agrandar (ver abajo);
 - un botón grande: **Descargar las 3 hojas**.
+
+Los avisos no son decisiones técnicas: hablan de datos que faltan para una hoja ("Falta la calle de atrás
+para el croquis") o de algo del dibujo ("El caño a la caldera cruza otro caño"). Ninguno pide elegir piezas.
 
 **Qué pedimos:** nada. Si no hay avisos, descargar.
 
@@ -123,12 +155,13 @@ gabinete, planilla por tramo.
 |---|---:|
 | Datos de la obra | 2 |
 | Plano | 3 |
-| Artefactos (medidor + 4) | 11 |
-| Cañería | 2 a 3 |
+| Artefactos (medidor + 4) | 10 |
+| Cañería (casa de 2 esquinas) | 4 |
 | Revisar y descargar | 1 |
-| **Total** | **19 a 20** |
+| **Total** | **20** |
 
-Contra los 70 de hoy. Si la escala no viene en el archivo: +3. Cada boca taponada: +1.
+Contra los 70 de hoy. Si la escala no viene en el archivo: +3. Cada boca taponada: +1. Cada quiebre a mano
+en una bajada: +1. Sin el Medidor elegido de entrada serían 21: por eso se elige solo.
 
 ---
 
@@ -164,9 +197,9 @@ muestra una sección más, al final y plegada:
 Mientras dure el cambio, las pantallas nuevas se abren con "Nueva obra" y las viejas siguen disponibles en
 "Pantallas anteriores". Cada paso termina con la app funcionando, las verificaciones en verde y un commit.
 
-1. **Destrabar lo que hoy frena** (sin pantallas nuevas todavía): que la revisión no pida confirmar tes ni
-   codos (ya los pone el motor) y que una pieza cargada a mano sin posición no bloquee el paso a calcular
-   (hoy pasa en la obra de tres derivaciones). Arreglar en la isométrica el "LL.P" del medidor que pisa el
+1. **Destrabar lo que hoy frena** (sin pantallas nuevas todavía): que la revisión no pida confirmar ni
+   rechazar tes, codos ni llaves (ya los pone el motor) y que una pieza cargada a mano sin posición en el
+   corte no bloquee el paso a calcular: se cuenta y listo (hoy pasa en la obra de tres derivaciones). Arreglar en la isométrica el "LL.P" del medidor que pisa el
    caño y los textos que se amontonan en tramos cortos (ver capturas en `docs/capturas/`).
 2. **Barra de 5 pasos** con las pantallas viejas adentro. Ningún cambio de cálculo.
 3. **Revisar y descargar** nuevo: las 3 hojas, avisos con botón al paso, "Descargar las 3 hojas".
