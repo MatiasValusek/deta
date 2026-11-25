@@ -4,8 +4,9 @@ import type { ReactNode } from "react";
 import { FormaDeRecorridoBotones, type FormaDeRecorrido } from "./FormaDeRecorrido";
 
 /**
- * Paso 4, panel de la derecha. El gasista marca el caño principal (dónde dobla y dónde
- * termina) y la app pone las bajadas, las piezas y la numeración. Lo de antes queda plegado.
+ * Paso 4, panel de la derecha. Con "Directo" la app arma el caño principal sola y el gasista lo
+ * corrige arrastrando; a mano, marca dónde dobla y dónde termina. En los dos casos la app pone las
+ * bajadas, las piezas y la numeración. Lo de antes queda plegado.
  */
 export function PasoCaneria(props: {
   ajena: boolean;
@@ -13,6 +14,8 @@ export function PasoCaneria(props: {
   /** Las acciones para corregir (punto 3), cuando se está corrigiendo. */
   correccion?: ReactNode;
   corrigiendo: boolean;
+  /** La app arma el recorrido (Directo); si no, el gasista lo marca a mano. */
+  directo: boolean;
   forma: FormaDeRecorrido;
   hayMedidor: boolean;
   /** Tramos con su diámetro, cuando ya hay cálculo ("C-M 32 mm"). */
@@ -22,6 +25,8 @@ export function PasoCaneria(props: {
   onCorregir: () => void;
   onDeshacer: () => void;
   onElegirForma: (forma: FormaDeRecorrido) => void;
+  onMarcarAMano: () => void;
+  onRearmarDirecto: () => void;
   onEmpezarDeNuevo: () => void;
   onSeguirMarcando: () => void;
 }) {
@@ -35,6 +40,10 @@ export function PasoCaneria(props: {
         <p className="mt-1 text-xs text-[var(--muted)]">
           {props.ajena
             ? "Esta cañería se trazó con la pantalla anterior."
+            : props.directo && props.puntos > 0
+              ? "La app armó el recorrido: sale del medidor, cruza por el medio y llega a cada artefacto a 90°. Para corregirlo, arrastrá un quiebre o el punto donde sale una bajada."
+              : props.directo
+                ? "Ubicá el medidor y los artefactos: la app arma el recorrido sola."
             : props.corrigiendo
               ? "Arrastrá un quiebre o el punto donde sale una bajada. Tocá un tramo para ver qué podés hacer."
               : props.puntos === 0
@@ -50,10 +59,10 @@ export function PasoCaneria(props: {
       ) : props.ajena ? (
         <section className="rounded border border-[#f1d28a] bg-[#fffaf0] px-3 py-3">
           <p className="text-[#7a4b00]">
-            Podés seguir con ella o marcar el caño principal de nuevo: la app pone las bajadas sola.
+            Podés seguir con ella o que la app arme el recorrido de nuevo (Directo, a 90°).
           </p>
           <Boton principal onClick={props.onEmpezarDeNuevo}>
-            Marcar el caño principal
+            Armar el recorrido de nuevo
           </Boton>
         </section>
       ) : (
@@ -61,7 +70,14 @@ export function PasoCaneria(props: {
           {props.corrigiendo ? (
             <section className="space-y-2">
               {props.correccion}
-              <Boton onClick={props.onSeguirMarcando}>Seguir marcando el caño</Boton>
+              {props.directo ? (
+                <div className="flex flex-wrap gap-2">
+                  <Boton onClick={props.onRearmarDirecto}>Volver a armar el recorrido</Boton>
+                  <Boton onClick={props.onMarcarAMano}>Marcar el caño a mano</Boton>
+                </div>
+              ) : (
+                <Boton onClick={props.onSeguirMarcando}>Seguir marcando el caño</Boton>
+              )}
             </section>
           ) : (
             <div className="flex flex-wrap gap-2">

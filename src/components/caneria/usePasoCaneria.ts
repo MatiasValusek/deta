@@ -10,13 +10,17 @@ import {
 } from "@/lib/caneria/canoPrincipal";
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
 import type { Point2D } from "@/lib/geometry/types";
+import { armarRecorridoDirecto, corresponderArmarDirecto } from "@/lib/caneria/recorridoDirecto";
 import type { ManualRouteNetwork, RouteDraft } from "@/lib/routing/types";
 import type { FormaDeRecorrido } from "./FormaDeRecorrido";
 
 /*
- * Estado del paso Cañería. Mientras se marca, cada toque en el plano es un quiebre o el fin
- * del caño principal (en escuadra con el anterior) y la app rearma las bajadas al momento.
- * La red queda guardada en la obra en cada toque: "Siguiente" no necesita "Terminar".
+ * Estado del paso Cañería. Con "Directo" (por defecto) la app arma sola el caño principal si
+ * todavía no hay uno, y el gasista lo corrige arrastrando: lo que toca queda guardado y la app no
+ * lo vuelve a armar (salvo que lo pida con "Volver a armar el recorrido").
+ * A mano, cada toque en el plano es un quiebre o el fin del caño principal (en escuadra con el
+ * anterior) y la app rearma las bajadas al momento.
+ * La red queda guardada en la obra en cada cambio: "Siguiente" no necesita "Terminar".
  */
 
 export function usePasoCaneria(params: {
@@ -32,6 +36,8 @@ export function usePasoCaneria(params: {
   const [corrigiendo, setCorrigiendo] = useState(false);
   /** Por ahora solo "directo" está hecho (Perimetral y Por la pared: "Próximamente"). */
   const [forma, setForma] = useState<FormaDeRecorrido>("directo");
+  /** El gasista eligió marcar el caño principal a mano: la app no lo arma sola. */
+  const [aMano, setAMano] = useState(false);
   const [cursor, setCursor] = useState<Point2D | null>(null);
   const traza = useMemo(() => leerTraza(network, equipment), [network, equipment]);
   const medidor = equipment.find((item) => item.role === "supply") ?? null;
@@ -44,7 +50,10 @@ export function usePasoCaneria(params: {
   );
   /** La red la trazó la pantalla anterior: no se pisa sin que el gasista lo pida. */
   const ajena = traza === null;
-  const marcando = params.activo && !ajena && !corrigiendo && medidor !== null;
+  const directo = forma === "directo" && !aMano;
+  /** Con Directo, lo armado se corrige arrastrando (no se agregan puntos tocando el plano). */
+  const enCorreccion = corrigiendo || (directo && (traza?.puntos.length ?? 0) > 0);
+  const marcando = params.activo && !ajena && !enCorreccion && medidor !== null;
   const ultimo = traza?.puntos.at(-1) ?? medidor?.connectionPoint ?? null;
   /** El punto antes del último: con él se sabe hacia dónde venía el caño. */
   const previo = traza && traza.puntos.length > 0 ? (traza.puntos.at(-2) ?? medidor?.connectionPoint) : undefined;
@@ -64,13 +73,35 @@ export function usePasoCaneria(params: {
     // Solo cuando cambia la forma: guardar la misma red no vuelve a disparar.
   }, [desactualizada]);
 
+  // Directo: sin caño principal, la app lo arma sola. Nunca pisa lo marcado.
+  const armarSola = params.activo && directo && corresponderArmarDirecto(traza, equipment);
+  useEffect(() => {
+    if (!armarSola) return;
+    const nueva = armarRecorridoDirecto({ equipment, metrosPorUnidad: params.metrosPorUnidad });
+    if (nueva) guardar(nueva);
+  }, [armarSola]);
+
   return {
     ajena,
     avisos: armada?.avisos ?? [],
-    corrigiendo: params.activo && corrigiendo,
+    corrigiendo: params.activo && enCorreccion,
+    directo,
     forma,
     elegirForma(nueva: FormaDeRecorrido) {
-      if (nueva === "directo") setForma(nueva);
+      if (nueva !== "directo") return;
+      setForma(nueva);
+      setAMano(false);
+    },
+    /** Vuelve a armar el recorrido Directo (se pierde lo corregido). */
+    rearmarDirecto() {
+      const nueva = armarRecorridoDirecto({ equipment, metrosPorUnidad: params.metrosPorUnidad });
+      if (nueva) guardar(nueva);
+    },
+    /** Deja Directo y marca el caño principal a mano, desde el medidor. */
+    marcarAMano() {
+      setAMano(true);
+      setCorrigiendo(false);
+      params.guardarRed({ nodes: [], segments: [] });
     },
     desactualizada,
     marcando,
@@ -111,7 +142,10 @@ export function usePasoCaneria(params: {
     },
     guardar,
     corregir: () => setCorrigiendo(true),
-    seguirMarcando: () => setCorrigiendo(false),
+    seguirMarcando: () => {
+      setAMano(true);
+      setCorrigiendo(false);
+    },
   };
 }
 

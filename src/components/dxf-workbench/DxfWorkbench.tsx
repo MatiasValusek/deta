@@ -8128,6 +8128,7 @@ export function DxfWorkbench() {
               avisos={pasoCaneria.avisos}
               correccion={<CorreccionCaneria correccion={correccionCaneria} equipment={planEquipment} />}
               corrigiendo={pasoCaneria.corrigiendo}
+              directo={pasoCaneria.directo}
               forma={pasoCaneria.forma}
               hayMedidor={supplyCount === 1}
               masOpciones={rightPanelSections.find((section) => section.id === "route")?.content}
@@ -8142,6 +8143,14 @@ export function DxfWorkbench() {
               onCorregir={pasoCaneria.corregir}
               onDeshacer={pasoCaneria.deshacer}
               onElegirForma={pasoCaneria.elegirForma}
+              onMarcarAMano={() => {
+                correccionCaneria.limpiar();
+                pasoCaneria.marcarAMano();
+              }}
+              onRearmarDirecto={() => {
+                correccionCaneria.limpiar();
+                pasoCaneria.rearmarDirecto();
+              }}
               onEmpezarDeNuevo={() => {
                 setRouteProposal(null);
                 setRouteProposalMode(null);
