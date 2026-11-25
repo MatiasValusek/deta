@@ -5549,10 +5549,12 @@ export function DxfWorkbench() {
         proposal,
       });
       setRouteProposalMode("automatic");
+      // El mismo estado que muestra la tarjeta y que habilita "Aceptar recorrido".
+      const estado = draftResult.draft.evaluation.status;
       setRouteError(
-        proposal.status === "invalid"
+        estado === "invalid"
           ? "La propuesta coordinada es invalida y se muestra solo para diagnostico."
-          : proposal.status === "incomplete"
+          : estado === "incomplete"
             ? "La propuesta coordinada tiene definiciones pendientes."
             : null,
       );
