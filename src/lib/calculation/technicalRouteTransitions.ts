@@ -64,6 +64,11 @@ export type TechnicalRouteTransitionContribution = {
   transitionId: string;
   transitionKind: DiameterTransitionKind;
   traversalKind: PipeDiameterTransitionTraversalKind | null;
+  /**
+   * La app no pudo saber si el recorrido sigue derecho o dobla en la te (por ejemplo, una bajada
+   * en diagonal) y contó la variante que más longitud equivalente suma. Hay que avisarle al gasista.
+   */
+  traversalAssumed?: true;
   upstreamDiameter: PipeDiameterReference | null;
   upstreamSegmentId: string | null;
   variant: PipeDiameterTransitionEquivalentLengthResult["variant"] | null;
@@ -630,8 +635,50 @@ const FAMILIA_REDUCCION_EN_LINEA = "cupla-reduccion-hh";
  * - Recorrido que baja: te de reducción U-B a 90°.
  * - Recorrido que sigue derecho: te de reducción U-B a través + cupla U-D.
  * Con dos medidas o menos se resuelve como siempre.
+ *
+ * Si no se puede saber si el recorrido sigue derecho o dobla en la te, la te nunca queda sin
+ * contar (eso agrandaba caños sin motivo): se cuenta la variante que más longitud equivalente
+ * suma y la contribución queda marcada (traversalAssumed) para avisarle al gasista.
  */
 function createBranchTransitionContributions(
+  params: Omit<Parameters<typeof createBranchTransitionContribution>[0], "traversalKind">,
+): TechnicalRouteTransitionContribution[] {
+  const traversalKind = params.upstreamSegmentId
+    ? classifyBranchTraversalKind({
+        downstreamSegmentId: params.downstreamSegmentId,
+        equipment: params.equipment,
+        network: params.network,
+        transition: params.transition,
+        upstreamSegmentId: params.upstreamSegmentId,
+      })
+    : null;
+
+  if (traversalKind || !params.upstreamSegmentId) {
+    return contribucionesDeDerivacion({ ...params, traversalKind });
+  }
+
+  const opciones = (["through", "turn_90"] as const)
+    .map((kind) => contribucionesDeDerivacion({ ...params, traversalKind: kind }))
+    .filter(
+      (contribuciones) =>
+        contribuciones.length > 0 &&
+        contribuciones.every((contribution) => contribution.status === "resolved"),
+    );
+
+  if (opciones.length === 0) {
+    return contribucionesDeDerivacion({ ...params, traversalKind: null });
+  }
+
+  const largo = (contribuciones: TechnicalRouteTransitionContribution[]) =>
+    contribuciones.reduce((sum, contribution) => sum + (contribution.equivalentLengthMeters ?? 0), 0);
+  const masExigente = opciones.reduce((elegida, opcion) =>
+    largo(opcion) > largo(elegida) ? opcion : elegida,
+  );
+
+  return masExigente.map((contribution) => ({ ...contribution, traversalAssumed: true as const }));
+}
+
+function contribucionesDeDerivacion(
   params: Parameters<typeof createBranchTransitionContribution>[0],
 ): TechnicalRouteTransitionContribution[] {
   if (
@@ -659,13 +706,7 @@ function createBranchTransitionContributions(
     return [createBranchTransitionContribution(params)];
   }
 
-  const traversalKind = classifyBranchTraversalKind({
-    downstreamSegmentId: params.downstreamSegmentId,
-    equipment: params.equipment,
-    network: params.network,
-    transition: params.transition,
-    upstreamSegmentId: params.upstreamSegmentId,
-  });
+  const traversalKind = params.traversalKind;
   // Para la te se ve sólo el par entrada-bajada: el otro lado de la te se toma con la medida de entrada.
   const otroLado =
     traversalKind === "through"
@@ -747,15 +788,7 @@ function teNormalMasCupla(
 ): TechnicalRouteTransitionContribution[] {
   const entrada = params.upstreamDiameter;
   const salida = params.base.downstreamDiameter;
-  const traversalKind = params.upstreamSegmentId
-    ? classifyBranchTraversalKind({
-        downstreamSegmentId: params.downstreamSegmentId,
-        equipment: params.equipment,
-        network: params.network,
-        transition: params.transition,
-        upstreamSegmentId: params.upstreamSegmentId,
-      })
-    : null;
+  const traversalKind = params.upstreamSegmentId ? params.traversalKind : null;
 
   if (!entrada || !salida || !traversalKind) {
     return [
@@ -815,6 +848,8 @@ function createBranchTransitionContribution(params: {
   network: ManualRouteNetwork | undefined;
   pipeSystem: PipeSystem;
   transition: DiameterTransitionProposal;
+  /** Si el recorrido sigue derecho o dobla en la te, ya resuelto (null si no se sabe). */
+  traversalKind: PipeDiameterTransitionTraversalKind | null;
   upstreamDiameter: PipeDiameterReference | null;
   upstreamSegmentId: string | null;
 }): TechnicalRouteTransitionContribution {
@@ -868,13 +903,7 @@ function createBranchTransitionContribution(params: {
     };
   }
 
-  const traversalKind = classifyBranchTraversalKind({
-    downstreamSegmentId: params.downstreamSegmentId,
-    equipment: params.equipment,
-    network: params.network,
-    transition: params.transition,
-    upstreamSegmentId: params.upstreamSegmentId,
-  });
+  const traversalKind = params.traversalKind;
 
   if (!traversalKind) {
     return unsupportedContribution({

@@ -118,6 +118,8 @@ export type TechnicalTransitionAwareSearchTraceEntry = {
 export type TechnicalTransitionAwareMinimalityAuditEntry = {
   finalDiameter: PipeDiameterReference;
   loweredDiameter: PipeDiameterReference | null;
+  /** Por qué no se pudo bajar un escalón (el primer problema que aparece al bajarlo). */
+  loweredIssueCode?: TechnicalTransitionAwareNetworkSizingIssueCode;
   reason: string;
   segmentId: string;
   status: "failed" | "passed";
@@ -1808,6 +1810,9 @@ function createMinimalityAudit(params: {
     audit.push({
       finalDiameter,
       loweredDiameter,
+      ...(loweredEvaluation.feasible || !loweredEvaluation.issues[0]
+        ? {}
+        : { loweredIssueCode: loweredEvaluation.issues[0].code }),
       reason: loweredEvaluation.feasible
         ? "Bajar un escalon conserva factibilidad; revisar busqueda."
         : auditReasonForInfeasibleEvaluation(loweredEvaluation),

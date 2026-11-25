@@ -1,3 +1,7 @@
+import {
+  causasDelAumento,
+  type CausaDelAumento,
+} from "@/lib/calculation/causaDelAumento";
 import type { PipeDiameterReference } from "@/lib/calculation/pipeSystem";
 import type {
   ProfessionalDiameterAdoptionSegmentResult,
@@ -42,6 +46,8 @@ export type TechnicalCalculationSheetRow = {
   downstreamApplianceIds: string[];
   downstreamAppliances: string[];
   effectiveDiameter: PipeDiameterReference | null;
+  /** Si el motor agrandó el tramo por encima de la tabla, por qué (ver causaDelAumento.ts). */
+  enlargementCause?: CausaDelAumento | null;
   finalCalculationLengthMeters: number | null;
   flowM3h: number | null;
   initialRouteLengthMeters: number | null;
@@ -196,6 +202,8 @@ function createSheetRow(params: {
         params.equipmentById.get(equipmentId)?.name ?? equipmentId,
     ),
     effectiveDiameter,
+    enlargementCause:
+      causasDelAumento(params.result).get(params.segment.segmentId) ?? null,
     finalCalculationLengthMeters,
     flowM3h,
     initialRouteLengthMeters,

@@ -33,7 +33,7 @@ export const NOMBRE_HOJA: Record<HojaId, string> = {
 };
 
 export type AvisoRevisar = {
-  /** Hojas que no salen mientras el aviso siga. */
+  /** Hojas que no salen mientras el aviso siga (ninguna: el aviso informa y no frena). */
   hojas: HojaId[];
   paso: PasoId;
   texto: string;
@@ -42,6 +42,8 @@ export type AvisoRevisar = {
 const TODAS: HojaId[] = ["factibilidad", "plano", "planilla"];
 
 export function avisosParaDescargar(params: {
+  /** Lo que el cálculo supuso o agrandó por su cuenta: se avisa, no frena. */
+  avisosCalculo?: string[];
   avisosPlanilla: string[];
   avisosTablas: string[];
   conCroquisEnPlano: boolean;
@@ -107,6 +109,9 @@ export function avisosParaDescargar(params: {
   }
   for (const texto of params.avisosPlanilla) {
     agregar(texto, pasoDelTexto(texto), ["planilla"]);
+  }
+  for (const texto of params.avisosCalculo ?? []) {
+    agregar(texto, "caneria", []);
   }
 
   return avisos;

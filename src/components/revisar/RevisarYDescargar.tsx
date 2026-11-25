@@ -11,6 +11,7 @@ import type { WorkbenchEquipment } from "@/lib/equipment/types";
 import type { NormalizedDrawing } from "@/lib/geometry/types";
 import type { FondoPdf } from "@/lib/laminas/fondoPdf";
 import { leerObraSnapshot, leerObraSnapshotServidor, suscribirObra } from "@/lib/obra/obraStore";
+import { avisosDelCalculo } from "@/lib/revisar/avisosDelCalculo";
 import {
   avisosParaDescargar,
   hojasListas,
@@ -136,6 +137,11 @@ export function RevisarYDescargar(props: {
   const avisos = useMemo(
     () =>
       avisosParaDescargar({
+        avisosCalculo: avisosDelCalculo({
+          calculationSheet: resultados.calculationSheet,
+          numeracion: tablas.numeracion,
+          result: props.result,
+        }),
         avisosPlanilla: planilla.avisos,
         avisosTablas: tablas.avisos,
         conCroquisEnPlano,
@@ -160,6 +166,7 @@ export function RevisarYDescargar(props: {
       props.result,
       resultados,
       tablas.avisos,
+      tablas.numeracion,
     ],
   );
   // Por texto, para no rearmar las hojas en cada dibujo de la pantalla.
@@ -312,7 +319,9 @@ export function RevisarYDescargar(props: {
                     <p className="text-sm text-[#7a4b00]">{aviso.texto}</p>
                     <div className="mt-2 flex items-center justify-between gap-2">
                       <span className="text-xs text-[var(--muted)]">
-                        Frena: {aviso.hojas.map((hoja) => NOMBRE_HOJA[hoja]).join(", ")}
+                        {aviso.hojas.length > 0
+                          ? `Frena: ${aviso.hojas.map((hoja) => NOMBRE_HOJA[hoja]).join(", ")}`
+                          : "No frena la descarga"}
                       </span>
                       {aviso.paso !== "revisar" ? (
                         <button
