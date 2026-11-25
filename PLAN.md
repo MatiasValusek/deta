@@ -108,8 +108,44 @@ Lo más valioso. Usa lo que el motor ya calcula.
 
 ## Notas
 
-### Estufa en la esquina: Ø32 en vez de Ø20 (2026-11-25) — error del motor, arreglo sin aplicar
-Prueba: `lib/caneria/estufaEnLaEsquinaVerification.ts` (pasa como PENDIENTE mientras dé 32).
+### Red de seguridad: piezas que el motor no sabe clasificar (2026-11-25)
+Prueba: `lib/caneria/bajadaEnDiagonalVerification.ts` (bajada a la estufa que sale de la te de C en
+diagonal, 45°, y después sube).
+- **Te sin sentido claro** (`calculation/technicalRouteTransitions.ts`): si no se ve si el recorrido
+  sigue derecho o dobla, la te ya no queda sin contar. Se cuenta la variante que más longitud
+  equivalente suma (te a 90°: 0,928 m en Ø32, contra 0,235 a través) + la cupla, y queda marcada
+  (`traversalAssumed`). En la casa, la bajada en diagonal da Ø20 (antes 32), 9,89 m de equivalente.
+- **Aviso en pantalla** (`revisar/avisosDelCalculo.ts`), en Revisar y descargar, con botón a Cañería
+  y sin frenar la descarga ("No frena la descarga"): "En la te de C no se ve si el tramo 4-C sigue
+  derecho o dobla (sale en diagonal). Se contó la te que más longitud equivalente suma, por seguridad.
+  Si querés el valor justo, tocá Cañería y hacé que ese tramo salga en escuadra."
+- **El motivo de la hoja es el real** (`calculation/causaDelAumento.ts`, `laminas/motivoDiametro.ts`).
+  El motor ya probaba bajar un escalón cada tramo agrandado; ahora anota por qué no pudo (código del
+  primer problema). La hoja imprime "Por longitud equivalente de reducciones" solo si lo que falta es
+  longitud; "Por seguridad: pieza sin contar" si fue una pieza que no pudo contar (y la pantalla avisa
+  con el tramo y la medida); "Por el cálculo de la red" en cualquier otro caso (también avisa). El
+  gasista que agrandó sigue viendo "Previsto para ampliación".
+- Ninguna obra de prueba cambia un número (tablas del A3 y planilla iguales). Verificaciones: 74
+  grupos, 622, 0 fallas.
+- **Queda afuera:** un cambio de medida en un nodo de 2 tramos que no es recto ni un giro claro (entre
+  3° y 10°) y un giro con cambio de medida (codo + reducción) siguen sin pieza por defecto. Si
+  agrandan un caño, la hoja ya lo dice ("pieza sin contar") y la pantalla avisa; contarlos solos queda
+  para decidir. En las obras de prueba no aparecen.
+
+### Estufa en la esquina: Ø32 en vez de Ø20 (2026-11-25) — arreglado
+Prueba: `lib/caneria/estufaEnLaEsquinaVerification.ts`: exige Ø20, 9,19 m de equivalente, 15,29 m
+de total y 3 cuplas de reducción 32. También con la bajada que sale a 90° y sube, y con la estufa de
+frente a C.
+
+**Arreglado** en `incidentVectorAtTransitionNode`: la dirección de cada tramo en la te se mide hacia
+su primer quiebre, como en `routing/incidentGeometry.ts`. Las tres obras de prueba dan las mismas
+tablas. En la casa de la estufa cambian, como se esperaba: 3 cuplas 32 (antes 2), codos Ø32 de 7 a 4,
+codos Ø20 de 4 a 7, una llave Ø32 menos y una Ø20 más; la te de C pasa a contarse como te + cupla y
+los otros recorridos suman lo mismo (2-A muestra 10,10 en vez de 10,09: es redondeo, vale 10,095 en
+los dos casos). Con el caño principal doblando arriba (otra casa de prueba, no guardada) 3-B y 4-C
+también bajaban de 32 a 20 por la misma causa.
+
+Lo que sigue es el diagnóstico de antes del arreglo.
 
 **El caso.** Casa desde cero, caño principal M → esquina C → fin; la bajada a la estufa sale de la te
 de C, sube derecho 1,50 m (sigue la dirección del caño que viene del medidor) y dobla 0,80 m hasta la
@@ -134,7 +170,7 @@ la hoja ("Por longitud equivalente de reducciones") no es cierto en este caso.
 con reducción se arma con te + cupla (o te de reducción). Nada obliga a llevar la bajada en 32. Con la
 estufa de frente a C (bajada recta) el mismo motor da 20, igual que si sale a 90°... una vez arreglado.
 
-**Arreglo propuesto (no aplicado).** En `incidentVectorAtTransitionNode`
+**Arreglo propuesto (aplicado, ver arriba).** En `incidentVectorAtTransitionNode`
 (`calculation/technicalRouteTransitions.ts`), medir la dirección de cada tramo hacia su primer
 quiebre (si tiene), como ya hace `routing/incidentGeometry.ts` para las propuestas de transición.
 Unas 10 líneas. Probado en una copia, sin tocar el motor: las 615 verificaciones pasan, ninguna obra
@@ -168,8 +204,8 @@ nada que aceptar. Para 20: Datos de la obra (6 contra 2 de `PANTALLAS.md`) y la 
 
 **Pendiente:**
 - Con el plano chico en pantalla, algunas etiquetas de tramo se pisan (`4-C` y `B-C`).
-- En la casa de prueba la bajada a la estufa sale 32 en lugar de 20: es un error del motor (ver
-  "Estufa en la esquina" abajo). Arreglo propuesto, sin aplicar.
+- ~~En la casa de prueba la bajada a la estufa sale 32 en lugar de 20~~: arreglado en el motor (ver
+  "Estufa en la esquina" abajo) y con red de seguridad para piezas que no sabe clasificar.
 - Los marcadores "Z" de alturas de la pantalla anterior siguen sobre la cañería (van a Modo experto).
 - Arrastrar el caño entero no es un arrastre: se toca el tramo y "Mover este tramo en paralelo" (+2).
 
