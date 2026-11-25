@@ -813,17 +813,17 @@ function classifyTwoSegmentAngle(
 ): "ambiguous" | "colinear" | "turn" {
   const distanceToStraight = Math.abs(180 - angleDegrees);
 
+  // Un quiebre de menos de 10° es un error de dibujo: en obra el caño va derecho (no se curva y
+  // los codos son de 90° y 45°). Se toma como recto, igual que los codos automáticos (tesYCodos):
+  // sin codo y, si cambia la medida, solo la reducción.
   if (
     angleDegrees <= COLINEAR_TOLERANCE_DEGREES ||
-    distanceToStraight <= COLINEAR_TOLERANCE_DEGREES
+    distanceToStraight < TURN_MINIMUM_DEGREES
   ) {
     return "colinear";
   }
 
-  if (
-    angleDegrees < TURN_MINIMUM_DEGREES ||
-    distanceToStraight < TURN_MINIMUM_DEGREES
-  ) {
+  if (angleDegrees < TURN_MINIMUM_DEGREES) {
     return "ambiguous";
   }
 
