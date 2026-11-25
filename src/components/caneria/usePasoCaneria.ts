@@ -43,6 +43,8 @@ export function usePasoCaneria(params: {
   const ajena = traza === null;
   const marcando = params.activo && !ajena && !corrigiendo && medidor !== null;
   const ultimo = traza?.puntos.at(-1) ?? medidor?.connectionPoint ?? null;
+  /** El punto antes del último: con él se sabe hacia dónde venía el caño. */
+  const previo = traza && traza.puntos.length > 0 ? (traza.puntos.at(-2) ?? medidor?.connectionPoint) : undefined;
 
   function guardar(nueva: TrazaCanoPrincipal) {
     params.guardarRed(
@@ -77,7 +79,7 @@ export function usePasoCaneria(params: {
             originSplitSegmentId: null,
             planBaseId: params.baseId,
             pdfPageNumber: params.pdfPageNumber,
-            previewPoint: enEscuadra(ultimo, cursor),
+            previewPoint: enEscuadra(ultimo, cursor, previo),
             routePoints: [],
             step: "drawing",
             targetEquipmentId: null,
@@ -85,7 +87,9 @@ export function usePasoCaneria(params: {
         : null,
     tocarPlano(punto: Point2D) {
       if (!traza || !ultimo) return;
-      guardar({ ...traza, puntos: [...traza.puntos, enEscuadra(ultimo, punto)] });
+      const nuevo = enEscuadra(ultimo, punto, previo);
+      if (Math.hypot(nuevo.x - ultimo.x, nuevo.y - ultimo.y) <= 1e-9) return;
+      guardar({ ...traza, puntos: [...traza.puntos, nuevo] });
     },
     mirar: setCursor,
     deshacer() {

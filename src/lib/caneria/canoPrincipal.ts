@@ -180,13 +180,25 @@ export function leerTraza(network: ManualRouteNetwork, equipment: WorkbenchEquip
 }
 
 /**
- * El punto tocado, en escuadra con el anterior: el caño principal va recto y dobla a 90°.
- * Se queda con la dirección en la que más se movió.
+ * El punto tocado, en escuadra con el anterior: el caño va recto y dobla a 90° (en obra el caño
+ * no se curva y Deta, por ahora, no usa codos a 45°). Se queda con la dirección en la que más se
+ * movió. Con el tramo anterior (desde `previo`), nunca vuelve para atrás por encima de él: en ese
+ * caso dobla a 90° hacia el lado tocado.
  */
-export function enEscuadra(anterior: Point2D, tocado: Point2D): Point2D {
-  return Math.abs(tocado.x - anterior.x) >= Math.abs(tocado.y - anterior.y)
-    ? { x: tocado.x, y: anterior.y }
-    : { x: anterior.x, y: tocado.y };
+export function enEscuadra(anterior: Point2D, tocado: Point2D, previo?: Point2D): Point2D {
+  const horizontal = Math.abs(tocado.x - anterior.x) >= Math.abs(tocado.y - anterior.y);
+  const enX = { x: tocado.x, y: anterior.y };
+  const enY = { x: anterior.x, y: tocado.y };
+  if (!previo) return horizontal ? enX : enY;
+
+  const llega = { x: anterior.x - previo.x, y: anterior.y - previo.y };
+  const elegido = horizontal ? enX : enY;
+  const sale = { x: elegido.x - anterior.x, y: elegido.y - anterior.y };
+  const vuelve = llega.x * sale.x + llega.y * sale.y < 0 && Math.abs(llega.x * sale.y - llega.y * sale.x) < 1e-9;
+  if (!vuelve) return elegido;
+  const otro = horizontal ? enY : enX;
+  // Tocó justo sobre el caño, para atrás: no hay lado al que doblar; se queda donde estaba.
+  return distancia(otro, anterior) > 1e-9 ? otro : anterior;
 }
 
 /**

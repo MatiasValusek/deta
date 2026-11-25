@@ -122,6 +122,16 @@ export function runCanoPrincipalVerifications() {
     igualPunto(enEscuadra({ x: 0, y: 0 }, { x: 5, y: -80 }), { x: 0, y: -80 });
   });
 
+  verify("respecto del tramo anterior: sigue derecho o dobla a 90°, nunca vuelve por encima del caño", () => {
+    const previo = { x: -100, y: 0 }; // el caño venía hacia +x
+    igualPunto(enEscuadra({ x: 0, y: 0 }, { x: 100, y: 7 }, previo), { x: 100, y: 0 });
+    igualPunto(enEscuadra({ x: 0, y: 0 }, { x: 5, y: -80 }, previo), { x: 0, y: -80 });
+    // Tocó para atrás: dobla hacia el lado tocado.
+    igualPunto(enEscuadra({ x: 0, y: 0 }, { x: -100, y: 30 }, previo), { x: 0, y: 30 });
+    // Justo sobre el caño, para atrás: no agrega nada.
+    igualPunto(enEscuadra({ x: 0, y: 0 }, { x: -100, y: 0 }, previo), { x: 0, y: 0 });
+  });
+
   verify("un quiebre agregado en un tramo recto se conserva (después se arrastra)", () => {
     igual(limpiarPuntos({ x: 0, y: 0 }, [{ x: 0, y: 50 }, { x: 0, y: 100 }, { x: 100, y: 100 }]).length, 3);
   });
