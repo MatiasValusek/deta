@@ -108,6 +108,39 @@ Lo más valioso. Usa lo que el motor ya calcula.
 
 ## Notas
 
+### Estufa en la esquina: Ø32 en vez de Ø20 (2026-11-25) — error del motor, arreglo sin aplicar
+Prueba: `lib/caneria/estufaEnLaEsquinaVerification.ts` (pasa como PENDIENTE mientras dé 32).
+
+**El caso.** Casa desde cero, caño principal M → esquina C → fin; la bajada a la estufa sale de la te
+de C, sube derecho 1,50 m (sigue la dirección del caño que viene del medidor) y dobla 0,80 m hasta la
+estufa. Nada agrandado a mano.
+
+**Lo que pide la tabla.** Recorrido al medidor: C-M 3,80 + 4-C 2,30 = 6,10 m. Piezas con 4-C en Ø20:
+4 codos de salida del medidor Ø32 (4 × 1,191 = 4,764), llave general Ø32 (0,327), te normal a través
+Ø32 (0,235), cupla de reducción 32→20 (0,329), codo del quiebre Ø20 (0,953), 2 codos de subida Ø20
+(1,906), llave del artefacto Ø20 (0,678): 9,19 m. Total 15,29 m → fila de 16 m: el Ø20 lleva 1,399
+m³/h y la estufa pide 0,323. **Ø20.**
+
+**Por qué sale 32.** Para contar la te + cupla, el motor necesita saber si la estufa sale de la te "a
+través" o "a 90°" (`classifyBranchTraversalKind` en `calculation/technicalRouteTransitions.ts`). Lo
+mide con la recta del nodo C al artefacto, no con el primer tramo del caño: C → estufa forma 152° con
+el caño que llega, que no es recto (±5°) ni 90° (±15°). La te queda sin contar
+(`branch_transition_required`) y la búsqueda del menor aumento sube 4-C: en 25 sigue faltando la te;
+en 32 los tres tramos de C miden lo mismo y ya no hay reducción, así que "cierra". Con 4-C en 32 la
+longitud da 15,33 m y la tabla sigue diciendo 20: el 32 no lo pide la longitud. El motivo que sale en
+la hoja ("Por longitud equivalente de reducciones") no es cierto en este caso.
+
+**No es la norma.** Cada tramo se dimensiona con su consumo y su longitud de cálculo; una derivación
+con reducción se arma con te + cupla (o te de reducción). Nada obliga a llevar la bajada en 32. Con la
+estufa de frente a C (bajada recta) el mismo motor da 20, igual que si sale a 90°... una vez arreglado.
+
+**Arreglo propuesto (no aplicado).** En `incidentVectorAtTransitionNode`
+(`calculation/technicalRouteTransitions.ts`), medir la dirección de cada tramo hacia su primer
+quiebre (si tiene), como ya hace `routing/incidentGeometry.ts` para las propuestas de transición.
+Unas 10 líneas. Probado en una copia, sin tocar el motor: las 615 verificaciones pasan, ninguna obra
+de prueba cambia un número, y en la casa 4-C queda Ø20 (3 cuplas 32, codos Ø32 de 7 a 4, codos Ø20 de
+4 a 7, una llave Ø32 menos y una Ø20 más). También arregla la bajada que sale a 90° y después sube.
+
 ### Paso Cañería nuevo (2026-11-25, contado en el navegador de punta a punta)
 Casa de 10 × 8 m con medidor, 2 estufas, cocina y calefón (como `obraCasaDesdeCero.ts`), datos
 inventados. El caño principal sube desde el medidor, dobla en una esquina y termina en la otra punta.
@@ -135,9 +168,8 @@ nada que aceptar. Para 20: Datos de la obra (6 contra 2 de `PANTALLAS.md`) y la 
 
 **Pendiente:**
 - Con el plano chico en pantalla, algunas etiquetas de tramo se pisan (`4-C` y `B-C`).
-- En la casa de prueba la bajada a la estufa sale justo de la esquina y el cálculo le adopta 32 en
-  lugar de 20 "por longitud equivalente de reducciones". Es el motor (congelado); mirar con un caso
-  real si corresponde.
+- En la casa de prueba la bajada a la estufa sale 32 en lugar de 20: es un error del motor (ver
+  "Estufa en la esquina" abajo). Arreglo propuesto, sin aplicar.
 - Los marcadores "Z" de alturas de la pantalla anterior siguen sobre la cañería (van a Modo experto).
 - Arrastrar el caño entero no es un arrastre: se toca el tramo y "Mover este tramo en paralelo" (+2).
 
