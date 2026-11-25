@@ -567,6 +567,7 @@ function calculateResult(fixture: SimpleReviewFixture) {
   const result = calculateTechnicalTree({
     codosDeSubida: false,
     llavesDePaso: false, // esta prueba mide otra parte del motor
+    tesYCodos: false,
     equipment: fixture.equipment,
     minSegmentLengthSource: EPSILON,
     network: fixture.network,

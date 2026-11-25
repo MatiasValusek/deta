@@ -1,5 +1,6 @@
 import { puntoCambioDeNivel, tipoCodosDeSubidaEnId } from "@/lib/calculation/codosDeSubida";
 import { extremoDeLlave } from "@/lib/calculation/llavesDePaso";
+import { nodoDePieza, quiebreDePieza } from "@/lib/calculation/tesYCodos";
 import type {
   PipeDiameterReference,
 } from "@/lib/calculation/pipeSystem";
@@ -845,11 +846,12 @@ function projectedAccessoryPlanPoint(params: {
     return position;
   }
 
-  const nodePosition = params.item.nodeId
+  const nodoPieza = params.item.nodeId ?? nodoDePieza(params.item);
+  const nodePosition = nodoPieza
     ? technicalNodePosition({
         equipmentById: params.equipmentById,
         nodeById: params.nodeById,
-        nodeId: params.item.nodeId,
+        nodeId: nodoPieza,
         routeNodeElevations: params.routeNodeElevations,
       })
     : null;
@@ -914,6 +916,13 @@ function terminalRouteAccessoryPlanPoint(params: {
   item: TechnicalPhysicalAccessory;
   resolvedSegmentById: Map<string, ResolvedRouteSegment>;
 }): Point2D | null {
+  // Codo de un quiebre del tramo: va en el punto del quiebre.
+  for (const segmentId of params.item.segmentIds) {
+    const path = params.resolvedSegmentById.get(segmentId)?.path;
+    const quiebre = path ? quiebreDePieza(params.item, path) : null;
+    if (quiebre) return quiebre;
+  }
+
   const codos = [params.item.id, ...params.item.sourceIds]
     .map((id) => tipoCodosDeSubidaEnId(id) ?? extremoDeLlave(id))
     .find((tipo) => tipo !== null);

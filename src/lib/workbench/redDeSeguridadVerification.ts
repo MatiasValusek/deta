@@ -58,6 +58,7 @@ const FOTO: Record<ObraDePrueba["nombre"], FotoTablas> = {
   },
   "tres derivaciones": {
     // Llave general Ø32 en C-M (la gasista no la contó): +0,33 m en todos los recorridos.
+    // Tes: una pieza por nodo (3), aunque la gasista la cargue en cada recorrido.
     referencias: [
       ["1", "ANAFE", "9.000", "0,968"],
       ["2", "HORNO", "3.000", "0,323"],
@@ -71,8 +72,8 @@ const FOTO: Record<ObraDePrueba["nombre"], FotoTablas> = {
       ["CAÑO", "32", "7,15 m"],
       ["CODO", "25", "11"],
       ["CODO", "32", "6"],
-      ["TE", "25", "2"],
-      ["TE", "32", "3"],
+      ["TE", "25", "1"],
+      ["TE", "32", "2"],
       ["CUPLA DE REDUCCIÓN", "32", "1"],
       ["LLAVE DE PASO", "25", "3"],
       ["LLAVE DE PASO", "32", "2"],
@@ -90,8 +91,8 @@ const FOTO: Record<ObraDePrueba["nombre"], FotoTablas> = {
     ],
   },
   "casa desde cero": {
-    // Hueco conocido (PLAN.md): sin confirmar tes, solo se cuenta la te donde baja la medida.
-    // En A (calefón y calefactor, todo en 25) falta la te; tampoco se cuenta el codo de C.
+    // Te automática en A (calefón y calefactor) y codo en la esquina C del caño principal.
+    // Con la te, A-B sube de 25 a 32.
     referencias: [
       ["1", "CALEFÓN", "20.000", "2,151"],
       ["2", "CALEFACTOR", "3.000", "0,323"],
@@ -101,27 +102,27 @@ const FOTO: Record<ObraDePrueba["nombre"], FotoTablas> = {
     ],
     notas: ["", "", "", "", ""],
     materiales: [
-      ["CAÑO", "20", "6,00 m"],
-      ["CAÑO", "25", "9,70 m"],
-      ["CAÑO", "32", "8,80 m"],
-      ["CODO", "20", "4"],
-      ["CODO", "25", "4"],
+      ["CAÑO", "20", "9,40 m"],
+      ["CAÑO", "25", "3,70 m"],
+      ["CAÑO", "32", "11,40 m"],
+      ["CODO", "20", "7"],
+      ["CODO", "25", "2"],
       ["CODO", "32", "4"],
-      ["TE", "32", "2"],
-      ["CUPLA DE REDUCCIÓN", "32", "2"],
-      ["LLAVE DE PASO", "20", "2"],
-      ["LLAVE DE PASO", "25", "2"],
+      ["TE", "32", "3"],
+      ["CUPLA DE REDUCCIÓN", "32", "3"],
+      ["LLAVE DE PASO", "20", "3"],
+      ["LLAVE DE PASO", "25", "1"],
       ["LLAVE DE PASO", "32", "1"],
     ],
     calculo: [
-      ["1-A", "3,70", "15,10", "8,72", "23,82", "2,151", "25", "25"],
-      ["2-A", "3,40", "14,80", "8,72", "23,52", "0,323", "20", "25"],
+      ["1-A", "3,70", "15,10", "9,65", "24,75", "2,151", "25", "25"],
+      ["2-A", "3,40", "14,80", "10,10", "24,90", "0,323", "20", "20"],
       ["3-B", "3,70", "12,50", "9,86", "22,36", "0,968", "20", "20"],
-      ["4-C", "1,50", "6,10", "8,93", "15,03", "0,323", "20", "20"],
-      ["A-B", "2,60", "15,10", "8,72", "23,82", "2,473", "25", "25"],
-      ["B-D", "5,00", "15,10", "8,72", "23,82", "3,441", "32", "32"],
-      ["C-D", "0,80", "6,10", "8,93", "15,03", "0,323", "20", "20"],
-      ["D-M", "3,80", "15,10", "8,72", "23,82", "3,763", "32", "32"],
+      ["4-C", "1,50", "6,10", "9,89", "15,99", "0,323", "20", "20"],
+      ["A-B", "2,60", "15,10", "9,65", "24,75", "2,473", "32", "32"],
+      ["B-D", "5,00", "15,10", "9,65", "24,75", "3,441", "32", "32"],
+      ["C-D", "0,80", "6,10", "9,89", "15,99", "0,323", "20", "20"],
+      ["D-M", "3,80", "15,10", "9,65", "24,75", "3,763", "32", "32"],
     ],
   },
 };
@@ -201,11 +202,7 @@ export function runRedDeSeguridadVerifications() {
       return tapones === bocasTaponadasDe(obra.equipment).size || `${tapones} tapones`;
     });
 
-    // 3. Cada derivación cuenta su te. La obra de tres derivaciones no entra: copia la planilla
-    // de la gasista, que carga la te en cada recorrido que pasa por ella (5 piezas para 3 tes).
-    // La casa desde cero tampoco, por ahora: sin confirmar tes, la te solo se cuenta donde baja
-    // la medida (hueco conocido, ver PLAN.md). Cuando se arregle, sacar esta excepción.
-    if (obra.nombre !== "ejemplo") continue;
+    // 3. Cada derivación cuenta su te, una sola pieza por nodo, aunque nadie la confirme.
     const grado = new Map<string, number>();
     for (const segment of obra.network.segments) {
       for (const nodeId of [segment.fromNodeId, segment.toNodeId]) {

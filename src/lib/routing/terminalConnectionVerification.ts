@@ -90,6 +90,7 @@ function terminalConnectionFixture() {
   const initialResult = calculateTechnicalTree({
     codosDeSubida: false,
     llavesDePaso: false, // esta prueba mide otra parte del motor
+    tesYCodos: false,
     equipment,
     minSegmentLengthSource: EPSILON,
     network: firstUpdate.network,
@@ -140,6 +141,7 @@ function terminalConnectionFixture() {
   const result = calculateTechnicalTree({
     codosDeSubida: false,
     llavesDePaso: false, // esta prueba mide otra parte del motor
+    tesYCodos: false,
     equipment,
     minSegmentLengthSource: EPSILON,
     network: reapplied.network,

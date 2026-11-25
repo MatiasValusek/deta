@@ -4,6 +4,7 @@ import {
   tipoCodosDeSubida,
 } from "@/lib/calculation/codosDeSubida";
 import { agregarLlavesDePaso, tipoLlaveDePaso } from "@/lib/calculation/llavesDePaso";
+import { agregarTesYCodos, quiebreDeCodo } from "@/lib/calculation/tesYCodos";
 import type {
   PipeDiameterReference,
   PipeDiameterTransitionTraversalKind,
@@ -175,7 +176,10 @@ export function createTechnicalPhysicalAccessoryInventory(params: {
     network: params.network
       ? agregarLlavesDePaso({
           equipment: params.equipment ?? [],
-          network: agregarCodosDeSubida({ equipment: params.equipment ?? [], network: params.network }),
+          network: agregarCodosDeSubida({
+            equipment: params.equipment ?? [],
+            network: agregarTesYCodos({ equipment: params.equipment ?? [], network: params.network }),
+          }),
         })
       : undefined,
     routeNodeGeometryById,
@@ -186,6 +190,7 @@ export function createTechnicalPhysicalAccessoryInventory(params: {
     itemsById,
     pendingItems,
     routeAccessoryGeometryByKey,
+    routeNodeGeometryById,
     resolutions: selectRouteAccessoryResolutions(params.result),
   });
   addTransitionPieces({
@@ -220,6 +225,7 @@ function addRouteAccessoryPieces(params: {
   itemsById: Map<string, TechnicalPhysicalAccessory>;
   pendingItems: TechnicalPhysicalAccessoryPendingItem[];
   routeAccessoryGeometryByKey: Map<string, RouteAccessoryGeometry>;
+  routeNodeGeometryById: Map<string, RouteAccessoryGeometry>;
   resolutions: Record<string, TechnicalRouteAccessoryResolution>;
 }) {
   for (const resolution of sortRouteAccessoryResolutions(params.resolutions)) {
@@ -236,6 +242,7 @@ function addRouteAccessoryPieces(params: {
         contribution,
         proposal,
         routeAccessoryGeometryByKey: params.routeAccessoryGeometryByKey,
+        routeNodeGeometryById: params.routeNodeGeometryById,
       });
 
       if (contribution.status !== "resolved") {
@@ -451,11 +458,16 @@ function routeAccessoryPieceGeometry(params: {
   contribution: TechnicalRouteAccessoryContribution;
   proposal: AccessoryProposal | undefined;
   routeAccessoryGeometryByKey: Map<string, RouteAccessoryGeometry>;
+  routeNodeGeometryById?: Map<string, RouteAccessoryGeometry>;
 }): RouteAccessoryGeometry {
+  // Las piezas que llevan el nodo en su id (tes y codos de la app) van en ese nodo.
+  const nodoDelId = parseAutomaticRouteAccessoryNodeId(params.contribution.accessoryId);
   const inferred =
     params.routeAccessoryGeometryByKey.get(
       routeAccessoryPhysicalKey(params.contribution),
-    ) ?? null;
+    ) ??
+    (nodoDelId ? params.routeNodeGeometryById?.get(nodoDelId) : undefined) ??
+    null;
 
   return {
     nodeId: params.proposal?.nodeId ?? inferred?.nodeId ?? null,
@@ -469,7 +481,13 @@ function routeAccessoryPieceGeometry(params: {
 function routeAccessoryPieceId(
   contribution: TechnicalRouteAccessoryContribution,
 ) {
-  return `physical-accessory:route:${routeAccessoryPhysicalKey(contribution)}`;
+  // Las tes de una derivación se cargan en cada tramo que sale, pero son una sola pieza.
+  const nodoTe =
+    contribution.type === "tee" ? parseAutomaticRouteAccessoryNodeId(contribution.accessoryId) : null;
+
+  return nodoTe
+    ? `physical-accessory:route:tee-node:${nodoTe}`
+    : `physical-accessory:route:${routeAccessoryPhysicalKey(contribution)}`;
 }
 
 function routeAccessoryPhysicalKey(
@@ -742,6 +760,18 @@ function inferRouteSegmentAccessoryGeometry(params: {
       (nodeId) => params.nodeById.get(nodeId)?.kind === kind,
     );
     return extremo ? params.routeNodeGeometryById.get(extremo) ?? null : null;
+  }
+
+  // Codo de un quiebre dentro del tramo: va en el punto del quiebre.
+  const desde = params.routeNodeGeometryById.get(params.segment.fromNodeId)?.position;
+  const hasta = params.routeNodeGeometryById.get(params.segment.toNodeId)?.position;
+  const quiebre =
+    desde && hasta
+      ? quiebreDeCodo(params.accessory.id, [desde, ...(params.segment.vertices ?? []), hasta])
+      : null;
+
+  if (quiebre) {
+    return { nodeId: null, position: { ...quiebre } };
   }
 
   const llave = tipoLlaveDePaso(params.accessory.id);

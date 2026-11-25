@@ -108,6 +108,7 @@ function integratedTechnicalFlowFixture() {
   const baseResult = calculateTechnicalTree({
     codosDeSubida: false,
     llavesDePaso: false, // esta prueba mide otra parte del motor
+    tesYCodos: false,
     equipment,
     minSegmentLengthSource: 0.000001,
     network,
@@ -126,6 +127,7 @@ function integratedTechnicalFlowFixture() {
   const result = calculateTechnicalTree({
     codosDeSubida: false,
     llavesDePaso: false, // esta prueba mide otra parte del motor
+    tesYCodos: false,
     diameterTransitionDecisions,
     equipment,
     minSegmentLengthSource: 0.000001,

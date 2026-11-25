@@ -240,6 +240,7 @@ function calculateSingleSegment(params: {
   return calculateTechnicalTree({
     codosDeSubida: false,
     llavesDePaso: false, // esta prueba mide otra parte del motor
+    tesYCodos: false,
     equipment,
     minSegmentLengthSource: 0.000001,
     network,

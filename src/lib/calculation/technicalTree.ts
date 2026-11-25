@@ -38,6 +38,7 @@ import {
 } from "@/lib/calculation/professionalDiameterAdoption";
 import { agregarCodosDeSubida } from "@/lib/calculation/codosDeSubida";
 import { agregarLlavesDePaso } from "@/lib/calculation/llavesDePaso";
+import { agregarTesYCodos } from "@/lib/calculation/tesYCodos";
 import type { TechnicalRouteAccessoryResolution } from "@/lib/calculation/technicalRouteAccessories";
 import type { DiameterTransitionDecision } from "@/lib/calculation/diameterTransitionProposals";
 import {
@@ -239,6 +240,8 @@ export function calculateTechnicalTree(params: {
   adoptedDiameterDecisions?: AdoptedDiameterDecision[];
   /** Codos de subidas y de salida del medidor (por defecto, sí). */
   codosDeSubida?: boolean;
+  /** Te en cada derivación y codo en cada giro en planta (por defecto, sí). */
+  tesYCodos?: boolean;
   /** Llave general a la salida del medidor y una por artefacto (por defecto, sí). */
   llavesDePaso?: boolean;
   diameterTransitionDecisions?: DiameterTransitionDecision[];
@@ -250,6 +253,17 @@ export function calculateTechnicalTree(params: {
   projectGas?: ProjectGasConfig | null;
   scaleMetersPerSourceUnit: number | null;
 }): TechnicalCalculationResult {
+  // Tes y codos de los giros: van antes que los de subida, que no cuentan dos veces el codo
+  // de una unión donde ya hay uno.
+  if (params.tesYCodos !== false) {
+    params = {
+      ...params,
+      network: agregarTesYCodos({
+        ...params,
+        pipeSystemId: params.pipeSystem?.identity.id ?? "",
+      }),
+    };
+  }
   // Codos de subidas y de salida del medidor: en obra van aunque no haya alturas cargadas.
   // Se apagan solo en pruebas del motor que miden otra cosa con números exactos.
   if (params.codosDeSubida !== false) {

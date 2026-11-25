@@ -80,6 +80,7 @@ function sectionRouteProjectionFixture() {
   const result = calculateTechnicalTree({
     codosDeSubida: false,
     llavesDePaso: false, // esta prueba mide otra parte del motor
+    tesYCodos: false,
     equipment,
     minSegmentLengthSource: EPSILON,
     network,
@@ -535,6 +536,7 @@ function assertRouteNodeZIsInferredFromConfirmedGeometry(
   const result = calculateTechnicalTree({
     codosDeSubida: false,
     llavesDePaso: false, // esta prueba mide otra parte del motor
+    tesYCodos: false,
     equipment: fixture.equipment,
     minSegmentLengthSource: EPSILON,
     network,
@@ -585,6 +587,7 @@ function assertMissingApplianceZUsesDefaultWithoutBlocking(
   const result = calculateTechnicalTree({
     codosDeSubida: false,
     llavesDePaso: false, // esta prueba mide otra parte del motor
+    tesYCodos: false,
     equipment,
     minSegmentLengthSource: EPSILON,
     network: fixture.network,
