@@ -14,22 +14,31 @@ import { avisosParaDescargar, hojasListas } from "@/lib/revisar/avisosRevisar";
 import { ARTEFACTOS_CASA, ESCALA_CASA_M_POR_UNIDAD } from "@/lib/workbench/obraCasaDesdeCero";
 import { calcularObraDePrueba, OBRAS_DE_PRUEBA } from "@/lib/workbench/obrasDePrueba";
 import { armarRed, TRAZA_VACIA, type TrazaCanoPrincipal } from "./canoPrincipal";
+import { AVISO_TRAMOS_EN_DIAGONAL } from "./tramosEnDiagonal";
 
 type Resultado = { name: string; status: "passed" };
 
 /*
- * Red de seguridad: una pieza que el motor no sabe clasificar nunca agranda un caño en silencio.
+ * Bajada a la estufa (casa desde cero, datos inventados). En obra el caño no se curva y Deta, por
+ * ahora, va solo a 90°: la bajada sale de la te de C a 90° (hacia la estufa), dobla y sube. La te
+ * se cuenta a 90° (0,928 m en Ø32) + la cupla 32→20, sin suponer nada, y la bajada queda en Ø20.
  *
- * Casa desde cero (datos inventados). La bajada a la estufa sale de la te de C en diagonal (45°)
- * y después sube hasta la estufa. En la te no se puede saber si sigue derecho o dobla: antes la
- * te quedaba sin contar y el motor llevaba la bajada a Ø32 con el motivo "Por longitud
- * equivalente de reducciones", que no era cierto. Ahora:
- * - la te se cuenta con la variante que más longitud suma (a 90°: 0,928 m en Ø32, contra 0,235 a
- *   través) + la cupla 32→20, y la bajada queda en Ø20 como pide la tabla;
- * - la pantalla avisa que se supuso la te, sin frenar la descarga;
+ * Red de seguridad, con una obra cargada antes con esa bajada en diagonal (45°): no se borra. En
+ * la te no se puede saber si sigue derecho o dobla; antes la te quedaba sin contar y el motor
+ * llevaba la bajada a Ø32 con un motivo que no era cierto. Ahora:
+ * - la te se cuenta con la variante que más longitud suma (a 90°) + la cupla, y queda Ø20;
+ * - la pantalla avisa que se supuso la te y que hay tramos en diagonal, sin frenar la descarga;
  * - si igual el motor agranda un tramo, la hoja imprime el motivo real.
  */
 
+const TRAZA_A_NOVENTA: TrazaCanoPrincipal = {
+  ...TRAZA_VACIA,
+  bajadasAMano: { "ca-estufa": [{ x: 200, y: 4000 }] },
+  puntos: [{ x: 1000, y: 4000 }, { x: 8600, y: 4000 }],
+  salidas: { "ca-estufa": { x: 1000, y: 4000 } },
+};
+
+/** Obra cargada antes: la bajada a la estufa en diagonal. */
 const TRAZA_DIAGONAL: TrazaCanoPrincipal = {
   ...TRAZA_VACIA,
   bajadasAMano: { "ca-estufa": [{ x: 200, y: 4800 }] },
@@ -66,6 +75,25 @@ const avisos = (r: ReturnType<typeof calcular>) =>
     numeracion: r.tablas.numeracion,
     result: r.result,
   });
+const avisosEnRevisar = (r: ReturnType<typeof calcular>) =>
+  avisosParaDescargar({
+    avisosCalculo: avisos(r),
+    avisosPlanilla: [],
+    avisosTablas: [],
+    conCroquisEnPlano: false,
+    drawing: null,
+    equipment: ARTEFACTOS_CASA,
+    hayPlanoPdf: true,
+    instalador: INSTALADOR_VACIO,
+    materialesPendientes: 0,
+    network: r.network,
+    obra: OBRA_VACIA,
+    result: r.result,
+  });
+const aportesDeLaBajada = (r: ReturnType<typeof calcular>) =>
+  Object.values(r.result.transitionAwareNetworkSizing?.routeTransitionResolutions ?? {})
+    .flatMap((resolucion) => resolucion.contributions)
+    .filter((aporte) => aporte.downstreamSegmentId === "cp:bm:ca-estufa");
 
 export function runBajadaEnDiagonalVerifications() {
   const results: Resultado[] = [];
@@ -74,10 +102,40 @@ export function runBajadaEnDiagonalVerifications() {
     results.push({ name, status: "passed" });
   };
 
+  const noventa = calcular(TRAZA_A_NOVENTA);
+
+  verify("bajada a 90°: Ø20 como pide la tabla, sin agrandar", () => {
+    const [, largoTramo, , equivalenteN, totalN, consumoN, porTablaN, adoptadoN] = fila(noventa, "4-C");
+    igual(noventa.result.status, "valid");
+    igual(largoTramo, "2,30");
+    igual(consumoN, "0,323");
+    igual(porTablaN, "20");
+    igual(adoptadoN, "20");
+    igual(equivalenteN, "9,89");
+    igual(totalN, "15,99");
+    igual(causasDelAumento(noventa.result).size, 0);
+  });
+
+  verify("bajada a 90°: la te se cuenta a 90° + cupla, sin suponer nada", () => {
+    igual(tesSupuestas(noventa.result).length, 0);
+    const aportes = aportesDeLaBajada(noventa);
+    const te = aportes.find((aporte) => aporte.catalogFamilyId === "te-normal-flujo-a-90");
+    igual(te?.traversalKind, "turn_90");
+    igual(te?.traversalAssumed, undefined);
+    igual(te?.equivalentLengthMeters, 0.928);
+    igual(aportes.some((aporte) => aporte.catalogFamilyId === "cupla-reduccion-hh"), true);
+    igual(cantidad(noventa, "CUPLA DE REDUCCIÓN", "32"), 3);
+  });
+
+  verify("bajada a 90°: en Revisar y descargar no hay avisos de la cañería", () => {
+    igual(avisos(noventa).length, 0);
+    igual(avisosEnRevisar(noventa).filter((aviso) => aviso.paso === "caneria").length, 0);
+  });
+
   const diagonal = calcular(TRAZA_DIAGONAL);
   const [, , , equivalente, total, consumo, porTabla, adoptado] = fila(diagonal, "4-C");
 
-  verify("bajada en diagonal: Ø20 como pide la tabla, sin agrandar", () => {
+  verify("obra cargada antes, bajada en diagonal: Ø20 como pide la tabla, sin agrandar", () => {
     igual(diagonal.result.status, "valid");
     igual(consumo, "0,323");
     igual(porTabla, "20");
@@ -86,7 +144,7 @@ export function runBajadaEnDiagonalVerifications() {
     igual(diagonal.tablas.calculo.notasDerecha, undefined);
   });
 
-  verify("bajada en diagonal: la te se cuenta con la variante más exigente (a 90°) + cupla", () => {
+  verify("obra cargada antes, bajada en diagonal: la te se cuenta con la variante más exigente (a 90°) + cupla", () => {
     const supuestas = tesSupuestas(diagonal.result);
     igual(supuestas.length, 1);
     igual(supuestas[0]?.segmentId, "cp:bm:ca-estufa");
@@ -101,29 +159,19 @@ export function runBajadaEnDiagonalVerifications() {
     igual(cantidad(diagonal, "CUPLA DE REDUCCIÓN", "32"), 3);
   });
 
-  verify("bajada en diagonal: aviso claro en pantalla, que no frena la descarga", () => {
+  verify("obra cargada antes, bajada en diagonal: avisos claros en pantalla, que no frenan la descarga", () => {
     const textos = avisos(diagonal);
     igual(textos.length, 1);
     igual(textos[0]?.startsWith("En la te de C no se ve si el tramo 4-C sigue derecho o dobla"), true);
     igual(textos[0]?.includes("tocá Cañería"), true);
-    const enRevisar = avisosParaDescargar({
-      avisosCalculo: textos,
-      avisosPlanilla: [],
-      avisosTablas: [],
-      conCroquisEnPlano: false,
-      drawing: null,
-      equipment: ARTEFACTOS_CASA,
-      hayPlanoPdf: true,
-      instalador: INSTALADOR_VACIO,
-      materialesPendientes: 0,
-      network: diagonal.network,
-      obra: OBRA_VACIA,
-      result: diagonal.result,
-    }).filter((aviso) => aviso.texto === textos[0]);
-    igual(enRevisar.length, 1);
-    igual(enRevisar[0]?.paso, "caneria");
-    igual(enRevisar[0]?.hojas.length, 0);
+    const enRevisar = avisosEnRevisar(diagonal).filter(
+      (aviso) => aviso.texto === textos[0] || aviso.texto === AVISO_TRAMOS_EN_DIAGONAL,
+    );
+    igual(enRevisar.length, 2);
+    igual(enRevisar.every((aviso) => aviso.paso === "caneria" && aviso.hojas.length === 0), true);
     igual(hojasListas(enRevisar).size, 3);
+    // La bajada en diagonal no se borró.
+    igual(JSON.stringify(diagonal.network.segments.find((s) => s.id === "cp:bm:ca-estufa")?.vertices), JSON.stringify([{ x: 200, y: 4800 }]));
   });
 
   verify("sin piezas supuestas no hay avisos del cálculo (obras de prueba y bajada recta)", () => {
