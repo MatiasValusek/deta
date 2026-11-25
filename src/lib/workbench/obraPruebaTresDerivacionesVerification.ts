@@ -6,6 +6,17 @@ import { calculateTechnicalTree } from "@/lib/calculation/technicalTree";
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
 import { MOTIVO_AMPLIACION, motivoDiametroAdoptado } from "@/lib/laminas/motivoDiametro";
 import {
+  collectStandardTechnicalReviewGeometryPendingItems,
+  createStandardTechnicalAxonometricView,
+  createStandardTechnicalSectionView,
+} from "@/lib/sections/standardTechnicalViews";
+import {
+  createSigasAccessorySelectionDiameterIndex,
+  reconcileSigasAccessoryExactCatalogRows,
+} from "@/lib/calculation/pipeSystems/sigas/sigasAccessoryExactSelection";
+import { calcularObraDePrueba, OBRAS_DE_PRUEBA } from "./obrasDePrueba";
+import { createReviewCalculationReadiness, createRouteReviewState } from "./reviewStage";
+import {
   ADOPTADOS_PRUEBA,
   ARTEFACTOS_PRUEBA,
   CALCULO_PRESENTADO,
@@ -185,6 +196,83 @@ export function runObraPruebaTresDerivacionesVerifications() {
       ?.accessories?.find((accessory) => tipoCodosDeSubida(accessory.id) === "subida")
       ?.quantity ?? 0) === 1,
   );
+
+  // La pantalla no fija la fila SIGAS de una pieza que tiene una sola fila para su medida:
+  // fijada en la medida de tabla (20) dejaba el cálculo incompleto con el tramo agrandado (25),
+  // y fijada en 25 cambiaba el diámetro de tabla de la hoja. Una fila vieja guardada se saca.
+  const tresDerivaciones = OBRAS_DE_PRUEBA.find((obra) => obra.nombre === "tres derivaciones");
+  if (!tresDerivaciones) throw new Error("Falta la obra de tres derivaciones");
+  const sinFilas = calcularObraDePrueba(tresDerivaciones);
+  const conFilas = reconcileSigasAccessoryExactCatalogRows({
+    diameterBySegmentId: createSigasAccessorySelectionDiameterIndex({
+      adoptedDiameterDecisions: ADOPTADOS_PRUEBA,
+      diameterBySegmentId: new Map(
+        Object.entries(sinFilas.result.networkSizing?.finalDiameterBySegmentId ?? {}),
+      ),
+      result: sinFilas.result,
+    }),
+    network: {
+      ...CANERIA_PRUEBA,
+      segments: CANERIA_PRUEBA.segments.map((segment) => ({
+        ...segment,
+        accessories: (segment.accessories ?? []).map((accessory) =>
+          accessory.type === "valve" ? { ...accessory, catalogCode: "llave-esferica-20-mm" } : accessory,
+        ),
+      })),
+    },
+  });
+  const llave1A = conFilas.segments
+    .find((segment) => segment.id === "1-A")
+    ?.accessories?.find((accessory) => accessory.type === "valve");
+  check("la llave cargada a mano en 1-A no queda fijada en la fila de 20", () =>
+    llave1A !== undefined && llave1A.catalogCode === undefined,
+  );
+  const calculoConFilas = calcularObraDePrueba({ ...tresDerivaciones, network: conFilas });
+  check("con las filas fijadas por la pantalla el cálculo sigue completo y da lo mismo", () =>
+    calculoConFilas.result.status === "valid" &&
+    JSON.stringify(calculoConFilas.tablas) === JSON.stringify(sinFilas.tablas),
+  );
+
+  // Las llaves y codos cargados a mano no tienen posición en el Corte A-A: se cuentan y no
+  // frenan el paso a calcular. Lo mismo en las otras dos obras de prueba.
+  for (const obra of OBRAS_DE_PRUEBA) {
+    const calculo = calcularObraDePrueba(obra);
+    const comun = {
+      adoptedDiameterValidation: calculo.adoptedDiameterValidation,
+      equipment: obra.equipment,
+      inventory: calculo.physicalAccessoryInventory,
+      network: obra.network,
+      result: calculo.result,
+      scaleMetersPerSourceUnit: obra.scaleMetersPerSourceUnit,
+    };
+    const cortes = [
+      createStandardTechnicalSectionView({ ...comun, axis: "x", id: "section-aa", title: "Corte A-A" }),
+      createStandardTechnicalSectionView({ ...comun, axis: "y", id: "section-bb", title: "Corte B-B" }),
+    ];
+    const sinPosicion = cortes.flatMap((corte) => corte.projection.pendingItems);
+    const observaciones = collectStandardTechnicalReviewGeometryPendingItems({
+      axonometricView: createStandardTechnicalAxonometricView(comun),
+      sectionViews: cortes,
+    });
+    const listo = createReviewCalculationReadiness({
+      routeReviewState: createRouteReviewState({
+        equipment: obra.equipment,
+        hasActiveProposal: false,
+        hasRouteCycle: false,
+        network: obra.network,
+        routeRestrictionCount: 0,
+      }),
+      technicalGeometryPendingCount: observaciones.length,
+    });
+    if (obra.nombre === "tres derivaciones") {
+      check("en la obra de tres derivaciones hay piezas a mano sin posición en el corte", () =>
+        sinPosicion.length > 0,
+      );
+    }
+    check(`${obra.nombre}: llega al cálculo sin pedir nada del corte`, () =>
+      listo.canContinueToCalculate && observaciones.length === 0,
+    );
+  }
 
   return results;
 }

@@ -61,16 +61,13 @@ export function runSigasAccessoryExactSelectionVerifications() {
     assertEqual(decision?.candidates[1]?.choiceLabel, "3/4");
   });
 
-  verify(results, "Variante única se identifica automáticamente", () => {
+  verify(results, "Variante única no se fija ni se pide (la resuelve el cálculo)", () => {
     const network = reconcileSigasAccessoryExactCatalogRows({
       diameterBySegmentId: { segment: SIGAS_20 },
       network: valveNetwork(),
     });
 
-    assertEqual(
-      network.segments[0]?.accessories?.[0]?.catalogCode,
-      "llave-esferica-20-mm",
-    );
+    assertEqual(network.segments[0]?.accessories?.[0]?.catalogCode, undefined);
     assertEqual(
       createSigasAccessoryExactSelectionDecisions({
         diameterBySegmentId: { segment: SIGAS_20 },

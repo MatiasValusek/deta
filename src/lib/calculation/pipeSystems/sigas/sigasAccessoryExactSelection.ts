@@ -93,6 +93,7 @@ export function createSigasAccessoryExactSelectionDecisions(params: {
 }
 
 export function createSigasAccessorySelectionDiameterIndex(params: {
+  adoptedDiameterDecisions?: { diameterId: string; segmentId: string }[];
   diameterBySegmentId: DiameterBySegmentId;
   result: TechnicalCalculationResult | null;
 }) {
@@ -140,6 +141,21 @@ export function createSigasAccessorySelectionDiameterIndex(params: {
     }
   }
 
+  // Si el gasista agrandó un tramo, sus piezas van con la medida agrandada: si no, la fila
+  // SIGAS de la llave o el codo queda en la medida de tabla y el tramo no se puede calcular.
+  for (const decision of params.adoptedDiameterDecisions ?? []) {
+    const adoptado = SIGAS_DIAMETERS.find((item) => item.id === decision.diameterId);
+    const actual = index.get(decision.segmentId);
+
+    if (
+      adoptado &&
+      (!actual ||
+        adoptado.externalDiameterMillimeters > (actual.externalDiameterMillimeters ?? 0))
+    ) {
+      index.set(decision.segmentId, adoptado);
+    }
+  }
+
   return index;
 }
 
@@ -174,6 +190,21 @@ export function reconcileSigasAccessoryExactCatalogRows(params: {
         !getSelectedFemaleThread(accessory)
       ) {
         return accessory;
+      }
+
+      // Una sola fila SIGAS para la familia y la medida: el cálculo la encuentra solo. No se
+      // fija la fila en la pieza, así acompaña al tramo si el gasista lo agranda (una fila
+      // fijada en la medida de tabla dejaba el cálculo incompleto; fijada en la agrandada,
+      // cambiaba el diámetro de tabla de la hoja).
+      if (familyId !== "codo-90-rosca-hembra" && candidates.length <= 1) {
+        if (accessory.catalogCode === undefined) {
+          return accessory;
+        }
+
+        segmentChanged = true;
+        changed = true;
+        const { catalogCode: _filaFijada, ...sinFila } = accessory;
+        return sinFila;
       }
 
       if (

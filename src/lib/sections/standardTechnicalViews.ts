@@ -132,6 +132,10 @@ export function collectStandardTechnicalReviewGeometryPendingItems(params: {
 
   for (const view of params.sectionViews) {
     for (const item of view.projection.pendingItems) {
+      if (esSoloDibujoDeLaPieza(item.sourceType, item.id)) {
+        continue;
+      }
+
       const key = technicalGeometryPendingKey({
         message: item.reason,
         sourceId: item.sourceId ?? item.id,
@@ -181,6 +185,10 @@ export function collectStandardTechnicalReviewGeometryPendingItems(params: {
   }
 
   for (const item of params.axonometricView?.pendingItems ?? []) {
+    if (esSoloDibujoDeLaPieza(item.type, item.id)) {
+      continue;
+    }
+
     const key = technicalGeometryPendingKey({
       message: item.message,
       sourceId: item.sourceId,
@@ -203,6 +211,19 @@ export function collectStandardTechnicalReviewGeometryPendingItems(params: {
   }
 
   return [...pendingByKey.values()];
+}
+
+/**
+ * Una pieza (codo, llave, te) sin posición en el corte o en la isométrica, o fuera del corte:
+ * ya se cuenta en el cálculo y en materiales, solo falta dónde dibujarla. No frena el paso a
+ * calcular ni la descarga; sigue a la vista en el corte (Modo experto).
+ */
+function esSoloDibujoDeLaPieza(sourceType: string, id: string) {
+  return (
+    sourceType === "accessory" &&
+    (id.startsWith("section-route:accessory:") ||
+      id.startsWith("axonometric:accessory:"))
+  );
 }
 
 function addPendingItem(

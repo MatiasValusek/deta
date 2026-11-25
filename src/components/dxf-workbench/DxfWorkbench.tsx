@@ -1297,10 +1297,15 @@ export function DxfWorkbench() {
   const sigasAccessorySelectionDiameterBySegmentId = useMemo(
     () =>
       createSigasAccessorySelectionDiameterIndex({
+        adoptedDiameterDecisions: planBase?.adoptedDiameterDecisions,
         diameterBySegmentId: finalDiameterBySegmentId,
         result: technicalCalculationResult,
       }),
-    [finalDiameterBySegmentId, technicalCalculationResult],
+    [
+      finalDiameterBySegmentId,
+      planBase?.adoptedDiameterDecisions,
+      technicalCalculationResult,
+    ],
   );
   const sigasAccessoryExactSelectionDecisions = useMemo(
     () =>
