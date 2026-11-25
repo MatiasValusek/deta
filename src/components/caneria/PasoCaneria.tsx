@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { FormaDeRecorridoBotones, type FormaDeRecorrido } from "./FormaDeRecorrido";
 
 /**
  * Paso 4, panel de la derecha. El gasista marca el caño principal (dónde dobla y dónde
@@ -12,6 +13,7 @@ export function PasoCaneria(props: {
   /** Las acciones para corregir (punto 3), cuando se está corrigiendo. */
   correccion?: ReactNode;
   corrigiendo: boolean;
+  forma: FormaDeRecorrido;
   hayMedidor: boolean;
   /** Tramos con su diámetro, cuando ya hay cálculo ("C-M 32 mm"). */
   resumen?: ReactNode;
@@ -19,6 +21,7 @@ export function PasoCaneria(props: {
   masOpciones?: ReactNode;
   onCorregir: () => void;
   onDeshacer: () => void;
+  onElegirForma: (forma: FormaDeRecorrido) => void;
   onEmpezarDeNuevo: () => void;
   onSeguirMarcando: () => void;
 }) {
@@ -26,6 +29,9 @@ export function PasoCaneria(props: {
     <div className="space-y-4 px-4 pb-24 pt-4 text-sm">
       <div>
         <h2 className="text-base font-semibold">Cañería</h2>
+        <div className="mt-2">
+          <FormaDeRecorridoBotones elegida={props.forma} onElegir={props.onElegirForma} />
+        </div>
         <p className="mt-1 text-xs text-[var(--muted)]">
           {props.ajena
             ? "Esta cañería se trazó con la pantalla anterior."

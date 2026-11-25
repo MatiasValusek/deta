@@ -11,6 +11,7 @@ import {
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
 import type { Point2D } from "@/lib/geometry/types";
 import type { ManualRouteNetwork, RouteDraft } from "@/lib/routing/types";
+import type { FormaDeRecorrido } from "./FormaDeRecorrido";
 
 /*
  * Estado del paso Cañería. Mientras se marca, cada toque en el plano es un quiebre o el fin
@@ -29,6 +30,8 @@ export function usePasoCaneria(params: {
 }) {
   const { equipment, network } = params;
   const [corrigiendo, setCorrigiendo] = useState(false);
+  /** Por ahora solo "directo" está hecho (Perimetral y Por la pared: "Próximamente"). */
+  const [forma, setForma] = useState<FormaDeRecorrido>("directo");
   const [cursor, setCursor] = useState<Point2D | null>(null);
   const traza = useMemo(() => leerTraza(network, equipment), [network, equipment]);
   const medidor = equipment.find((item) => item.role === "supply") ?? null;
@@ -54,7 +57,7 @@ export function usePasoCaneria(params: {
 
   // La red guardada puede haber quedado vieja (se movió un artefacto): se rearma al entrar.
   const desactualizada =
-    params.activo && armada !== null && (traza?.puntos.length ?? 0) > 0 && forma(armada.network) !== forma(network);
+    params.activo && armada !== null && (traza?.puntos.length ?? 0) > 0 && formaDeLaRed(armada.network) !== formaDeLaRed(network);
 
   useEffect(() => {
     if (desactualizada && armada) params.guardarRed(armada.network);
@@ -65,6 +68,10 @@ export function usePasoCaneria(params: {
     ajena,
     avisos: armada?.avisos ?? [],
     corrigiendo: params.activo && corrigiendo,
+    forma,
+    elegirForma(nueva: FormaDeRecorrido) {
+      if (nueva === "directo") setForma(nueva);
+    },
     desactualizada,
     marcando,
     puntos: traza?.puntos ?? [],
@@ -109,7 +116,7 @@ export function usePasoCaneria(params: {
 }
 
 /** La forma de la red (nodos, tramos y quiebres), sin las piezas que suma el cálculo. */
-function forma(network: ManualRouteNetwork) {
+function formaDeLaRed(network: ManualRouteNetwork) {
   return JSON.stringify([
     network.nodes.map((n) => [n.id, n.equipmentId, n.position?.x, n.position?.y]),
     network.segments.map((s) => [s.id, s.fromNodeId, s.toNodeId, (s.vertices ?? []).map((v) => [v.x, v.y])]),
