@@ -572,7 +572,12 @@ function transitionAccessoryKind(
     return "reduced_tee";
   }
 
-  if (contribution.transitionKind === "simple_reduction") {
+  // El cambio de medida de un giro, con la cupla que pone la app, también es una cupla.
+  if (
+    contribution.transitionKind === "simple_reduction" ||
+    (contribution.compoundComponent === "diameter_change" &&
+      contribution.catalogFamilyId?.startsWith("cupla-reduccion"))
+  ) {
     return "reducing_coupling";
   }
 
@@ -630,6 +635,20 @@ function transitionDiameters(
   contribution: TechnicalRouteTransitionContribution,
   proposal: DiameterTransitionProposal | undefined,
 ): TechnicalPhysicalAccessoryDiameter[] {
+  // El codo de un giro con cambio de medida lleva el diámetro de su tramo.
+  const codo = contribution.compoundComponent === "turn" ? contribution.compoundSegmentId : undefined;
+  const diametroDelCodo =
+    codo === undefined
+      ? undefined
+      : codo === contribution.downstreamSegmentId
+        ? contribution.downstreamDiameter
+        : codo === contribution.upstreamSegmentId
+          ? contribution.upstreamDiameter
+          : proposal?.incidentSegments.find((segment) => segment.segmentId === codo)?.diameter;
+  if (codo && diametroDelCodo) {
+    return [{ diameter: diametroDelCodo, role: "incident" as const, segmentId: codo }];
+  }
+
   if (proposal) {
     return proposal.incidentSegments.map((segment) => ({
       diameter: segment.diameter,

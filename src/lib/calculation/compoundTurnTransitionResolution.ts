@@ -1,3 +1,4 @@
+import { nodoDePieza } from "@/lib/calculation/tesYCodos";
 import type {
   AccessoryCatalogCandidate,
 } from "@/lib/calculation/accessoryCatalogCandidates";
@@ -430,21 +431,51 @@ function diameterChangeContributionFromResolution(params: {
   };
 }
 
+/** Codos que la app cuenta aparte y nunca son el codo de un giro en planta. */
+const CODOS_QUE_NO_SON_DEL_GIRO = [
+  "codos-subida:",
+  "codos-salida-medidor:",
+  "codos-cambio-nivel:",
+  "codo-quiebre:",
+  "route-terminal:",
+];
+
+/**
+ * Codo del giro con cambio de medida: el que la app puso en ese nodo (tesYCodos) o, en obras
+ * cargadas a mano, los codos de los dos tramos. Nunca los de subida, los de salida del medidor,
+ * los de un quiebre dentro del tramo ni los de la otra punta de los tramos.
+ */
+export function codosDelGiro(params: {
+  network: ManualRouteNetwork;
+  proposal: DiameterTransitionProposal;
+}): ConfirmedElbow[] {
+  const incidentSegmentIds = new Set(
+    params.proposal.incidentSegments.map((segment) => segment.segmentId),
+  );
+  const candidatos = params.network.segments
+    .filter((segment) => incidentSegmentIds.has(segment.id))
+    .flatMap((segment) =>
+      (segment.accessories ?? [])
+        .filter(
+          (accessory) =>
+            accessory.type === "elbow" &&
+            !CODOS_QUE_NO_SON_DEL_GIRO.some((prefijo) => accessory.id.includes(prefijo)),
+        )
+        .map((accessory) => ({ accessory, nodo: nodoDePieza(accessory), segment })),
+    )
+    .filter((codo) => codo.nodo === null || codo.nodo === params.proposal.nodeId);
+  const delNodo = candidatos.filter((codo) => codo.nodo === params.proposal.nodeId);
+
+  return (delNodo.length > 0 ? delNodo : candidatos)
+    .map(({ accessory, segment }) => ({ accessory, segment }))
+    .sort(compareConfirmedElbows);
+}
+
 function findConfirmedElbowsAtTransition(params: {
   network: ManualRouteNetwork;
   proposal: DiameterTransitionProposal;
 }) {
-  const incidentSegmentIds = new Set(
-    params.proposal.incidentSegments.map((segment) => segment.segmentId),
-  );
-  const all = params.network.segments
-    .filter((segment) => incidentSegmentIds.has(segment.id))
-    .flatMap((segment) =>
-      (segment.accessories ?? [])
-        .filter((accessory) => accessory.type === "elbow")
-        .map((accessory) => ({ accessory, segment })),
-    )
-    .sort(compareConfirmedElbows);
+  const all = codosDelGiro(params);
   const sigas = all.filter(
     ({ accessory }) =>
       accessory.equivalentLengthSource === "pipe_system" &&

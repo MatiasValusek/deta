@@ -72,6 +72,8 @@ export const FAMILIA_TE_NORMAL_MAS_CUPLA = "te-normal-mas-cupla";
  */
 const FAMILIA_POR_DEFECTO: Partial<Record<DiameterTransitionKind, string>> = {
   branch_transition: FAMILIA_TE_NORMAL_MAS_CUPLA,
+  // Giro con cambio de medida: el codo del giro (lo pone tesYCodos) + esta cupla de reducción.
+  compound_turn_transition: "cupla-reduccion-hh",
   simple_reduction: "cupla-reduccion-hh",
 };
 const ESTADOS_A_RESOLVER_SOLOS: ReadonlySet<DiameterTransitionState> = new Set([

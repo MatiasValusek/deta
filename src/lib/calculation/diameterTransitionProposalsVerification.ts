@@ -99,7 +99,10 @@ export function runDiameterTransitionProposalVerifications() {
     );
 
     assertEqual(proposal.kind, "compound_turn_transition");
-    assertEqual(proposal.state, "needs_review");
+    // Giro con cambio de medida: codo + cupla de reducción, sin pedir confirmar.
+    assertEqual(proposal.state, "confirmed");
+    assertEqual(proposal.decision?.origin, "app_default");
+    assertEqual(proposal.decision?.catalogFamilyId, "cupla-reduccion-hh");
     assertEqual(elbow.kind, "elbow");
   });
 

@@ -95,7 +95,10 @@ export function runCompoundTurnTransitionResolutionVerifications() {
     );
 
     assertEqual(proposal.kind, "compound_turn_transition");
-    assertEqual(proposal.state, "needs_review");
+    // La app pone sola la reducción (cupla); el codo lo pone tesYCodos.
+    assertEqual(proposal.state, "confirmed");
+    assertEqual(proposal.decision?.origin, "app_default");
+    assertEqual(proposal.decision?.catalogFamilyId, "cupla-reduccion-hh");
     assertEqual(accessory.kind, "elbow");
   });
 
@@ -131,7 +134,8 @@ export function runCompoundTurnTransitionResolutionVerifications() {
     );
   });
 
-  verify(results, "Caso 6 - composicion requiere decisiones compatibles", () => {
+  verify(results, "Caso 6 - la reducción la pone la app; sin codo en el giro queda pendiente", () => {
+    // La cupla de reducción va por defecto: con el codo del giro, la composición se resuelve sola.
     const onlyElbow = compoundPreview({
       network: networkWithConfirmedElbow(),
     });
@@ -140,11 +144,11 @@ export function runCompoundTurnTransitionResolutionVerifications() {
     });
     const noDecisions = compoundPreview();
 
-    assertEqual(onlyElbow.confirmationState, "needs_reduction_confirmation");
-    assertEqual(onlyElbow.totalEquivalentLengthMeters, null);
+    assertEqual(onlyElbow.confirmationState, "confirmed");
+    assertEqual(onlyElbow.status, "resolved");
     assertEqual(onlyReduction.confirmationState, "needs_elbow_confirmation");
     assertEqual(onlyReduction.totalEquivalentLengthMeters, null);
-    assertEqual(noDecisions.confirmationState, "needs_compatible_decisions");
+    assertEqual(noDecisions.confirmationState, "needs_elbow_confirmation");
   });
 
   verify(results, "Caso 7 - no duplica codo confirmado", () => {

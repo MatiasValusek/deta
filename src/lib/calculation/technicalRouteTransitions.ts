@@ -49,6 +49,8 @@ export type TechnicalRouteTransitionContribution = {
   catalogCode?: string;
   catalogFamilyId?: string;
   compoundComponent?: "diameter_change" | "turn";
+  /** Giro con cambio de medida: tramo donde va el codo (el codo lleva su diámetro). */
+  compoundSegmentId?: string;
   downstreamDiameter: PipeDiameterReference | null;
   downstreamSegmentId: string | null;
   equivalentLengthMeters: number | null;
@@ -618,6 +620,7 @@ function compoundPreviewContributionToRouteContribution(params: {
     catalogCode: params.contribution.catalogCode,
     catalogFamilyId: params.contribution.catalogFamilyId,
     compoundComponent: params.contribution.role,
+    ...(params.contribution.segmentId ? { compoundSegmentId: params.contribution.segmentId } : {}),
     equivalentLengthMeters: params.contribution.equivalentLengthMeters,
     reason: params.contribution.reason,
     source,

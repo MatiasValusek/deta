@@ -70,6 +70,21 @@ export function runQuiebresYGirosVerifications() {
     igual(piezas(calcular({ x: 3000 * Math.tan(grados(2)), y: 6000 })), piezas(calcular({ x: 3000 * Math.tan(grados(5)), y: 6000 })));
   });
 
+  verify("giro a 90° con cambio de medida: codo + reducción, con los valores de la tabla, sin agrandar", () => {
+    const giro = calcular({ x: 3000, y: 3000 });
+    const recto = calcular({ x: 0, y: 6000 });
+    igual(giro.result.status, "valid");
+    igual(adoptados(giro), "1-A 20, A-M 32");
+    igual(cantidad(giro, "CUPLA DE REDUCCIÓN", "32"), 1);
+    // El codo del giro va en el tramo que sale (Ø20), además de los 2 de subida.
+    igual(cantidad(giro, "CODO", "20"), 3);
+    igual(cantidad(giro, "CODO", "32"), 4);
+    // Mismo largo que la bajada recta: la diferencia es el codo Ø20 de la tabla (0,953 m).
+    const equivalente = (r: ReturnType<typeof calcular>) =>
+      Number(r.tablas.calculo.filas.find((f) => f[0] === "1-A")?.[3]?.replace(",", "."));
+    igual(Math.abs(equivalente(giro) - equivalente(recto) - 0.953) <= 0.01, true);
+  });
+
   return results;
 }
 

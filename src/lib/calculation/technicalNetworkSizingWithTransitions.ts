@@ -1,3 +1,4 @@
+import { codosDelGiro } from "./compoundTurnTransitionResolution";
 import {
   type PipeDiameterReference,
   type PipeSegmentPipeContext,
@@ -800,25 +801,10 @@ function confirmedSigasElbowsAtCompoundTurn(params: {
   network: ManualRouteNetwork;
   transition: DiameterTransitionProposal;
 }) {
-  const incidentSegmentIds = new Set(
-    params.transition.incidentSegments.map((segment) => segment.segmentId),
-  );
-
-  return params.network.segments
-    .filter((segment) => incidentSegmentIds.has(segment.id))
-    .flatMap((segment) =>
-      (segment.accessories ?? [])
-        .filter(isConfirmedSigasElbow)
-        .map((accessory) => ({
-          accessory,
-          segmentId: segment.id,
-        })),
-    )
-    .sort(
-      (first, second) =>
-        first.segmentId.localeCompare(second.segmentId) ||
-        first.accessory.id.localeCompare(second.accessory.id),
-    );
+  // El mismo codo que cuenta el giro (codo + reducción): no se cuenta dos veces.
+  return codosDelGiro({ network: params.network, proposal: params.transition })
+    .filter(({ accessory }) => isConfirmedSigasElbow(accessory))
+    .map(({ accessory, segment }) => ({ accessory, segmentId: segment.id }));
 }
 
 /** Tes confirmadas del nodo: las propuestas por la app llevan el nodo en su id. */

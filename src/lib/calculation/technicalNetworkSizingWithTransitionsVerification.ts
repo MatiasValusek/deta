@@ -288,13 +288,15 @@ export function runTechnicalTransitionAwareNetworkSizingVerifications() {
     assertEqual(tee?.decision?.catalogFamilyId, "te-normal-mas-cupla");
   });
 
-  verify(results, "Caso K - compound transition", () => {
+  verify(results, "Caso K - compound transition sin codo en el giro queda pendiente", () => {
+    // La cupla la pone la app sola; sin codo en el giro no se inventa uno.
     const fixture = createTurnFixture({
       pipeSystem: createTestPipeSystem({
         requiredBySegmentId: {
           s1: "test-32",
           s2: "test-25",
         },
+        transitionEquivalentByFamily: { "cupla-reduccion-hh": { "32-25": 1 } },
       }),
     });
     const evaluation = evaluateFixtureAssignment(fixture, {
@@ -865,10 +867,14 @@ export function runTechnicalTransitionAwareNetworkSizingVerifications() {
     assertIssue(evaluation, "compound_transition_required");
   });
 
-  verify(results, "Caso AK - compound sin reduccion confirmada queda incomplete", () => {
+  verify(results, "Caso AK - compound sin decision del gasista: codo + cupla de la app", () => {
     const fixture = createCompoundTurnFixture({
       includeElbow: true,
-      pipeSystem: compoundPipeSystem(),
+      pipeSystem: createTestPipeSystem({
+        accessoryEquivalentByFamily: { [COMPOUND_ELBOW_FAMILY]: { "test-25": 1, "test-32": 1 } },
+        requiredBySegmentId: { s1: "test-32", s2: "test-25" },
+        transitionEquivalentByFamily: { "cupla-reduccion-hh": { "32-25": 2 } },
+      }),
     });
     const evaluation = evaluateFixtureAssignment(fixture, {
       s1: "test-32",
@@ -876,13 +882,8 @@ export function runTechnicalTransitionAwareNetworkSizingVerifications() {
     });
     const transition = routeTransitionFromEvaluation(evaluation);
 
-    assertEqual(evaluation.status, "incomplete");
-    assertIssue(evaluation, "compound_transition_required");
     assertClose(compoundContribution(transition, "turn").equivalentLengthMeters, 1);
-    assertEqual(
-      compoundContribution(transition, "diameter_change").equivalentLengthMeters,
-      null,
-    );
+    assertClose(compoundContribution(transition, "diameter_change").equivalentLengthMeters, 2);
   });
 
   verify(results, "Caso AL - compound recalcula reduccion al cambiar diametro", () => {
