@@ -218,7 +218,7 @@ function crearMateriales(
 ): TablaLamina {
   if (takeoff.pendingSummary.total > 0) {
     avisos.push(
-      `Hay ${takeoff.pendingSummary.total} materiales sin definir. Resolvelos en Calcular.`,
+      `Hay ${takeoff.pendingSummary.total} materiales sin definir. Revisá la cañería en el paso Cañería.`,
     );
   }
 
@@ -241,7 +241,7 @@ function crearMateriales(
     const medida = mayorDiametroDeEtiqueta(item.label);
 
     if (medida === null) {
-      avisos.push(`No se pudo leer el diámetro de ${item.label}. Revisalo en Calcular.`);
+      avisos.push(`No se pudo leer el diámetro de ${item.label}. Revisá la cañería en el paso Cañería.`);
     }
     sumar(
       materialDePieza(item),
@@ -310,7 +310,7 @@ function crearCalculo(
         : fila.finalCalculationLengthMeters - fila.initialRouteLengthMeters;
 
     if (fila.status !== "resolved") {
-      avisos.push(`El tramo ${tramo} no está resuelto. Revisalo en Calcular.`);
+      avisos.push(`El tramo ${tramo} no está resuelto. Revisalo en el paso Cañería.`);
     }
 
     return [

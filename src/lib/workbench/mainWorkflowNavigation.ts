@@ -3,7 +3,8 @@ export type MainWorkflowStageId =
   | "equipment"
   | "route"
   | "calculate"
-  | "deliver";
+  | "deliver"
+  | "review";
 
 export type MainWorkflowPanelSectionId =
   | "geometry"
@@ -21,6 +22,7 @@ const PANEL_SECTIONS: Record<
   deliver: ["calculation"],
   equipment: ["equipment"],
   plan: ["scale"],
+  review: ["calculation"],
   route: ["route"],
 };
 
@@ -32,6 +34,7 @@ const DEFAULT_PANEL: Record<
   deliver: "calculation",
   equipment: "equipment",
   plan: "geometry",
+  review: "calculation",
   route: "route",
 };
 

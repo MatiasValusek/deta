@@ -144,7 +144,7 @@ export function crearPlanillaTramos(params: {
 
     if (equivalente !== null && Math.abs(suma - equivalente) > TOLERANCIA_M) {
       avisos.push(
-        `En el tramo ${nombre} los accesorios suman ${formatear(suma)} m y el cálculo usó ${formatear(equivalente)} m. Revisá los accesorios en Calcular.`,
+        `En el tramo ${nombre} los accesorios suman ${formatear(suma)} m y el cálculo usó ${formatear(equivalente)} m. Revisá los accesorios de ese tramo en el paso Cañería.`,
       );
     }
 

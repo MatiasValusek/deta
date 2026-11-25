@@ -311,7 +311,10 @@ import {
   type SourceCalibrationState,
 } from "./CalibrationPanel";
 import { CalculationPanel } from "./CalculationPanel";
-import { DatosObraBoton } from "@/components/obra/DatosObraBoton";
+import { abrirDatosDeLaObra, DatosObraBoton } from "@/components/obra/DatosObraBoton";
+import { BarraDePasos, BotonSiguiente } from "@/components/pasos/BarraDePasos";
+import { etapaDePaso, pasosDeLaBarra, siguientePaso } from "@/components/pasos/pasosDeLaObra";
+import { RevisarYDescargar } from "@/components/revisar/RevisarYDescargar";
 import { borrarObra, hayObraCargada } from "@/lib/obra/obraStore";
 import { LayerPanel } from "./LayerPanel";
 import { PdfDiagnosticsPanel } from "./PdfDiagnosticsPanel";
@@ -445,16 +448,6 @@ const MIN_SECTION_LINK_LENGTH = 0.0001;
 const DEFAULT_REFERENCE_ELEVATION_INPUT = "0,00";
 const DEFAULT_DEMAND_UNIT: DemandUnit = "kcal_h";
 const DEFAULT_ROUTE_PROPOSAL_MARGIN_INPUT = "0,10";
-const MAIN_WORKFLOW_STAGES: Array<{
-  id: MainWorkflowStageId;
-  label: string;
-}> = [
-  { id: "plan", label: "Plano" },
-  { id: "equipment", label: "Artefactos" },
-  { id: "route", label: "Recorrido" },
-  { id: "calculate", label: "Calcular" },
-  { id: "deliver", label: "Entregar" },
-];
 export function DxfWorkbench() {
   const [bases, setBases] = useState<WorkbenchBase[]>([]);
   const [activeBaseId, setActiveBaseId] = useState<string | null>(null);
@@ -2446,7 +2439,7 @@ export function DxfWorkbench() {
       return;
     }
 
-    handleMainWorkflowStageChange("calculate");
+    handleMainWorkflowStageChange("review");
   }
 
   function handleOpenPlanStageScale(baseId: string | null, startCalibration = true) {
@@ -6968,6 +6961,10 @@ export function DxfWorkbench() {
       return canOpenCalculateStage;
     }
 
+    if (stage === "review") {
+      return canOpenRouteStage;
+    }
+
     return canOpenDeliverStage;
   }
 
@@ -7361,6 +7358,12 @@ export function DxfWorkbench() {
       ),
     },
   ];
+  const estadoDePasos = {
+    artefactosListos: canOpenRouteStage,
+    canieriaLista: canOpenCalculateStage,
+    planoListo: canOpenEquipmentStage,
+  };
+  const siguiente = siguientePaso(activeWorkflowStage, estadoDePasos);
   const activeStagePanelSections = rightPanelSections.filter((section) =>
     mainWorkflowPanelSections(activeWorkflowStage, {
       routeAccessoryReviewAvailable: Boolean(activeCoordinatedRouteProposal),
@@ -7372,34 +7375,13 @@ export function DxfWorkbench() {
       <header className="shrink-0 border-b border-[var(--line)] bg-white px-5 py-3">
         <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-3">
           <h1 className="min-w-0 text-xl font-semibold tracking-normal">DETA</h1>
-          <nav
-            aria-label="Flujo principal"
-            className="flex min-w-0 flex-wrap items-center justify-center gap-1"
-          >
-            {MAIN_WORKFLOW_STAGES.map((stage) => {
-              const isActive = stage.id === activeWorkflowStage;
-              const isLocked = !canOpenWorkflowStage(stage.id);
-
-              return (
-                <button
-                  aria-current={isActive ? "step" : undefined}
-                  className={`rounded border px-3 py-1.5 text-xs font-medium transition ${
-                    isActive
-                      ? "border-[var(--accent)] bg-[var(--accent)] text-white"
-                      : "border-[var(--line)] bg-white hover:border-[var(--accent)]"
-                  } disabled:cursor-not-allowed disabled:bg-[#f5f6f7] disabled:text-[var(--muted)]`}
-                  disabled={isLocked}
-                  key={stage.id}
-                  type="button"
-                  onClick={() => handleMainWorkflowStageChange(stage.id)}
-                >
-                  {stage.label}
-                </button>
-              );
-            })}
-          </nav>
+          <BarraDePasos
+            activo={activeWorkflowStage}
+            pasoDatos={<DatosObraBoton comoPaso />}
+            pasos={pasosDeLaBarra(estadoDePasos)}
+            onElegir={(id) => handleMainWorkflowStageChange(id as MainWorkflowStageId)}
+          />
           <div className="flex justify-end gap-2">
-            <DatosObraBoton />
             <button
               className="rounded border border-[var(--line)] bg-white px-3 py-2 text-sm font-medium hover:border-[var(--accent)]"
               type="button"
@@ -7439,10 +7421,43 @@ export function DxfWorkbench() {
         onChange={(event) => handleBaseFileInput(event, "replace-active")}
       />
 
+      {activeWorkflowStage === "review" ? (
+        <RevisarYDescargar
+          accessoryProposals={routeAccessoryProposals}
+          adoptedDiameterDecisions={planBase?.adoptedDiameterDecisions ?? []}
+          diameterTransitionProposals={diameterTransitionProposals}
+          drawing={planBase?.sourceType === "dxf" ? planBase.drawing : null}
+          equipment={planEquipment}
+          network={routeNetwork}
+          result={technicalCalculationResult}
+          routeTransitionResolutions={routeTransitionResolutions}
+          scaleMetersPerSourceUnit={calibrationScaleMetersPerSourceUnit(planBase)}
+          visibleLayers={planBase?.visibleLayers ?? {}}
+          onAdoptSegmentDiameter={handleAdoptSegmentDiameter}
+          onIrAPaso={(paso) =>
+            paso === "datos"
+              ? abrirDatosDeLaObra()
+              : handleMainWorkflowStageChange(etapaDePaso(paso))
+          }
+        />
+      ) : null}
+      {siguiente ? (
+        <BotonSiguiente
+          etiqueta="Siguiente"
+          habilitado={siguiente.habilitado}
+          motivo={siguiente.motivo}
+          onClick={() =>
+            siguiente.hacia === "review"
+              ? handleContinueToCalculateFromRoute()
+              : handleMainWorkflowStageChange(siguiente.hacia)
+          }
+        />
+      ) : null}
+
       <section
         className={`grid min-h-0 flex-1 gap-0 overflow-hidden ${
           hasAnyBase ? "grid-cols-[280px_minmax(0,1fr)_340px]" : "grid-cols-1"
-        }`}
+        } ${activeWorkflowStage === "review" ? "hidden" : ""}`}
       >
         {hasAnyBase ? (
           <aside className="min-h-0 overflow-hidden border-r border-[var(--line)] bg-white">

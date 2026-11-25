@@ -49,6 +49,13 @@ export async function importPdfDocument(file: File): Promise<ImportedPdfDocument
   }
 }
 
+/** pdf.js listo para usar en el navegador (para dibujar miniaturas de las hojas). */
+export async function cargarPdfjs() {
+  const pdfjs = await import("pdfjs-dist");
+  ensurePdfWorker(pdfjs);
+  return pdfjs;
+}
+
 function ensurePdfWorker(pdfjs: typeof import("pdfjs-dist")) {
   if (workerConfigured || typeof window === "undefined") {
     return;

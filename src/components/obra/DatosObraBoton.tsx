@@ -1,6 +1,7 @@
 "use client";
 
-import { useRef, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
+import { BotonPaso } from "@/components/pasos/BarraDePasos";
 import {
   avisosDatosFaltantes,
   crearRotulo,
@@ -34,7 +35,22 @@ const CAMPOS_OBRA: Array<{
 const CLASE_CONTROL =
   "w-full rounded border border-[var(--line)] bg-white px-2 py-1.5 text-sm text-[var(--foreground)] focus:border-[var(--accent)] focus:outline-none";
 
-export function DatosObraBoton() {
+/** Pide abrir la ventana de Datos de la obra desde otro lado (por ejemplo, un aviso). */
+export function abrirDatosDeLaObra() {
+  window.dispatchEvent(new Event(EVENTO_ABRIR));
+}
+
+const EVENTO_ABRIR = "deta:abrir-datos-obra";
+
+/** Lo mínimo para empezar: propietario, calle y número, localidad. */
+export function datosMinimosCompletos(obra: DatosObra) {
+  return (["propietario", "calle", "numero", "localidad"] as const).every(
+    (campo) => obra[campo].trim() !== "",
+  );
+}
+
+/** Con `comoPaso`, el botón es el paso 1 de la barra de pasos. */
+export function DatosObraBoton({ comoPaso = false }: { comoPaso?: boolean } = {}) {
   const dialogo = useRef<HTMLDialogElement>(null);
   const { obra, instalador, errorAlGuardar } = useSyncExternalStore(
     suscribirObra,
@@ -43,20 +59,36 @@ export function DatosObraBoton() {
   );
   const avisos = avisosDatosFaltantes(obra, instalador);
 
+  useEffect(() => {
+    const abrir = () => dialogo.current?.showModal();
+    window.addEventListener(EVENTO_ABRIR, abrir);
+    return () => window.removeEventListener(EVENTO_ABRIR, abrir);
+  }, []);
+
   return (
     <>
-      <button
-        className="rounded border border-[var(--line)] bg-white px-3 py-2 text-sm font-medium hover:border-[var(--accent)]"
-        type="button"
-        onClick={() => dialogo.current?.showModal()}
-      >
-        Datos de la obra
-        {avisos.length > 0 ? (
-          <span className="ml-2 text-xs font-normal text-[var(--muted)]">
-            {avisos.length} {avisos.length === 1 ? "falta" : "faltan"}
-          </span>
-        ) : null}
-      </button>
+      {comoPaso ? (
+        <BotonPaso
+          activo={false}
+          completo={datosMinimosCompletos(obra)}
+          etiqueta="Datos de la obra"
+          numero={1}
+          onClick={() => dialogo.current?.showModal()}
+        />
+      ) : (
+        <button
+          className="rounded border border-[var(--line)] bg-white px-3 py-2 text-sm font-medium hover:border-[var(--accent)]"
+          type="button"
+          onClick={() => dialogo.current?.showModal()}
+        >
+          Datos de la obra
+          {avisos.length > 0 ? (
+            <span className="ml-2 text-xs font-normal text-[var(--muted)]">
+              {avisos.length} {avisos.length === 1 ? "falta" : "faltan"}
+            </span>
+          ) : null}
+        </button>
+      )}
 
       <dialog
         aria-labelledby="datos-obra-titulo"

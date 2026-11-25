@@ -39,7 +39,11 @@ Lo más valioso. Usa lo que el motor ya calcula.
 - [ ] Tabla Referencias con numeración de artefactos y "boca taponada".
 
 ## Fase 2 — Flujo simple de 5 pasos
-- [ ] Pasos visibles: Datos de la obra → Plano → Artefactos → Cañería → Revisar y descargar.
+- [x] Pasos visibles: Datos de la obra → Plano → Artefactos → Cañería → Revisar y descargar.
+      Barra de 5 pasos con tildes y "Siguiente"; las pantallas de Plano, Artefactos y Cañería
+      siguen siendo las de antes. "Revisar y descargar" es nueva (`components/revisar/`):
+      3 hojas en miniatura, avisos antes del botón, "Agrandar para ampliación futura" y
+      "Descargar las 3 hojas". Calcular y Entregar ya no son pasos (Exportar Excel vuelve en Modo experto).
 - [ ] Resolución automática de accesorios, transiciones y familias (opción compatible por defecto).
 - [ ] "Modo experto" que agrupe: decisiones de accesorios/transiciones, cortes y alturas,
       anclaje a paredes, propuesta automática de recorrido.

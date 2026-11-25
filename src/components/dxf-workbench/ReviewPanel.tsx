@@ -81,7 +81,7 @@ export function ReviewPanel({
         type="button"
         onClick={onContinueToCalculate}
       >
-        Continuar a Calcular
+        Continuar a Revisar y descargar
       </button>
     </section>
   );
