@@ -36,7 +36,7 @@ Lo más valioso. Usa lo que el motor ya calcula.
 - [x] **Lámina "Factibilidad" A3:** planta + croquis + rótulo. Botón en Entregar.
 - [x] Croquis de ubicación simple: manzana, calles (4 nombres), distancias a esquina, norte.
       Datos en *Datos de la obra*; en el Plano de instalación va apagado y se prende en Entregar.
-- [ ] Tabla Referencias con numeración de artefactos y "boca taponada".
+- [x] Tabla Referencias con numeración de artefactos y "boca taponada" (se marca en Artefactos).
 
 ## Fase 2 — Flujo simple de 5 pasos
 - [x] Pasos visibles: Datos de la obra → Plano → Artefactos → Cañería → Revisar y descargar.
@@ -58,7 +58,8 @@ Lo más valioso. Usa lo que el motor ya calcula.
       lleva al mismo marcado. Cortes y paneles de antes quedan plegados en "Cortes y más
       opciones". El PDF se guarda en el navegador (IndexedDB, `lib/plano/pdfGuardado.ts`) y se
       reabre solo al volver; antes había que subirlo otra vez.
-- [ ] **PDF en Artefactos y en el A3** (encontrado al probar con PDF, 2026-11-25): la escala
+- [x] **PDF en Artefactos y en el A3** (resuelto: con PDF el artefacto queda donde se toca y las dos
+      láminas A3 llevan la página del PDF de fondo, como dibujo; `laminas/fondoPdf.ts`) (encontrado al probar con PDF, 2026-11-25): la escala
       anda (un A4 a 1:100 da 29,70 × 21,00 m), pero en Artefactos no se puede ubicar ningún
       artefacto: la app busca una pared en el dibujo del DXF y un PDF no le da paredes ("No
       encontré una pared válida"). El medidor sí se ubica. Además, la planta del A3 se dibuja
@@ -68,10 +69,18 @@ Lo más valioso. Usa lo que el motor ya calcula.
 - [ ] "Modo experto" que agrupe: decisiones de accesorios/transiciones, cortes y alturas,
       anclaje a paredes, propuesta automática de recorrido.
 - [ ] Numeración automática de tramos con letras/números como en los planos reales.
-- [ ] Consumos típicos precargados por artefacto (cocina, calefactor TB, termotanque,
-      calefón, caldera, horno), editables.
-- [ ] Agregar en el paso Artefactos dónde marcar "boca taponada". La boca taponada suma
-      consumo, así que el cálculo no cambia.
+- [x] **Paso Artefactos nuevo** (`components/artefactos/`, `lib/artefactos/`): un botón por tipo con
+      el consumo típico (cocina 9.000, horno 3.000, calefón 20.000, termotanque 6.500, caldera 30.000,
+      estufa/calefactor 3.000, secarropas 4.000 kcal/h; Otro sin consumo), un toque en el plano para
+      ubicarlo (en DXF se apoya en la pared si hay una a menos de 0,5 m; si no, queda donde se tocó).
+      Medidor ya elegido al entrar sin medidor. Numeración como la del plano (1 = el más lejano al
+      medidor; con cañería, por la cañería). Tarjeta: nombre, consumo (kcal/h o m³/h), boca taponada,
+      salida de gases, Mover y Borrar. La pantalla anterior queda plegada en "Alturas, lado de salida
+      y más opciones".
+- [x] Boca taponada: tilde en la tarjeta (`bocaTaponada`). Sale en Referencias, lleva tapón y el
+      cálculo no cambia.
+- [x] **Tiro de cada artefacto** (`tiro`: natural, balanceado o sin conducto), preparado para las
+      ventilaciones. Típico por tipo; se cambia en "Salida de gases". Las ventilaciones no están hechas.
 - [ ] Definir qué hacer con DWG (aceptarlo o explicar cómo convertir a DXF en un paso).
 
 ## Fase 3 — Prolijidad
@@ -89,6 +98,30 @@ Lo más valioso. Usa lo que el motor ya calcula.
 ---
 
 ## Notas
+
+### Paso Artefactos nuevo (2026-11-25, contado en el navegador)
+Misma casa de 10 × 8 m, medidor, 2 estufas, cocina y calefón (como `obraCasaDesdeCero.ts`).
+
+| Paso | DXF | PDF |
+|---|---:|---:|
+| Datos de la obra | 6 | 6 |
+| Plano (+ 2 puntos y Confirmar con PDF) | 3 | 6 |
+| Artefactos (medidor 1, Estufa + 2 toques, Cocina 2, Calefón 2, Siguiente 1) | 9 | 9 |
+| Cañería (Generar recorrido, Aceptar recorrido, Siguiente) | 3 | 3 |
+| Revisar y descargar | 1 | 1 |
+| **Total** | **22** | **25** |
+
+Artefactos bajó de 26 a 9 (la meta era 10 con 4 tipos distintos; las dos estufas comparten botón).
+Lo que falta para 20 está en Cañería (pantalla de antes) y en el Plano con PDF.
+
+**Encontrado y resuelto al probar:** la isométrica salía espejada con PDF (la Y del PDF va hacia
+abajo); ahora se da vuelta en la lámina. El cartel del artefacto elegido tapaba el toque de al lado.
+
+**Pendiente:**
+- Con PDF la planta del A3 muestra la hoja entera del PDF: si tiene mucho blanco alrededor, la casa
+  queda chica. Recortar a la casa sin cortar paredes queda para después.
+- Los botones llevan la sigla del plano (COC, CF…), no un dibujo.
+- Ventilaciones y conductos de evacuación (usan el tiro que ya guarda cada artefacto).
 
 ### Clics de la casa desde cero (2026-11-25, contados en el navegador)
 Misma casa de 10 × 8 m (DXF en mm), medidor y 4 artefactos, hasta descargar las 3 hojas.
