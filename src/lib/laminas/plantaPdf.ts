@@ -26,6 +26,7 @@ import {
 import type { ManualRouteNetwork } from "@/lib/routing/types";
 import type { NumeracionPlano } from "./numeracionPlano";
 import { dibujarSimboloLlave, LARGO_LLAVE_MM } from "./simboloLlave";
+import { cuadrado, elegirLugar, linea, lugaresAlrededor, Ocupado } from "./ubicarTextos";
 
 export type DatosPlanta = {
   capasVisibles?: Record<string, boolean>;
@@ -46,6 +47,8 @@ const MARGEN_MM = 6;
 const ALTO_ETIQUETA_MM = 3;
 const SEPARACION_ETIQUETA_MM = 1.3;
 const RADIO_DERIVACION_MM = 0.6;
+/** Aire mínimo entre un número y la traza o una llave. */
+const HOLGURA_TEXTO_MM = 0.4;
 const PASOS_ARCO = 24;
 const mmAPt = (mm: number) => mm / MM_POR_PT;
 
@@ -144,13 +147,15 @@ export function dibujarPlantaPdf(params: {
       });
     }
   }
+  // La traza, las llaves y los puntos, para que los números no los pisen.
+  const ocupado = new Ocupado();
+  const holgura = mmAPt(HOLGURA_TEXTO_MM);
+
   for (const pierna of piernas) {
-    page.drawLine({
-      start: aPdf(pierna.from),
-      end: aPdf(pierna.to),
-      thickness: LINEA_TRAZA_PT,
-      color: ROJO,
-    });
+    const desde = aPdf(pierna.from);
+    const hasta = aPdf(pierna.to);
+    page.drawLine({ start: desde, end: hasta, thickness: LINEA_TRAZA_PT, color: ROJO });
+    ocupado.agregar(linea(desde, hasta, LINEA_TRAZA_PT + holgura * 2));
   }
 
   // Llaves de paso (la general y una por artefacto), las mismas que cuenta el cálculo.
@@ -176,11 +181,9 @@ export function dibujarPlantaPdf(params: {
       const dy = hacia.y - desde.y;
       const largo = Math.hypot(dx, dy) || 1;
       const distancia = Math.min(mmAPt(LARGO_LLAVE_MM * 1.5), largo / 2);
-      dibujarSimboloLlave(
-        page,
-        { x: desde.x + (dx / largo) * distancia, y: desde.y + (dy / largo) * distancia },
-        { x: dx, y: dy },
-      );
+      const centroLlave = { x: desde.x + (dx / largo) * distancia, y: desde.y + (dy / largo) * distancia };
+      dibujarSimboloLlave(page, centroLlave, { x: dx, y: dy });
+      ocupado.agregar(cuadrado(centroLlave, mmAPt(LARGO_LLAVE_MM) + holgura * 2));
     }
   }
 
@@ -193,6 +196,8 @@ export function dibujarPlantaPdf(params: {
     }
   }
 
+  const etiquetas: Array<{ centro: Point2D; etiqueta: string }> = [];
+
   for (const nodo of datos.network.nodes) {
     const posicion = resolveRouteNodePosition(nodo, equipoPorId);
     const etiqueta = datos.numeracion.nodos.get(nodo.id);
@@ -202,8 +207,6 @@ export function dibujarPlantaPdf(params: {
     }
 
     const centro = aPdf(posicion);
-    const separacion = mmAPt(SEPARACION_ETIQUETA_MM);
-    const ancho = fuente.widthOfTextAtSize(etiqueta, tamano);
 
     if (nodo.kind === "route" && (tramosPorNodo.get(nodo.id) ?? 0) >= 3) {
       page.drawCircle({
@@ -212,18 +215,39 @@ export function dibujarPlantaPdf(params: {
         size: mmAPt(RADIO_DERIVACION_MM),
         color: ROJO,
       });
+      ocupado.agregar(cuadrado(centro, mmAPt(RADIO_DERIVACION_MM * 2)));
+    }
+
+    etiquetas.push({ centro, etiqueta });
+  }
+
+  // Cada número (1, 2, A, M…) al lado de su punto, donde no pise la traza ni una llave.
+  for (const { centro, etiqueta } of etiquetas) {
+    const ancho = fuente.widthOfTextAtSize(etiqueta, tamano);
+    const lugar = elegirLugar(
+      ocupado,
+      lugaresAlrededor({
+        alto: tamano * 0.75,
+        ancho,
+        centro,
+        separacion: mmAPt(SEPARACION_ETIQUETA_MM),
+      }),
+    );
+
+    if (!lugar) {
+      continue;
     }
 
     page.drawRectangle({
-      x: centro.x + separacion - 1,
-      y: centro.y + separacion - 1,
+      x: lugar.origen.x - 1,
+      y: lugar.origen.y - 1,
       width: ancho + 2,
       height: tamano * 0.8 + 2,
       color: BLANCO,
     });
     page.drawText(etiqueta, {
-      x: centro.x + separacion,
-      y: centro.y + separacion,
+      x: lugar.origen.x,
+      y: lugar.origen.y,
       size: tamano,
       font: fuente,
       color: NEGRO,
