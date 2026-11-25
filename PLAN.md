@@ -110,11 +110,21 @@ hay ramas separadas. Vercel publica `main` como Production; el resto sale como P
   0,77 m), con el mismo diámetro.
 - Verificaciones: 62 grupos, 495, 0 fallas. Typecheck sin errores.
 
-**Huecos encontrados (para la próxima tarea, la de pantallas):**
-- Sin confirmar tes, la te solo se cuenta donde la derivación baja de medida. En la casa
-  desde cero, la derivación del calefón y el calefactor (todo en 25) queda sin te.
-  Tampoco se cuenta el codo de una esquina del caño principal. Las dos cosas acortan la
-  longitud equivalente. Al hacer "la app decide por defecto", poner te y codo solos.
+**Tes y codos automáticos** (`9f89750`, `5c726fe`, prueba `a9cc873`,
+`calculation/tesYCodos.ts`):
+- Toda derivación lleva te sin que nadie la confirme: va en cada tramo que sale, a 90° o a
+  través según el recorrido; en materiales es una pieza por nodo. Donde cambia la medida
+  queda **te normal + cupla** (decidido: no te de reducción).
+- Todo giro en planta lleva codo con el diámetro del tramo: esquinas entre tramos y
+  quiebres dentro de un tramo.
+- No se duplican con lo cargado a mano. En la planta del A3 el punto marca solo las tes;
+  el codo se ve en el giro de la traza (sin símbolo propio, como en los planos reales).
+- La llave general del medidor **sigue sumando** a la longitud equivalente (decidido).
+- Números: obra de tres derivaciones sin cambios en el cálculo (materiales: 3 tes en lugar
+  de 5); casa desde cero: A-B sube de 25 a 32; obra de ejemplo sin cambios.
+- Verificaciones: 63 grupos, 515, 0 fallas.
+
+**Pendientes para la próxima tarea (pantallas):**
 - La pantalla sigue pidiendo confirmar tes que no se pueden confirmar ("requiere datos").
 - La prueba de punta a punta con el navegador (punto 9.5 del relevamiento) queda para
   cuando estén las pantallas nuevas: hoy probaría pantallas que se van a rehacer y
