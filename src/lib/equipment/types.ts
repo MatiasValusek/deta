@@ -20,6 +20,13 @@ export type EquipmentType =
 
 export type DemandUnit = "kcal_h" | "m3_h";
 
+/**
+ * Cómo saca los gases el artefacto (para las ventilaciones, que vienen después):
+ * tiro natural (conducto por los cuatro vientos), tiro balanceado (toma y salida por la pared)
+ * o sin conducto (cocina, horno).
+ */
+export type TiroArtefacto = "natural" | "balanceado" | "sin_conducto";
+
 export type EquipmentWallReferenceKind =
   | "hard_structure"
   | "manual_constraint"
@@ -79,6 +86,8 @@ export type WorkbenchEquipment = {
   notes?: string;
   /** Boca taponada: suma consumo, lleva tapón y sale así en Referencias. */
   bocaTaponada?: boolean;
+  /** Si falta, vale el típico de su tipo (ver lib/artefactos/tiposDeArtefacto.ts). */
+  tiro?: TiroArtefacto;
   source: "manual";
 };
 

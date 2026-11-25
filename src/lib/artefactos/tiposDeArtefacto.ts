@@ -1,4 +1,4 @@
-import type { EquipmentType } from "@/lib/equipment/types";
+import type { EquipmentType, TiroArtefacto, WorkbenchEquipment } from "@/lib/equipment/types";
 
 /*
  * Los botones del paso Artefactos: uno por tipo, con el consumo típico ya cargado.
@@ -15,6 +15,8 @@ export type TipoDeArtefacto = {
   /** Consumo típico en kcal/h; null si no hay uno típico (Otro). */
   kcalPorHora: number | null;
   tipo: EquipmentType;
+  /** Tiro típico del tipo; el gasista lo cambia en la tarjeta. */
+  tiro: TiroArtefacto;
 };
 
 export const MEDIDOR: TipoDeArtefacto = {
@@ -23,17 +25,18 @@ export const MEDIDOR: TipoDeArtefacto = {
   nombre: "Medidor",
   sigla: "M",
   tipo: "meter_regulator",
+  tiro: "sin_conducto",
 };
 
 export const TIPOS_DE_ARTEFACTO: TipoDeArtefacto[] = [
-  { boton: "Cocina", kcalPorHora: 9000, nombre: "Cocina", sigla: "COC", tipo: "stove" },
-  { boton: "Horno", kcalPorHora: 3000, nombre: "Horno", sigla: "HOR", tipo: "oven" },
-  { boton: "Calefón", kcalPorHora: 20000, nombre: "Calefón", sigla: "CF", tipo: "instant_water_heater" },
-  { boton: "Termotanque", kcalPorHora: 6500, nombre: "Termotanque", sigla: "TT", tipo: "storage_water_heater" },
-  { boton: "Caldera", kcalPorHora: 30000, nombre: "Caldera", sigla: "CLD", tipo: "boiler" },
-  { boton: "Estufa / Calefactor", kcalPorHora: 3000, nombre: "Calefactor", sigla: "EST", tipo: "space_heater" },
-  { boton: "Secarropas", kcalPorHora: 4000, nombre: "Secarropas", sigla: "SEC", tipo: "gas_dryer" },
-  { boton: "Otro", kcalPorHora: null, nombre: "Artefacto", sigla: "OTR", tipo: "other" },
+  { boton: "Cocina", kcalPorHora: 9000, nombre: "Cocina", sigla: "COC", tipo: "stove", tiro: "sin_conducto" },
+  { boton: "Horno", kcalPorHora: 3000, nombre: "Horno", sigla: "HOR", tipo: "oven", tiro: "sin_conducto" },
+  { boton: "Calefón", kcalPorHora: 20000, nombre: "Calefón", sigla: "CF", tipo: "instant_water_heater", tiro: "natural" },
+  { boton: "Termotanque", kcalPorHora: 6500, nombre: "Termotanque", sigla: "TT", tipo: "storage_water_heater", tiro: "natural" },
+  { boton: "Caldera", kcalPorHora: 30000, nombre: "Caldera", sigla: "CLD", tipo: "boiler", tiro: "balanceado" },
+  { boton: "Estufa / Calefactor", kcalPorHora: 3000, nombre: "Calefactor", sigla: "EST", tipo: "space_heater", tiro: "balanceado" },
+  { boton: "Secarropas", kcalPorHora: 4000, nombre: "Secarropas", sigla: "SEC", tipo: "gas_dryer", tiro: "natural" },
+  { boton: "Otro", kcalPorHora: null, nombre: "Artefacto", sigla: "OTR", tipo: "other", tiro: "sin_conducto" },
 ];
 
 /** Medidor primero y después los artefactos, en el orden de los botones. */
@@ -42,6 +45,17 @@ export const BOTONES_DE_ARTEFACTOS: TipoDeArtefacto[] = [MEDIDOR, ...TIPOS_DE_AR
 export function tipoDeArtefacto(tipo: EquipmentType): TipoDeArtefacto {
   return BOTONES_DE_ARTEFACTOS.find((item) => item.tipo === tipo) ?? TIPOS_DE_ARTEFACTO[TIPOS_DE_ARTEFACTO.length - 1];
 }
+
+/** Tiro del artefacto: el que marcó el gasista o el típico de su tipo. */
+export function tiroDe(artefacto: Pick<WorkbenchEquipment, "tiro" | "type">): TiroArtefacto {
+  return artefacto.tiro ?? tipoDeArtefacto(artefacto.type).tiro;
+}
+
+export const NOMBRE_TIRO: Record<TiroArtefacto, string> = {
+  balanceado: "Tiro balanceado",
+  natural: "Tiro natural",
+  sin_conducto: "Sin conducto",
+};
 
 const MILES = new Intl.NumberFormat("es-AR", { maximumFractionDigits: 3 });
 

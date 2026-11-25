@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { formatearNumero, tipoDeArtefacto } from "@/lib/artefactos/tiposDeArtefacto";
-import type { DemandUnit, WorkbenchEquipment } from "@/lib/equipment/types";
+import { formatearNumero, NOMBRE_TIRO, tipoDeArtefacto, tiroDe } from "@/lib/artefactos/tiposDeArtefacto";
+import type { DemandUnit, TiroArtefacto, WorkbenchEquipment } from "@/lib/equipment/types";
 
 /**
  * La tarjeta del artefacto tocado: nombre y consumo para cambiar, moverlo o borrarlo.
@@ -60,6 +60,24 @@ export function TarjetaArtefacto(props: {
               Queda la boca con tapón para conectar después. Suma su consumo y sale en Referencias.
             </span>
           </span>
+        </label>
+      )}
+
+      {esMedidor ? null : (
+        <label className="mt-3 block text-xs font-medium">
+          Salida de gases
+          <select
+            className="mt-1 block w-full rounded border border-[var(--line)] bg-white px-1.5 py-1.5 text-sm font-normal"
+            name="tiro"
+            value={tiroDe(artefacto)}
+            onChange={(evento) => props.onCambiar({ tiro: evento.target.value as TiroArtefacto })}
+          >
+            {(Object.keys(NOMBRE_TIRO) as TiroArtefacto[]).map((tiro) => (
+              <option key={tiro} value={tiro}>
+                {NOMBRE_TIRO[tiro]}
+              </option>
+            ))}
+          </select>
         </label>
       )}
 

@@ -1,9 +1,10 @@
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
 import { calcularObraDePrueba, OBRAS_DE_PRUEBA } from "@/lib/workbench/obrasDePrueba";
 import { OBRA_GUARDADA_HOY } from "@/lib/workbench/obraGuardadaHoy";
+import { parsePersistedWorkbenchProject } from "@/lib/workbench/persistence";
 import { crearArtefacto, moverArtefacto, type PlanoParaUbicar } from "./colocarArtefacto";
 import { numerarArtefactos } from "./numerarArtefactos";
-import { BOTONES_DE_ARTEFACTOS, tipoDeArtefacto } from "./tiposDeArtefacto";
+import { BOTONES_DE_ARTEFACTOS, tipoDeArtefacto, tiroDe } from "./tiposDeArtefacto";
 
 type Resultado = { name: string; status: "passed" };
 
@@ -125,6 +126,32 @@ export function runArtefactosVerifications() {
     assertEqual(JSON.stringify(marcada.tablas.calculo.filas), JSON.stringify(antes.tablas.calculo.filas));
     const total = (t: typeof antes) => t.tablas.referencias.filas.at(-1)?.join("|");
     assertEqual(total(marcada), total(antes));
+  });
+
+  verify("cada artefacto sabe su tiro: el típico del tipo, o el que marcó el gasista", () => {
+    const crear = (tipo: Parameters<typeof crearArtefacto>[0]["tipo"]) =>
+      crearArtefacto({ existentes: [], id: tipo, plano: PLANO_PDF, punto: { x: 0, y: 0 }, tipo });
+    assertEqual(tiroDe(crear("instant_water_heater")), "natural");
+    assertEqual(tiroDe(crear("storage_water_heater")), "natural");
+    assertEqual(tiroDe(crear("space_heater")), "balanceado");
+    assertEqual(tiroDe(crear("boiler")), "balanceado");
+    assertEqual(tiroDe(crear("stove")), "sin_conducto");
+    assertEqual(crear("instant_water_heater").tiro, "natural");
+    // Las obras guardadas antes no traen el dato: vale el típico.
+    assertEqual(tiroDe({ type: "instant_water_heater" }), "natural");
+    assertEqual(tiroDe({ tiro: "balanceado", type: "instant_water_heater" }), "balanceado");
+  });
+
+  verify("el tiro y la boca taponada se guardan y se vuelven a abrir", () => {
+    const guardada = JSON.parse(OBRA_GUARDADA_HOY);
+    guardada.bases[0].equipment[1] = { ...guardada.bases[0].equipment[1], bocaTaponada: true, tiro: "balanceado" };
+    const leida = parsePersistedWorkbenchProject(JSON.stringify(guardada));
+    if (leida.status !== "loaded") throw new Error("no se abrió");
+    const artefacto = leida.project.bases[0].equipment[1];
+    assertEqual(artefacto.tiro, "balanceado");
+    assertEqual(artefacto.bocaTaponada, true);
+    guardada.bases[0].equipment[1].tiro = "cualquiera";
+    assertEqual(parsePersistedWorkbenchProject(JSON.stringify(guardada)).status === "loaded", false);
   });
 
   return results;

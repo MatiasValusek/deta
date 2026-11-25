@@ -942,6 +942,10 @@ function isEquipmentArray(value: unknown): value is WorkbenchEquipment[] {
           equipment.demandUnit === "kcal_h" ||
           equipment.demandUnit === "m3_h") &&
         (equipment.bocaTaponada === undefined || isBoolean(equipment.bocaTaponada)) &&
+        (equipment.tiro === undefined ||
+          equipment.tiro === "natural" ||
+          equipment.tiro === "balanceado" ||
+          equipment.tiro === "sin_conducto") &&
         equipment.source === "manual",
     )
   );

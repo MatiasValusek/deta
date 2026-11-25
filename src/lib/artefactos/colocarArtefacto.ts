@@ -131,6 +131,7 @@ export function crearArtefacto(params: {
     ...(datos.kcalPorHora === null ? {} : { demandUnit: "kcal_h" as const, demandValue: datos.kcalPorHora }),
     role: "appliance",
     terminalConfig: createSuggestedEquipmentTerminalConfig(tipo),
+    tiro: datos.tiro,
   };
 }
 
