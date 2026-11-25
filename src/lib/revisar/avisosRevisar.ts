@@ -1,4 +1,5 @@
 import type { TechnicalCalculationResult } from "@/lib/calculation/technicalTree";
+import { AVISO_TRAMOS_EN_DIAGONAL, tramosEnDiagonal } from "@/lib/caneria/tramosEnDiagonal";
 import type { WorkbenchEquipment } from "@/lib/equipment/types";
 import type { NormalizedDrawing } from "@/lib/geometry/types";
 import {
@@ -112,6 +113,10 @@ export function avisosParaDescargar(params: {
   }
   for (const texto of params.avisosCalculo ?? []) {
     agregar(texto, "caneria", []);
+  }
+  // Obras cargadas antes con tramos en diagonal: no se tocan, se avisa (no frena la descarga).
+  if (tramosEnDiagonal(params.network, params.equipment).length > 0) {
+    agregar(AVISO_TRAMOS_EN_DIAGONAL, "caneria", []);
   }
 
   return avisos;
