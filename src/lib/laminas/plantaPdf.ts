@@ -185,6 +185,13 @@ export function dibujarPlantaPdf(params: {
   }
 
   const tamano = mmAPt(ALTO_ETIQUETA_MM);
+  // El punto marca la te de cada derivación; en una esquina el giro ya se ve en la traza.
+  const tramosPorNodo = new Map<string, number>();
+  for (const tramo of datos.network.segments) {
+    for (const nodeId of [tramo.fromNodeId, tramo.toNodeId]) {
+      tramosPorNodo.set(nodeId, (tramosPorNodo.get(nodeId) ?? 0) + 1);
+    }
+  }
 
   for (const nodo of datos.network.nodes) {
     const posicion = resolveRouteNodePosition(nodo, equipoPorId);
@@ -198,7 +205,7 @@ export function dibujarPlantaPdf(params: {
     const separacion = mmAPt(SEPARACION_ETIQUETA_MM);
     const ancho = fuente.widthOfTextAtSize(etiqueta, tamano);
 
-    if (nodo.kind === "route") {
+    if (nodo.kind === "route" && (tramosPorNodo.get(nodo.id) ?? 0) >= 3) {
       page.drawCircle({
         x: centro.x,
         y: centro.y,
