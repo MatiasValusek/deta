@@ -4,7 +4,7 @@ import { resolveRouteSegments, getConnectedApplianceEquipmentIds } from "@/lib/r
 import { ARTEFACTOS_CASA, ESCALA_CASA_M_POR_UNIDAD } from "@/lib/workbench/obraCasaDesdeCero";
 import { calcularObraDePrueba } from "@/lib/workbench/obrasDePrueba";
 import { medidasDeTramos } from "./medidasDeTramos";
-import { armarRed, enEscuadra, leerTraza, limpiarPuntos, TRAZA_VACIA, type TrazaCanoPrincipal } from "./canoPrincipal";
+import { armarRed, bajadaEnEscuadra, enEscuadra, leerTraza, limpiarPuntos, TRAZA_VACIA, type TrazaCanoPrincipal } from "./canoPrincipal";
 
 type Resultado = { name: string; status: "passed" };
 
@@ -147,6 +147,18 @@ export function runCanoPrincipalVerifications() {
     igual(bajada?.vertices?.length, 1);
     // Sale en ángulo recto del caño y dobla hacia la cocina: no vuelve por encima del caño.
     igualPunto(bajada?.vertices?.[0], { x: 5000, y: 7700 });
+  });
+
+  verify("bajada en L: de las dos L posibles, nunca la que pisa el caño principal", () => {
+    // Caño de (0,0) a (1000,0). Artefacto al costado, con la salida corrida: sale derecho y dobla.
+    const linea = [{ x: 0, y: 0 }, { x: 1000, y: 0 }];
+    igualPunto(bajadaEnEscuadra({ x: 400, y: 0 }, { x: 700, y: 500 }, linea, 0)[0], { x: 400, y: 500 });
+    // Detrás del comienzo del caño (antes del medidor): tampoco vuelve por encima del caño.
+    igualPunto(bajadaEnEscuadra({ x: 300, y: 0 }, { x: -200, y: 500 }, linea, 0)[0], { x: 300, y: 500 });
+    // Más allá de la punta: las dos L miden lo mismo; gana la que sigue el eje del caño.
+    igualPunto(bajadaEnEscuadra({ x: 1000, y: 0 }, { x: 1400, y: 500 }, linea, 0)[0], { x: 1400, y: 0 });
+    // De frente: recta, sin quiebre.
+    igual(bajadaEnEscuadra({ x: 500, y: 0 }, { x: 500, y: 800 }, linea, 0).length, 0);
   });
 
   verify("una bajada que cruza otro caño trae aviso", () => {

@@ -255,21 +255,48 @@ function enLinea(linea: Point2D[], largos: number[], t: number) {
 }
 
 /**
- * Bajada de la derivación al artefacto. Si el artefacto queda de frente, va recta. Si queda al
- * costado del tramo, sale en ángulo recto y dobla una vez (nunca vuelve por encima del caño).
- * Si queda más allá de la punta, sigue la dirección del caño y dobla una vez a 90°.
+ * Bajada de la derivación al artefacto, en L (a 90°). Si el artefacto queda de frente, va recta.
+ * Si no, hay dos L posibles: se descarta la que va por encima del caño principal, se elige la más
+ * corta y, si empatan, la que va primero por el eje del caño principal (sigue su dirección).
  */
-function bajadaEnEscuadra(desde: Point2D, hasta: Point2D, linea: Point2D[], tramo: number): Point2D[] {
+export function bajadaEnEscuadra(desde: Point2D, hasta: Point2D, linea: Point2D[], tramo: number): Point2D[] {
   const tolerancia = Math.max(distancia(desde, hasta) * 1e-6, 1e-9);
   if (Math.abs(desde.x - hasta.x) <= tolerancia || Math.abs(desde.y - hasta.y) <= tolerancia) return [];
   const a = linea[tramo];
   const b = linea[tramo + 1];
   const horizontal = Math.abs(b.x - a.x) >= Math.abs(b.y - a.y);
-  const dentro = (v: number, p: number, q: number) => v >= Math.min(p, q) - tolerancia && v <= Math.max(p, q) + tolerancia;
-  const alCostado = horizontal ? dentro(hasta.x, a.x, b.x) : dentro(hasta.y, a.y, b.y);
   const sigueElCano = horizontal ? { x: hasta.x, y: desde.y } : { x: desde.x, y: hasta.y };
   const saleDerecho = horizontal ? { x: desde.x, y: hasta.y } : { x: hasta.x, y: desde.y };
-  return [alCostado ? saleDerecho : sigueElCano];
+  const largo = (quiebre: Point2D) => distancia(desde, quiebre) + distancia(quiebre, hasta);
+  const candidatas = [sigueElCano, saleDerecho]
+    .map((quiebre, orden) => ({ largo: largo(quiebre), orden, pisa: pisaElCano(desde, quiebre, hasta, linea), quiebre }))
+    .sort((p, q) => Number(p.pisa) - Number(q.pisa) || p.largo - q.largo || p.orden - q.orden);
+  return [candidatas[0].quiebre];
+}
+
+/** Alguna pierna de la L va por encima del caño principal (se superpone a lo largo, no solo se toca). */
+function pisaElCano(desde: Point2D, quiebre: Point2D, hasta: Point2D, linea: Point2D[]) {
+  const piernas: Array<[Point2D, Point2D]> = [
+    [desde, quiebre],
+    [quiebre, hasta],
+  ];
+  return piernas.some(([p, q]) => linea.slice(1).some((r, i) => superpuestos(p, q, linea[i], r)));
+}
+
+function superpuestos(p: Point2D, q: Point2D, r: Point2D, s: Point2D) {
+  const escala = Math.max(distancia(p, q), distancia(r, s), 1e-9);
+  const eps = escala * 1e-6;
+  const ux = q.x - p.x;
+  const uy = q.y - p.y;
+  const largo = Math.hypot(ux, uy);
+  if (largo <= eps || distancia(r, s) <= eps) return false;
+  // Las dos rectas tienen que ser la misma (paralelas y alineadas).
+  const lado = (punto: Point2D) => Math.abs(ux * (punto.y - p.y) - uy * (punto.x - p.x)) / largo;
+  if (lado(r) > eps || lado(s) > eps) return false;
+  const t = (punto: Point2D) => ((punto.x - p.x) * ux + (punto.y - p.y) * uy) / largo;
+  const desdeT = Math.max(0, Math.min(t(r), t(s)));
+  const hastaT = Math.min(largo, Math.max(t(r), t(s)));
+  return hastaT - desdeT > eps;
 }
 
 /** "El caño a la caldera cruza otro caño": bajadas que se cruzan con otro tramo. */
